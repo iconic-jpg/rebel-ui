@@ -5,6 +5,8 @@ export type ContextMode = "web" | "cyber";
 export interface ChatMessage {
   role: Role;
   content: string;
+  timestamp?: string;
+
 }
 
 export interface ChatRequest {

@@ -11,7 +11,7 @@ export default function useChat() {
     const userMessage: ChatMessage = {
       role: "user",
       content,
-
+      timestamp: new Date().toISOString(),
     };
 
     const updatedMessages = [...messages, userMessage];
@@ -20,14 +20,25 @@ export default function useChat() {
     setError(null);
 
     try {
-      const { reply } = await apiSendMessage(updatedMessages); // no context
-      setMessages([...updatedMessages, reply]);
-    } catch (err: any) {
-      setError(err.message || "Unknown error");
+      const { reply } = await apiSendMessage(updatedMessages);
+
+      const assistantMessage: ChatMessage = {
+        role: "assistant",
+        content: reply,
+        timestamp: new Date().toISOString(),
+      };
+
+      setMessages([...updatedMessages, assistantMessage]);
+    } catch (err: unknown) {
+      if (err instanceof Error) {
+        setError(err.message);
+      } else {
+        setError("Unknown error");
+      }
     } finally {
       setLoading(false);
     }
   }
 
-  return { messages, sendMessage, loading, error }; // only these
+  return { messages, sendMessage, loading, error };
 }
