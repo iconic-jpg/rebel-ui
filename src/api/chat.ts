@@ -1,37 +1,25 @@
-export interface ChatMessage {
-  role: "user" | "assistant";
-  content: string;
-  timestamp?: string | null;
-}
+const API_URL = "https://r3bel-production.up.railway.app/chat";
 
-export interface ChatResponse {
-  mode: string;
-  mood: string;
-  reply: string;
-}
+export async function sendMessage(messages: any[]) {
+  const lastMessage = messages[messages.length - 1];
 
-const API_URL = import.meta.env.VITE_API_URL;
-
-export async function sendMessage(
-  messages: ChatMessage[]
-): Promise<ChatResponse> {
-
-  const latest = messages[messages.length - 1];
-
-  const res = await fetch(`${API_URL}/chat`, {
+  const response = await fetch(API_URL, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      message: latest.content,
-      mode: "fast",
+      message: lastMessage.content,
     }),
   });
 
-  if (!res.ok) {
-    throw new Error(`Server error: ${res.status}`);
+  if (!response.ok) {
+    throw new Error("Failed to get response");
   }
 
-  return res.json() as Promise<ChatResponse>;
+  const data = await response.json();
+
+  return {
+    reply: data.response, // 🔥 THIS IS THE FIX
+  };
 }
