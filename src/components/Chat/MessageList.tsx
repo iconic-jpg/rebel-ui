@@ -1,4 +1,4 @@
-import type { ChatMessage } from "../../api/chat";
+import type { ChatMessage } from "../../types/chat";
 
 interface Props {
   messages: ChatMessage[];
