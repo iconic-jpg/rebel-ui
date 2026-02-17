@@ -1,8 +1,8 @@
 {
   "compilerOptions": {
     "target": "ES2020",
-    "module": "ESNext",
-    "moduleResolution": "NodeNext",  // <-- change here
+    "module": "NodeNext",              // <-- must match moduleResolution
+    "moduleResolution": "NodeNext",
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
@@ -10,7 +10,7 @@
     "outDir": "dist",
     "verbatimModuleSyntax": true,
 
-    /* 👇 Required for JSX/React */
+    /* Required for JSX/React */
     "jsx": "react-jsx",
     "allowJs": true
   },
