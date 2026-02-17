@@ -1,6 +1,6 @@
-import MessageList from "./MessageList";
-import MessageInput from "./MessageInput";
-import useChat from "../../hooks/useChat";
+import MessageList from "./MessageList.js";
+import MessageInput from "./MessageInput.js";
+import useChat from "../../hooks/useChat.js";
 
 export default function Chat() {
   const { messages, sendMessage, loading, error } = useChat();
