@@ -1,7 +1,7 @@
 import React from "react";
 import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
-import Chat from "./components/Chat/Chat";
-import SecurityDashboard from "./components/SecurityDashboard";
+import Chat from "./components/Chat/Chat.js";
+import SecurityDashboard from "./components/SecurityDashboard.js";
 
 export default function App() {
   return (
