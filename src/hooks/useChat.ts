@@ -1,6 +1,6 @@
 import { useState } from "react";
-import type { ChatMessage } from "../types/chat";
-import { sendMessage as apiSendMessage } from "../api/chat";
+import type { ChatMessage } from "../types/chat.js";
+import { sendMessage as apiSendMessage } from "../api/chat.js";
 
 export default function useChat() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
