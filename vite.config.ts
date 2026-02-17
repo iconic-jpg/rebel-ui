@@ -10,4 +10,12 @@ export default defineConfig({
       },
     }),
   ],
+
+  // --- Add this for React Router client-side routing ---
+  server: {
+    historyApiFallback: true,
+  },
+
+  // Optional: ensure base path is root
+  base: '/',
 })
