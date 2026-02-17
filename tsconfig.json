@@ -1,11 +1,15 @@
 {
   "compilerOptions": {
-    "moduleResolution": "node16",
-    "module": "esnext",
-    "target": "esnext",
+    "target": "ESNext",
+    "module": "Node16",                 // ✅ Must match node16 resolution
+    "moduleResolution": "Node16",       // ✅ Node16 or NodeNext
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,
     "strict": true,
-    "skipLibCheck": true
-  }
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "jsx": "react-jsx"
+  },
+  "include": ["src"],
+  "exclude": ["node_modules", "dist"]
 }
