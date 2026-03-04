@@ -1,24 +1,29 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 
+const API = import.meta.env.VITE_API_URL;
+
 export default function Login() {
   const navigate = useNavigate();
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [error, setError] = useState("");
+
+  const [email, setEmail] = useState<string>("");
+  const [password, setPassword] = useState<string>("");
+  const [error, setError] = useState<string>("");
+  const [loading, setLoading] = useState<boolean>(false);
 
   const handleLogin = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setError("");
+    setLoading(true);
 
     try {
-      const response = await fetch(`${API}/api/login/`, {
+      const response = await fetch(`${API}/api/token/`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          username: email,  // Django expects username
+          username: email,
           password: password,
         }),
       });
@@ -26,18 +31,20 @@ export default function Login() {
       const data = await response.json();
 
       if (!response.ok) {
-        setError("Invalid username or password");
+        setError(data.detail || "Invalid credentials");
+        setLoading(false);
         return;
       }
 
-      // Store tokens
+      // Store tokens (MVP approach)
       localStorage.setItem("access", data.access);
       localStorage.setItem("refresh", data.refresh);
 
-      // Redirect to dashboard
       navigate("/");
     } catch (err) {
-      setError("Server error. Is backend running?");
+      setError("Unable to connect to server.");
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -64,7 +71,9 @@ export default function Login() {
         />
         <br /><br />
 
-        <button type="submit">Login</button>
+        <button type="submit" disabled={loading}>
+          {loading ? "Logging in..." : "Login"}
+        </button>
       </form>
 
       {error && (
