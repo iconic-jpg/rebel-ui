@@ -122,6 +122,133 @@ function ScanModal({ onClose }: { onClose: () => void }) {
   );
 }
 
+// ─── WORLD MAP CARD ───────────────────────────────────────────────────────────
+function WorldMapCard({ packets }: { packets: Packet[] }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const mobile = useMobile();
+
+  // Rough lat/lng to x/y on a 800x400 equirectangular map
+  const project = (lat: number, lng: number, w: number, h: number) => ({
+    x: ((lng + 180) / 360) * w,
+    y: ((90 - lat) / 180) * h,
+  });
+
+  // Fake geo from country code (enough for MVP visualization)
+  const countryCoords: Record<string, [number, number]> = {
+    US: [37.09, -95.71], CN: [35.86, 104.19], RU: [61.52, 105.31], DE: [51.16, 10.45],
+    GB: [55.37, -3.43], FR: [46.22, 2.21], IN: [20.59, 78.96], BR: [14.23, -51.92],
+    JP: [36.20, 138.25], KR: [35.90, 127.76], AU: [-25.27, 133.77], CA: [56.13, -106.34],
+    NL: [52.13, 5.29], SG: [1.35, 103.82], ZA: [-30.55, 22.93], NG: [9.08, 8.67],
+    MX: [23.63, -102.55], IT: [41.87, 12.56], ES: [40.46, -3.74], SE: [60.12, 18.64],
+    "??": [20, 0],
+  };
+
+  const attackerIPs = packets.filter(p => p.label !== "NORMAL").slice(0, 20);
+  const targetCoords: [number, number] = [37.09, -95.71]; // Default target: US
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    const W = canvas.width, H = canvas.height;
+
+    ctx.clearRect(0, 0, W, H);
+
+    // Draw world outline (simplified dot map)
+    ctx.fillStyle = "rgba(59,130,246,0.08)";
+    ctx.fillRect(0, 0, W, H);
+
+    // Grid lines
+    ctx.strokeStyle = "rgba(59,130,246,0.06)";
+    ctx.lineWidth = 0.5;
+    for (let lat = -90; lat <= 90; lat += 30) {
+      const { y } = project(lat, 0, W, H);
+      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+    }
+    for (let lng = -180; lng <= 180; lng += 30) {
+      const { x } = project(0, lng, W, H);
+      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
+    }
+
+    // Target marker (defended system)
+    const tgt = project(targetCoords[0], targetCoords[1], W, H);
+    ctx.beginPath();
+    ctx.arc(tgt.x, tgt.y, 6, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(34,197,94,0.25)";
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(tgt.x, tgt.y, 3, 0, Math.PI * 2);
+    ctx.fillStyle = "#22c55e";
+    ctx.shadowColor = "#22c55e";
+    ctx.shadowBlur = 8;
+    ctx.fill();
+    ctx.shadowBlur = 0;
+
+    // Draw attack lines
+    attackerIPs.forEach(p => {
+      const coords = countryCoords[p.country] ?? countryCoords["??"];
+      const src = project(coords[0] + (Math.random() - 0.5) * 4, coords[1] + (Math.random() - 0.5) * 4, W, H);
+      const color = p.color;
+
+      // Arc line
+      ctx.beginPath();
+      ctx.moveTo(src.x, src.y);
+      const cpx = (src.x + tgt.x) / 2 + (Math.random() - 0.5) * 60;
+      const cpy = Math.min(src.y, tgt.y) - 30 - Math.random() * 40;
+      ctx.quadraticCurveTo(cpx, cpy, tgt.x, tgt.y);
+      ctx.strokeStyle = color + "55";
+      ctx.lineWidth = 0.8;
+      ctx.stroke();
+
+      // Source dot
+      ctx.beginPath();
+      ctx.arc(src.x, src.y, 3, 0, Math.PI * 2);
+      ctx.fillStyle = color;
+      ctx.shadowColor = color;
+      ctx.shadowBlur = 6;
+      ctx.fill();
+      ctx.shadowBlur = 0;
+
+      // Country label
+      ctx.fillStyle = "rgba(200,220,255,0.45)";
+      ctx.font = "7px Share Tech Mono";
+      ctx.fillText(p.country, src.x + 5, src.y - 3);
+    });
+
+  }, [packets]);
+
+  return (
+    <div className="panel">
+      <div className="ph">
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <Pulse color="#ef4444" />
+          <span style={S.label}>GLOBAL THREAT MAP</span>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          {[["ATTACKER", "#ef4444"], ["TARGET", "#22c55e"]].map(([l, c]) => (
+            <div key={l} style={{ display: "flex", alignItems: "center", gap: 4 }}>
+              <div style={{ width: 6, height: 6, borderRadius: "50%", background: c, boxShadow: `0 0 4px ${c}` }} />
+              <span style={{ fontSize: 7.5, color: "rgba(200,220,255,0.3)", letterSpacing: "0.12em", fontFamily: "'Orbitron',monospace" }}>{l}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+      <div style={{ padding: "8px 4px 4px", position: "relative" }}>
+        <canvas
+          ref={canvasRef}
+          width={mobile ? 340 : 800}
+          height={mobile ? 180 : 340}
+          style={{ width: "100%", height: mobile ? 180 : 340, display: "block", borderRadius: 2 }}
+        />
+        <div style={{ position: "absolute", bottom: 12, right: 12, fontSize: 8, color: "rgba(200,220,255,0.2)", fontFamily: "Share Tech Mono", letterSpacing: "0.1em" }}>
+          {attackerIPs.length} ACTIVE SOURCES
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── IP ENRICH MODAL ──────────────────────────────────────────────────────────
 function IPEnrichModal({ ip: initIp, onClose }: { ip: string; onClose: () => void }) {
   const [ip, setIp] = useState(initIp || "");
