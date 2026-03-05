@@ -121,30 +121,32 @@ function ScanModal({ onClose }: { onClose: () => void }) {
     </div>
   );
 }
-
 // ─── WORLD MAP CARD ───────────────────────────────────────────────────────────
 function WorldMapCard({ packets }: { packets: Packet[] }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const mobile = useMobile();
 
-  // Rough lat/lng to x/y on a 800x400 equirectangular map
+  const countryCoords: Record<string, [number, number]> = {
+    US: [37.09, -95.71], CN: [35.86, 104.19], RU: [61.52, 105.31], DE: [51.16, 10.45],
+    GB: [55.37, -3.43], FR: [46.22, 2.21], IN: [20.59, 78.96], BR: [-14.23, -51.92],
+    JP: [36.20, 138.25], KR: [35.90, 127.76], AU: [-25.27, 133.77], CA: [56.13, -106.34],
+    NL: [52.13, 5.29], SG: [1.35, 103.82], ZA: [-30.55, 22.93], NG: [9.08, 8.67],
+    MX: [23.63, -102.55], IT: [41.87, 12.56], ES: [40.46, -3.74], SE: [60.12, 18.64],
+    UA: [48.37, 31.16], IR: [32.42, 53.68], KP: [40.33, 127.51], TR: [38.96, 35.24],
+    "??": [20, 0],
+  };
+
   const project = (lat: number, lng: number, w: number, h: number) => ({
     x: ((lng + 180) / 360) * w,
     y: ((90 - lat) / 180) * h,
   });
 
-  // Fake geo from country code (enough for MVP visualization)
-  const countryCoords: Record<string, [number, number]> = {
-    US: [37.09, -95.71], CN: [35.86, 104.19], RU: [61.52, 105.31], DE: [51.16, 10.45],
-    GB: [55.37, -3.43], FR: [46.22, 2.21], IN: [20.59, 78.96], BR: [14.23, -51.92],
-    JP: [36.20, 138.25], KR: [35.90, 127.76], AU: [-25.27, 133.77], CA: [56.13, -106.34],
-    NL: [52.13, 5.29], SG: [1.35, 103.82], ZA: [-30.55, 22.93], NG: [9.08, 8.67],
-    MX: [23.63, -102.55], IT: [41.87, 12.56], ES: [40.46, -3.74], SE: [60.12, 18.64],
-    "??": [20, 0],
+  // Stable jitter per packet id so dots don't jump on every render
+  const jitter = (id: string, range: number) => {
+    let h = 0;
+    for (let i = 0; i < id.length; i++) h = (Math.imul(31, h) + id.charCodeAt(i)) | 0;
+    return ((h & 0xffff) / 0xffff - 0.5) * range;
   };
-
-  const attackerIPs = packets.filter(p => p.label !== "NORMAL").slice(0, 20);
-  const targetCoords: [number, number] = [37.09, -95.71]; // Default target: US
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -155,12 +157,12 @@ function WorldMapCard({ packets }: { packets: Packet[] }) {
 
     ctx.clearRect(0, 0, W, H);
 
-    // Draw world outline (simplified dot map)
-    ctx.fillStyle = "rgba(59,130,246,0.08)";
+    // Background
+    ctx.fillStyle = "rgba(8,12,20,1)";
     ctx.fillRect(0, 0, W, H);
 
-    // Grid lines
-    ctx.strokeStyle = "rgba(59,130,246,0.06)";
+    // Grid lines (lat/lng)
+    ctx.strokeStyle = "rgba(59,130,246,0.07)";
     ctx.lineWidth = 0.5;
     for (let lat = -90; lat <= 90; lat += 30) {
       const { y } = project(lat, 0, W, H);
@@ -171,52 +173,94 @@ function WorldMapCard({ packets }: { packets: Packet[] }) {
       ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
     }
 
-    // Target marker (defended system)
+    // Continent blobs (very rough, just for visual context)
+    const blobs: [number, number, number, number][] = [
+      // [lat, lng, rw, rh] approximate continent centers
+      [50, 10, 60, 35],   // Europe
+      [55, 95, 110, 40],  // Asia
+      [5, 20, 65, 55],    // Africa
+      [45, -100, 75, 40], // N America
+      [-15, -55, 50, 40], // S America
+      [-25, 133, 55, 35], // Australia
+    ];
+    blobs.forEach(([lat, lng, rw, rh]) => {
+      const c = project(lat, lng, W, H);
+      const grad = ctx.createRadialGradient(c.x, c.y, 0, c.x, c.y, rw);
+      grad.addColorStop(0, "rgba(59,130,246,0.07)");
+      grad.addColorStop(1, "rgba(59,130,246,0)");
+      ctx.beginPath();
+      ctx.ellipse(c.x, c.y, rw, rh, 0, 0, Math.PI * 2);
+      ctx.fillStyle = grad;
+      ctx.fill();
+    });
+
+    const attackers = packets.filter(p => p.label !== "NORMAL").slice(0, 25);
+    const targetCoords: [number, number] = [37.09, -95.71];
     const tgt = project(targetCoords[0], targetCoords[1], W, H);
-    ctx.beginPath();
-    ctx.arc(tgt.x, tgt.y, 6, 0, Math.PI * 2);
-    ctx.fillStyle = "rgba(34,197,94,0.25)";
-    ctx.fill();
-    ctx.beginPath();
-    ctx.arc(tgt.x, tgt.y, 3, 0, Math.PI * 2);
-    ctx.fillStyle = "#22c55e";
-    ctx.shadowColor = "#22c55e";
-    ctx.shadowBlur = 8;
-    ctx.fill();
-    ctx.shadowBlur = 0;
 
-    // Draw attack lines
-    attackerIPs.forEach(p => {
+    // Draw arc lines first (behind dots)
+    attackers.forEach(p => {
       const coords = countryCoords[p.country] ?? countryCoords["??"];
-      const src = project(coords[0] + (Math.random() - 0.5) * 4, coords[1] + (Math.random() - 0.5) * 4, W, H);
-      const color = p.color;
-
-      // Arc line
+      const src = project(
+        coords[0] + jitter(p.id + "lat", 3),
+        coords[1] + jitter(p.id + "lng", 3),
+        W, H
+      );
       ctx.beginPath();
       ctx.moveTo(src.x, src.y);
-      const cpx = (src.x + tgt.x) / 2 + (Math.random() - 0.5) * 60;
-      const cpy = Math.min(src.y, tgt.y) - 30 - Math.random() * 40;
+      const cpx = (src.x + tgt.x) / 2;
+      const cpy = Math.min(src.y, tgt.y) - Math.abs(src.x - tgt.x) * 0.25 - 20;
       ctx.quadraticCurveTo(cpx, cpy, tgt.x, tgt.y);
-      ctx.strokeStyle = color + "55";
+      ctx.strokeStyle = p.color + "40";
       ctx.lineWidth = 0.8;
       ctx.stroke();
+    });
 
-      // Source dot
+    // Draw source dots + labels
+    attackers.forEach(p => {
+      const coords = countryCoords[p.country] ?? countryCoords["??"];
+      const src = project(
+        coords[0] + jitter(p.id + "lat", 3),
+        coords[1] + jitter(p.id + "lng", 3),
+        W, H
+      );
       ctx.beginPath();
-      ctx.arc(src.x, src.y, 3, 0, Math.PI * 2);
-      ctx.fillStyle = color;
-      ctx.shadowColor = color;
-      ctx.shadowBlur = 6;
+      ctx.arc(src.x, src.y, 3.5, 0, Math.PI * 2);
+      ctx.fillStyle = p.color;
+      ctx.shadowColor = p.color;
+      ctx.shadowBlur = 8;
       ctx.fill();
       ctx.shadowBlur = 0;
 
-      // Country label
-      ctx.fillStyle = "rgba(200,220,255,0.45)";
-      ctx.font = "7px Share Tech Mono";
+      ctx.fillStyle = "rgba(200,220,255,0.5)";
+      ctx.font = `${mobile ? 7 : 8}px Share Tech Mono`;
       ctx.fillText(p.country, src.x + 5, src.y - 3);
     });
 
-  }, [packets]);
+    // Target pulse rings
+    [14, 9].forEach((r, i) => {
+      ctx.beginPath();
+      ctx.arc(tgt.x, tgt.y, r, 0, Math.PI * 2);
+      ctx.strokeStyle = `rgba(34,197,94,${i === 0 ? 0.15 : 0.3})`;
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    });
+    ctx.beginPath();
+    ctx.arc(tgt.x, tgt.y, 4, 0, Math.PI * 2);
+    ctx.fillStyle = "#22c55e";
+    ctx.shadowColor = "#22c55e";
+    ctx.shadowBlur = 10;
+    ctx.fill();
+    ctx.shadowBlur = 0;
+
+    // Target label
+    ctx.fillStyle = "rgba(34,197,94,0.7)";
+    ctx.font = "8px Share Tech Mono";
+    ctx.fillText("TARGET", tgt.x + 8, tgt.y + 3);
+
+  }, [packets, mobile]);
+
+  const attackerCount = packets.filter(p => p.label !== "NORMAL").slice(0, 25).length;
 
   return (
     <div className="panel">
@@ -232,18 +276,21 @@ function WorldMapCard({ packets }: { packets: Packet[] }) {
               <span style={{ fontSize: 7.5, color: "rgba(200,220,255,0.3)", letterSpacing: "0.12em", fontFamily: "'Orbitron',monospace" }}>{l}</span>
             </div>
           ))}
+          <span style={{ fontSize: 7.5, color: "rgba(200,220,255,0.2)", fontFamily: "Share Tech Mono" }}>{attackerCount} ACTIVE SOURCES</span>
         </div>
       </div>
-      <div style={{ padding: "8px 4px 4px", position: "relative" }}>
+      <div style={{ position: "relative" }}>
         <canvas
           ref={canvasRef}
-          width={mobile ? 340 : 800}
-          height={mobile ? 180 : 340}
-          style={{ width: "100%", height: mobile ? 180 : 340, display: "block", borderRadius: 2 }}
+          width={800}
+          height={mobile ? 200 : 340}
+          style={{ width: "100%", height: mobile ? 200 : 340, display: "block" }}
         />
-        <div style={{ position: "absolute", bottom: 12, right: 12, fontSize: 8, color: "rgba(200,220,255,0.2)", fontFamily: "Share Tech Mono", letterSpacing: "0.1em" }}>
-          {attackerIPs.length} ACTIVE SOURCES
-        </div>
+        {attackerCount === 0 && (
+          <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, color: "rgba(200,220,255,0.18)", fontFamily: "Share Tech Mono", letterSpacing: "0.1em" }}>
+            AWAITING THREAT DATA...
+          </div>
+        )}
       </div>
     </div>
   );
