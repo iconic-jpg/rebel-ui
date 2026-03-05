@@ -44,6 +44,126 @@ function ScanModal({ onClose }) {
     const sc = (s) => s >= 70 ? "#22c55e" : s >= 40 ? "#eab308" : "#ef4444";
     return (_jsx("div", { style: { position: "fixed", inset: 0, background: "rgba(0,0,0,0.8)", zIndex: 300, display: "flex", alignItems: mobile ? "flex-end" : "center", justifyContent: "center", backdropFilter: "blur(4px)" }, children: _jsxs("div", { style: { width: mobile ? "100%" : 560, maxHeight: mobile ? "92vh" : "90vh", background: "#0d1117", border: "1px solid rgba(59,130,246,0.25)", borderRadius: mobile ? "12px 12px 0 0" : 4, boxShadow: "0 0 60px rgba(59,130,246,0.15)", display: "flex", flexDirection: "column", overflow: "hidden" }, children: [_jsxs("div", { style: { padding: "13px 18px", borderBottom: "1px solid rgba(59,130,246,0.1)", display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0 }, children: [_jsx("span", { style: S.label, children: "ACTIVE SCAN" }), _jsx("button", { onClick: onClose, style: S.ghost, children: "\u2715" })] }), _jsxs("div", { style: { padding: 16, display: "flex", flexDirection: "column", gap: 12, overflowY: "auto", flex: 1 }, children: [_jsx("div", { style: { display: "flex", borderBottom: "1px solid rgba(59,130,246,0.08)" }, children: [["url", "URL SCAN"], ["crypto", "CRYPTO / TLS"]].map(([id, label]) => (_jsx("button", { onClick: () => setTab(id), style: { ...S.tabBtn, color: tab === id ? "#3b82f6" : "rgba(200,220,255,0.3)", borderBottom: tab === id ? "2px solid #3b82f6" : "2px solid transparent", flex: 1 }, children: label }, id))) }), _jsxs("div", { style: { display: "flex", gap: 8 }, children: [_jsx("input", { value: url, onChange: e => setUrl(e.target.value), onKeyDown: e => e.key === "Enter" && runScan(), placeholder: "https://target.com", style: { ...S.input, flex: 1, fontSize: 14 } }), _jsx("button", { onClick: runScan, disabled: loading, style: { ...S.btn, padding: "10px 16px" }, children: loading ? "..." : "SCAN" })] }), loading && _jsxs("div", { style: { display: "flex", gap: 6, alignItems: "center" }, children: [_jsx("div", { style: S.spinner }), _jsx("span", { style: { fontSize: 11, color: "rgba(200,220,255,0.4)", fontFamily: "Share Tech Mono" }, children: "Probing target..." })] }), result && !result.error && (_jsxs("div", { style: { background: "rgba(255,255,255,0.025)", border: "1px solid rgba(59,130,246,0.1)", borderRadius: 3, padding: 14, display: "flex", flexDirection: "column", gap: 10 }, children: [result.score !== undefined && (_jsxs("div", { style: { display: "flex", alignItems: "center", gap: 12 }, children: [_jsx("div", { style: { fontFamily: "'Orbitron',monospace", fontSize: 42, color: sc(result.score), textShadow: `0 0 20px ${sc(result.score)}55` }, children: result.score }), _jsxs("div", { children: [_jsx("div", { style: { fontFamily: "'Orbitron',monospace", fontSize: 11, color: sc(result.score), letterSpacing: "0.15em" }, children: result.level?.toUpperCase() || "RISK" }), _jsx("div", { style: { fontSize: 11, color: "rgba(200,220,255,0.4)", marginTop: 2 }, children: result.domain || result.url })] })] })), result.tls_info?.tls_version && (_jsx("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 7 }, children: [["TLS Version", result.tls_info.tls_version], ["Key Type", result.tls_info.key_type], ["Key Size", (result.tls_info.key_size ?? "?") + " bits"], ["Issuer", result.tls_info.issuer], ["Post-Quantum", result.tls_info.post_quantum ? "YES ✓" : "NO"], ["Self-Signed", result.tls_info.is_self_signed ? "YES ⚠" : "NO"]].map(([k, v]) => (_jsxs("div", { style: { background: "rgba(255,255,255,0.03)", padding: "6px 10px", borderRadius: 2 }, children: [_jsx("div", { style: { fontSize: 8, color: "rgba(200,220,255,0.28)", letterSpacing: "0.1em", marginBottom: 2 }, children: k }), _jsx("div", { style: { fontSize: 12, color: "rgba(200,220,255,0.8)" }, children: v ?? "N/A" })] }, k))) })), result.vulnerabilities && (_jsxs("div", { children: [_jsx("div", { style: { fontSize: 9, color: "rgba(200,220,255,0.28)", letterSpacing: "0.15em", marginBottom: 6 }, children: "VULNERABILITIES" }), result.vulnerabilities.missing_headers?.map((h) => _jsxs("div", { style: { fontSize: 12, color: "#f97316", padding: "2px 0" }, children: ["\u26A0 ", h] }, h)), result.vulnerabilities.open_redirect_risk && _jsx("div", { style: { fontSize: 12, color: "#ef4444" }, children: "\u26A0 Open Redirect Risk" }), result.vulnerabilities.suspicious_url_patterns?.map((p) => _jsxs("div", { style: { fontSize: 12, color: "#eab308" }, children: ["\u26A0 ", p] }, p))] })), result.reasons?.map((r) => _jsxs("div", { style: { fontSize: 12, color: "#f97316" }, children: ["\u26A0 ", r] }, r)), result.explanation && _jsx("div", { style: { fontSize: 12, color: "rgba(200,220,255,0.58)", lineHeight: 1.7, borderTop: "1px solid rgba(59,130,246,0.08)", paddingTop: 10, fontFamily: "Share Tech Mono" }, children: result.explanation })] })), result?.error && _jsxs("div", { style: { fontSize: 12, color: "#ef4444", fontFamily: "Share Tech Mono" }, children: ["ERROR: ", result.error] })] })] }) }));
 }
+// ─── WORLD MAP CARD ───────────────────────────────────────────────────────────
+// ─── WORLD MAP CARD ───────────────────────────────────────────────────────────
+function WorldMapCard({ packets }) {
+    const canvasRef = useRef(null);
+    const imgRef = useRef(null);
+    const [mapLoaded, setMapLoaded] = useState(false);
+    const mobile = useMobile();
+    const countryCoords = {
+        US: [37.09, -95.71], CN: [35.86, 104.19], RU: [61.52, 105.31], DE: [51.16, 10.45],
+        GB: [55.37, -3.43], FR: [46.22, 2.21], IN: [20.59, 78.96], BR: [-14.23, -51.92],
+        JP: [36.20, 138.25], KR: [35.90, 127.76], AU: [-25.27, 133.77], CA: [56.13, -106.34],
+        NL: [52.13, 5.29], SG: [1.35, 103.82], ZA: [-30.55, 22.93], NG: [9.08, 8.67],
+        MX: [23.63, -102.55], IT: [41.87, 12.56], ES: [40.46, -3.74], SE: [60.12, 18.64],
+        UA: [48.37, 31.16], IR: [32.42, 53.68], KP: [40.33, 127.51], TR: [38.96, 35.24],
+        "??": [20, 0],
+    };
+    const project = (lat, lng, W, H) => ({
+        x: ((lng + 180) / 360) * W,
+        y: ((90 - lat) / 180) * H,
+    });
+    const jitter = (id, range) => {
+        let h = 0;
+        for (let i = 0; i < id.length; i++)
+            h = (Math.imul(31, h) + id.charCodeAt(i)) | 0;
+        return ((h & 0xffff) / 0xffff - 0.5) * range;
+    };
+    // Load map image once
+    useEffect(() => {
+        const img = new Image();
+        img.crossOrigin = "anonymous";
+        img.src = "https://upload.wikimedia.org/wikipedia/commons/thumb/8/80/World_map_-_low_resolution.svg/1280px-World_map_-_low_resolution.svg.png";
+        img.onload = () => { imgRef.current = img; setMapLoaded(true); };
+    }, []);
+    useEffect(() => {
+        const canvas = canvasRef.current;
+        if (!canvas)
+            return;
+        const ctx = canvas.getContext("2d");
+        if (!ctx)
+            return;
+        const W = canvas.width, H = canvas.height;
+        ctx.clearRect(0, 0, W, H);
+        ctx.fillStyle = "#080c14";
+        ctx.fillRect(0, 0, W, H);
+        // Draw map image if loaded
+        if (imgRef.current) {
+            ctx.globalAlpha = 0.25;
+            ctx.drawImage(imgRef.current, 0, 0, W, H);
+            ctx.globalAlpha = 1;
+        }
+        // Grid
+        ctx.strokeStyle = "rgba(59,130,246,0.06)";
+        ctx.lineWidth = 0.5;
+        for (let lat = -90; lat <= 90; lat += 30) {
+            const { y } = project(lat, 0, W, H);
+            ctx.beginPath();
+            ctx.moveTo(0, y);
+            ctx.lineTo(W, y);
+            ctx.stroke();
+        }
+        for (let lng = -180; lng <= 180; lng += 30) {
+            const { x } = project(0, lng, W, H);
+            ctx.beginPath();
+            ctx.moveTo(x, 0);
+            ctx.lineTo(x, H);
+            ctx.stroke();
+        }
+        const attackers = packets.filter(p => p.label !== "NORMAL").slice(0, 25);
+        const TARGET = [37.09, -95.71];
+        const tgt = project(TARGET[0], TARGET[1], W, H);
+        // Arc lines
+        attackers.forEach(p => {
+            const coords = countryCoords[p.country] ?? countryCoords["??"];
+            const src = project(coords[0] + jitter(p.id + "lat", 3), coords[1] + jitter(p.id + "lng", 3), W, H);
+            ctx.beginPath();
+            ctx.moveTo(src.x, src.y);
+            const cpx = (src.x + tgt.x) / 2;
+            const cpy = Math.min(src.y, tgt.y) - Math.abs(src.x - tgt.x) * 0.22 - 15;
+            ctx.quadraticCurveTo(cpx, cpy, tgt.x, tgt.y);
+            ctx.strokeStyle = p.color + "55";
+            ctx.lineWidth = 0.8;
+            ctx.stroke();
+        });
+        // Source dots
+        attackers.forEach(p => {
+            const coords = countryCoords[p.country] ?? countryCoords["??"];
+            const src = project(coords[0] + jitter(p.id + "lat", 3), coords[1] + jitter(p.id + "lng", 3), W, H);
+            ctx.beginPath();
+            ctx.arc(src.x, src.y, 3.5, 0, Math.PI * 2);
+            ctx.fillStyle = p.color;
+            ctx.shadowColor = p.color;
+            ctx.shadowBlur = 8;
+            ctx.fill();
+            ctx.shadowBlur = 0;
+            ctx.fillStyle = "rgba(200,220,255,0.5)";
+            ctx.font = `${mobile ? 7 : 8}px Share Tech Mono`;
+            ctx.fillText(p.country, src.x + 5, src.y - 3);
+        });
+        // Target rings
+        [14, 9].forEach((r, i) => {
+            ctx.beginPath();
+            ctx.arc(tgt.x, tgt.y, r, 0, Math.PI * 2);
+            ctx.strokeStyle = `rgba(34,197,94,${i === 0 ? 0.15 : 0.35})`;
+            ctx.lineWidth = 1;
+            ctx.stroke();
+        });
+        ctx.beginPath();
+        ctx.arc(tgt.x, tgt.y, 4, 0, Math.PI * 2);
+        ctx.fillStyle = "#22c55e";
+        ctx.shadowColor = "#22c55e";
+        ctx.shadowBlur = 10;
+        ctx.fill();
+        ctx.shadowBlur = 0;
+        ctx.fillStyle = "rgba(34,197,94,0.8)";
+        ctx.font = "8px Share Tech Mono";
+        ctx.fillText("TARGET", tgt.x + 8, tgt.y + 3);
+    }, [packets, mapLoaded, mobile]);
+    const attackerCount = packets.filter(p => p.label !== "NORMAL").slice(0, 25).length;
+    return (_jsxs("div", { className: "panel", children: [_jsxs("div", { className: "ph", children: [_jsxs("div", { style: { display: "flex", alignItems: "center", gap: 8 }, children: [_jsx(Pulse, { color: "#ef4444" }), _jsx("span", { style: S.label, children: "GLOBAL THREAT MAP" })] }), _jsxs("div", { style: { display: "flex", alignItems: "center", gap: 12 }, children: [[["ATTACKER", "#ef4444"], ["TARGET", "#22c55e"]].map(([l, c]) => (_jsxs("div", { style: { display: "flex", alignItems: "center", gap: 4 }, children: [_jsx("div", { style: { width: 6, height: 6, borderRadius: "50%", background: c, boxShadow: `0 0 4px ${c}` } }), _jsx("span", { style: { fontSize: 7.5, color: "rgba(200,220,255,0.3)", letterSpacing: "0.12em", fontFamily: "'Orbitron',monospace" }, children: l })] }, l))), _jsxs("span", { style: { fontSize: 7.5, color: "rgba(200,220,255,0.2)", fontFamily: "Share Tech Mono" }, children: [attackerCount, " ACTIVE SOURCES"] })] })] }), _jsxs("div", { style: { position: "relative" }, children: [_jsx("canvas", { ref: canvasRef, width: 800, height: mobile ? 200 : 360, style: { width: "100%", height: mobile ? 200 : 360, display: "block" } }), !mapLoaded && (_jsx("div", { style: { position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, color: "rgba(200,220,255,0.18)", fontFamily: "Share Tech Mono" }, children: "LOADING MAP..." })), mapLoaded && attackerCount === 0 && (_jsx("div", { style: { position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, color: "rgba(200,220,255,0.18)", fontFamily: "Share Tech Mono", letterSpacing: "0.1em" }, children: "AWAITING THREAT DATA..." }))] })] }));
+}
 // ─── IP ENRICH MODAL ──────────────────────────────────────────────────────────
 function IPEnrichModal({ ip: initIp, onClose }) {
     const [ip, setIp] = useState(initIp || "");
@@ -193,7 +313,7 @@ export default function RebelDashboard() {
                             { label: "CRITICAL", value: stats.critical, sub: "Immediate risk", color: "#ef4444", icon: "☢" },
                             { label: "BLOCKED", value: stats.blocked, sub: "Auto-blocked", color: "#ef4444", icon: "⛔" },
                             { label: "RISK", value: overallRisk, sub: overallRisk > 70 ? "ELEVATED" : overallRisk > 40 ? "MODERATE" : "LOW", color: overallColor, icon: "◉" },
-                        ].map((m, i) => (_jsxs("div", { className: "panel", style: { padding: mobile ? "10px 12px" : "12px 14px" }, children: [_jsxs("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 5 }, children: [_jsx("span", { style: { ...S.label, fontSize: mobile ? 7 : 7.5 }, children: m.label }), _jsx("span", { style: { fontSize: mobile ? 11 : 12, color: m.color, opacity: 0.65 }, children: m.icon })] }), _jsx("div", { style: { fontFamily: "'Orbitron',monospace", fontSize: mobile ? 24 : 30, fontWeight: 700, color: m.color, lineHeight: 1, marginBottom: 3, textShadow: `0 0 16px ${m.color}44` }, children: m.value }), _jsx("div", { style: { fontSize: 8, color: "rgba(200,220,255,0.25)", letterSpacing: "0.06em" }, children: m.sub })] }, i))) }), _jsxs("div", { className: "panel", children: [_jsxs("div", { className: "ph", children: [_jsxs("div", { style: { display: "flex", alignItems: "center", gap: 8 }, children: [_jsx(Pulse, { color: "#3b82f6" }), _jsx("span", { style: { ...S.label, fontSize: mobile ? 8 : 10 }, children: "LIVE TRAFFIC \u2014 ANOMALY DETECTION" })] }), !mobile && _jsx("div", { style: { display: "flex", gap: 12 }, children: [["NORMAL", "#3b82f6"], ["ANOMALY", "#ef4444"]].map(([l, c]) => (_jsxs("div", { style: { display: "flex", alignItems: "center", gap: 4 }, children: [_jsx("div", { style: { width: 18, height: 2, background: c, boxShadow: `0 0 4px ${c}` } }), _jsx("span", { style: { fontSize: 7.5, color: "rgba(200,220,255,0.3)", letterSpacing: "0.12em" }, children: l })] }, l))) })] }), _jsx("div", { style: { padding: "10px 4px 4px" }, children: _jsx(ResponsiveContainer, { width: "100%", height: mobile ? 120 : 160, children: _jsxs(AreaChart, { data: trafficHistory, children: [_jsxs("defs", { children: [_jsxs("linearGradient", { id: "gN", x1: "0", y1: "0", x2: "0", y2: "1", children: [_jsx("stop", { offset: "5%", stopColor: "#3b82f6", stopOpacity: 0.14 }), _jsx("stop", { offset: "95%", stopColor: "#3b82f6", stopOpacity: 0 })] }), _jsxs("linearGradient", { id: "gA", x1: "0", y1: "0", x2: "0", y2: "1", children: [_jsx("stop", { offset: "5%", stopColor: "#ef4444", stopOpacity: 0.18 }), _jsx("stop", { offset: "95%", stopColor: "#ef4444", stopOpacity: 0 })] })] }), _jsx(XAxis, { dataKey: "t", hide: true }), _jsx(YAxis, { tick: { fontSize: 8, fill: "rgba(200,220,255,0.22)", fontFamily: "Share Tech Mono" }, axisLine: false, tickLine: false, width: 28 }), _jsx(Tooltip, { contentStyle: { background: "#0d1117", border: "1px solid rgba(59,130,246,0.22)", borderRadius: 2, fontFamily: "Share Tech Mono", fontSize: 10 }, itemStyle: { color: "rgba(200,220,255,0.75)" } }), _jsx(Area, { type: "monotone", dataKey: "normal", stroke: "#3b82f6", strokeWidth: 1.5, fill: "url(#gN)", dot: false, isAnimationActive: false }), _jsx(Area, { type: "monotone", dataKey: "anomaly", stroke: "#ef4444", strokeWidth: 1.5, fill: "url(#gA)", dot: false, isAnimationActive: false })] }) }) })] }), _jsxs("div", { className: "panel", children: [_jsxs("div", { className: "ph", children: [_jsx("span", { style: S.label, children: "RISK SURFACE" }), _jsx("span", { style: { fontFamily: "'Orbitron',monospace", fontSize: 20, color: overallColor, textShadow: `0 0 16px ${overallColor}` }, children: overallRisk })] }), _jsx("div", { style: { padding: "12px 8px", display: "flex", gap: mobile ? 6 : 5, justifyContent: mobile ? "space-around" : "center", overflowX: mobile ? "auto" : "visible", flexWrap: mobile ? "nowrap" : "wrap" }, children: riskScores.map(c => _jsx(RiskArc, { score: c.score, label: c.label }, c.label)) })] }), _jsxs("div", { className: "panel", children: [_jsxs("div", { className: "ph", children: [_jsx("div", { style: { display: "flex" }, children: [["feed", "LIVE FEED"], ["critical", "CRITICAL"]].map(([id, label]) => (_jsx("button", { onClick: () => setActiveTab(id), style: { ...S.tabBtn, color: activeTab === id ? "#3b82f6" : "rgba(200,220,255,0.28)", borderBottom: activeTab === id ? "2px solid #3b82f6" : "2px solid transparent" }, children: label }, id))) }), _jsxs("div", { style: { display: "flex", alignItems: "center", gap: 6 }, children: [_jsx(Pulse, { color: "#ef4444" }), _jsx("span", { style: { fontSize: 7.5, fontFamily: "'Orbitron',monospace", color: "rgba(200,220,255,0.28)", letterSpacing: "0.1em" }, children: "POLLING \u00B7 2s" })] })] }), mobile ? (
+                        ].map((m, i) => (_jsxs("div", { className: "panel", style: { padding: mobile ? "10px 12px" : "12px 14px" }, children: [_jsxs("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 5 }, children: [_jsx("span", { style: { ...S.label, fontSize: mobile ? 7 : 7.5 }, children: m.label }), _jsx("span", { style: { fontSize: mobile ? 11 : 12, color: m.color, opacity: 0.65 }, children: m.icon })] }), _jsx("div", { style: { fontFamily: "'Orbitron',monospace", fontSize: mobile ? 24 : 30, fontWeight: 700, color: m.color, lineHeight: 1, marginBottom: 3, textShadow: `0 0 16px ${m.color}44` }, children: m.value }), _jsx("div", { style: { fontSize: 8, color: "rgba(200,220,255,0.25)", letterSpacing: "0.06em" }, children: m.sub })] }, i))) }), _jsxs("div", { className: "panel", children: [_jsxs("div", { className: "ph", children: [_jsxs("div", { style: { display: "flex", alignItems: "center", gap: 8 }, children: [_jsx(Pulse, { color: "#3b82f6" }), _jsx("span", { style: { ...S.label, fontSize: mobile ? 8 : 10 }, children: "LIVE TRAFFIC \u2014 ANOMALY DETECTION" })] }), !mobile && _jsx("div", { style: { display: "flex", gap: 12 }, children: [["NORMAL", "#3b82f6"], ["ANOMALY", "#ef4444"]].map(([l, c]) => (_jsxs("div", { style: { display: "flex", alignItems: "center", gap: 4 }, children: [_jsx("div", { style: { width: 18, height: 2, background: c, boxShadow: `0 0 4px ${c}` } }), _jsx("span", { style: { fontSize: 7.5, color: "rgba(200,220,255,0.3)", letterSpacing: "0.12em" }, children: l })] }, l))) })] }), _jsx("div", { style: { padding: "10px 4px 4px" }, children: _jsx(ResponsiveContainer, { width: "100%", height: mobile ? 120 : 160, children: _jsxs(AreaChart, { data: trafficHistory, children: [_jsxs("defs", { children: [_jsxs("linearGradient", { id: "gN", x1: "0", y1: "0", x2: "0", y2: "1", children: [_jsx("stop", { offset: "5%", stopColor: "#3b82f6", stopOpacity: 0.14 }), _jsx("stop", { offset: "95%", stopColor: "#3b82f6", stopOpacity: 0 })] }), _jsxs("linearGradient", { id: "gA", x1: "0", y1: "0", x2: "0", y2: "1", children: [_jsx("stop", { offset: "5%", stopColor: "#ef4444", stopOpacity: 0.18 }), _jsx("stop", { offset: "95%", stopColor: "#ef4444", stopOpacity: 0 })] })] }), _jsx(XAxis, { dataKey: "t", hide: true }), _jsx(YAxis, { tick: { fontSize: 8, fill: "rgba(200,220,255,0.22)", fontFamily: "Share Tech Mono" }, axisLine: false, tickLine: false, width: 28 }), _jsx(Tooltip, { contentStyle: { background: "#0d1117", border: "1px solid rgba(59,130,246,0.22)", borderRadius: 2, fontFamily: "Share Tech Mono", fontSize: 10 }, itemStyle: { color: "rgba(200,220,255,0.75)" } }), _jsx(Area, { type: "monotone", dataKey: "normal", stroke: "#3b82f6", strokeWidth: 1.5, fill: "url(#gN)", dot: false, isAnimationActive: false }), _jsx(Area, { type: "monotone", dataKey: "anomaly", stroke: "#ef4444", strokeWidth: 1.5, fill: "url(#gA)", dot: false, isAnimationActive: false })] }) }) })] }), _jsxs("div", { className: "panel", children: [_jsxs("div", { className: "ph", children: [_jsx("span", { style: S.label, children: "RISK SURFACE" }), _jsx("span", { style: { fontFamily: "'Orbitron',monospace", fontSize: 20, color: overallColor, textShadow: `0 0 16px ${overallColor}` }, children: overallRisk })] }), _jsx("div", { style: { padding: "12px 8px", display: "flex", gap: mobile ? 6 : 5, justifyContent: mobile ? "space-around" : "center", overflowX: mobile ? "auto" : "visible", flexWrap: mobile ? "nowrap" : "wrap" }, children: riskScores.map(c => _jsx(RiskArc, { score: c.score, label: c.label }, c.label)) })] }), _jsx(WorldMapCard, { packets: packets }), _jsxs("div", { className: "panel", children: [_jsxs("div", { className: "ph", children: [_jsx("div", { style: { display: "flex" }, children: [["feed", "LIVE FEED"], ["critical", "CRITICAL"]].map(([id, label]) => (_jsx("button", { onClick: () => setActiveTab(id), style: { ...S.tabBtn, color: activeTab === id ? "#3b82f6" : "rgba(200,220,255,0.28)", borderBottom: activeTab === id ? "2px solid #3b82f6" : "2px solid transparent" }, children: label }, id))) }), _jsxs("div", { style: { display: "flex", alignItems: "center", gap: 6 }, children: [_jsx(Pulse, { color: "#ef4444" }), _jsx("span", { style: { fontSize: 7.5, fontFamily: "'Orbitron',monospace", color: "rgba(200,220,255,0.28)", letterSpacing: "0.1em" }, children: "POLLING \u00B7 2s" })] })] }), mobile ? (
                             // Mobile: card-style rows
                             _jsxs("div", { style: { maxHeight: 280, overflowY: "auto" }, children: [displayFeed.map((p, i) => (_jsxs("div", { className: "row fr", onClick: () => setEnrichTarget(p.src), style: { padding: "10px 14px", borderBottom: "1px solid rgba(59,130,246,0.04)", background: i === 0 && p.label === "CRITICAL" ? "rgba(239,68,68,0.04)" : "transparent" }, children: [_jsxs("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }, children: [_jsxs("span", { style: { color: "#3b82f6", fontSize: 10, fontFamily: "Share Tech Mono" }, children: [p.id, " \u00B7 ", p.time] }), _jsx("span", { style: { fontSize: 9, fontFamily: "'Orbitron',monospace", color: p.color, letterSpacing: "0.08em" }, children: p.label })] }), _jsxs("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center" }, children: [_jsx("span", { style: { color: "rgba(200,220,255,0.7)", fontSize: 12 }, children: p.src }), _jsxs("div", { style: { display: "flex", alignItems: "center", gap: 5 }, children: [_jsx("div", { style: { width: 40, height: 3, background: "rgba(255,255,255,0.07)", borderRadius: 2, overflow: "hidden" }, children: _jsx("div", { style: { width: `${p.risk * 100}%`, height: "100%", background: p.color } }) }), _jsxs("span", { style: { fontSize: 10, color: p.color }, children: [(p.risk * 100).toFixed(0), "%"] })] })] }), _jsxs("div", { style: { marginTop: 3, fontSize: 10, color: "rgba(200,220,255,0.35)" }, children: [":", p.dst_port, " \u00B7 ", p.size, "B \u00B7 ", p.country] })] }, p.id))), displayFeed.length === 0 && _jsx("div", { style: { padding: 18, textAlign: "center", fontSize: 11, color: "rgba(200,220,255,0.18)" }, children: "Awaiting packets..." })] })) : (
                             // Desktop: table-style

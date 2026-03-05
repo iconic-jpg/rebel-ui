@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { AreaChart, Area, XAxis, YAxis, ResponsiveContainer, Tooltip } from "recharts";
+import { ComposableMap, Geographies, Geography, Marker, Line } from "react-simple-maps";
 
 const API = "https://r3bel-production.up.railway.app";
 
@@ -121,9 +122,14 @@ function ScanModal({ onClose }: { onClose: () => void }) {
     </div>
   );
 }
+
+// ─── WORLD MAP CARD ───────────────────────────────────────────────────────────
+
 // ─── WORLD MAP CARD ───────────────────────────────────────────────────────────
 function WorldMapCard({ packets }: { packets: Packet[] }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const imgRef = useRef<HTMLImageElement | null>(null);
+  const [mapLoaded, setMapLoaded] = useState(false);
   const mobile = useMobile();
 
   const countryCoords: Record<string, [number, number]> = {
@@ -136,17 +142,24 @@ function WorldMapCard({ packets }: { packets: Packet[] }) {
     "??": [20, 0],
   };
 
-  const project = (lat: number, lng: number, w: number, h: number) => ({
-    x: ((lng + 180) / 360) * w,
-    y: ((90 - lat) / 180) * h,
+  const project = (lat: number, lng: number, W: number, H: number) => ({
+    x: ((lng + 180) / 360) * W,
+    y: ((90 - lat) / 180) * H,
   });
 
-  // Stable jitter per packet id so dots don't jump on every render
   const jitter = (id: string, range: number) => {
     let h = 0;
     for (let i = 0; i < id.length; i++) h = (Math.imul(31, h) + id.charCodeAt(i)) | 0;
     return ((h & 0xffff) / 0xffff - 0.5) * range;
   };
+
+  // Load map image once
+  useEffect(() => {
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.src = "https://upload.wikimedia.org/wikipedia/commons/thumb/8/80/World_map_-_low_resolution.svg/1280px-World_map_-_low_resolution.svg.png";
+    img.onload = () => { imgRef.current = img; setMapLoaded(true); };
+  }, []);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -156,13 +169,18 @@ function WorldMapCard({ packets }: { packets: Packet[] }) {
     const W = canvas.width, H = canvas.height;
 
     ctx.clearRect(0, 0, W, H);
-
-    // Background
-    ctx.fillStyle = "rgba(8,12,20,1)";
+    ctx.fillStyle = "#080c14";
     ctx.fillRect(0, 0, W, H);
 
-    // Grid lines (lat/lng)
-    ctx.strokeStyle = "rgba(59,130,246,0.07)";
+    // Draw map image if loaded
+    if (imgRef.current) {
+      ctx.globalAlpha = 0.25;
+      ctx.drawImage(imgRef.current, 0, 0, W, H);
+      ctx.globalAlpha = 1;
+    }
+
+    // Grid
+    ctx.strokeStyle = "rgba(59,130,246,0.06)";
     ctx.lineWidth = 0.5;
     for (let lat = -90; lat <= 90; lat += 30) {
       const { y } = project(lat, 0, W, H);
@@ -173,57 +191,28 @@ function WorldMapCard({ packets }: { packets: Packet[] }) {
       ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
     }
 
-    // Continent blobs (very rough, just for visual context)
-    const blobs: [number, number, number, number][] = [
-      // [lat, lng, rw, rh] approximate continent centers
-      [50, 10, 60, 35],   // Europe
-      [55, 95, 110, 40],  // Asia
-      [5, 20, 65, 55],    // Africa
-      [45, -100, 75, 40], // N America
-      [-15, -55, 50, 40], // S America
-      [-25, 133, 55, 35], // Australia
-    ];
-    blobs.forEach(([lat, lng, rw, rh]) => {
-      const c = project(lat, lng, W, H);
-      const grad = ctx.createRadialGradient(c.x, c.y, 0, c.x, c.y, rw);
-      grad.addColorStop(0, "rgba(59,130,246,0.07)");
-      grad.addColorStop(1, "rgba(59,130,246,0)");
-      ctx.beginPath();
-      ctx.ellipse(c.x, c.y, rw, rh, 0, 0, Math.PI * 2);
-      ctx.fillStyle = grad;
-      ctx.fill();
-    });
-
     const attackers = packets.filter(p => p.label !== "NORMAL").slice(0, 25);
-    const targetCoords: [number, number] = [37.09, -95.71];
-    const tgt = project(targetCoords[0], targetCoords[1], W, H);
+    const TARGET: [number, number] = [37.09, -95.71];
+    const tgt = project(TARGET[0], TARGET[1], W, H);
 
-    // Draw arc lines first (behind dots)
+    // Arc lines
     attackers.forEach(p => {
       const coords = countryCoords[p.country] ?? countryCoords["??"];
-      const src = project(
-        coords[0] + jitter(p.id + "lat", 3),
-        coords[1] + jitter(p.id + "lng", 3),
-        W, H
-      );
+      const src = project(coords[0] + jitter(p.id + "lat", 3), coords[1] + jitter(p.id + "lng", 3), W, H);
       ctx.beginPath();
       ctx.moveTo(src.x, src.y);
       const cpx = (src.x + tgt.x) / 2;
-      const cpy = Math.min(src.y, tgt.y) - Math.abs(src.x - tgt.x) * 0.25 - 20;
+      const cpy = Math.min(src.y, tgt.y) - Math.abs(src.x - tgt.x) * 0.22 - 15;
       ctx.quadraticCurveTo(cpx, cpy, tgt.x, tgt.y);
-      ctx.strokeStyle = p.color + "40";
+      ctx.strokeStyle = p.color + "55";
       ctx.lineWidth = 0.8;
       ctx.stroke();
     });
 
-    // Draw source dots + labels
+    // Source dots
     attackers.forEach(p => {
       const coords = countryCoords[p.country] ?? countryCoords["??"];
-      const src = project(
-        coords[0] + jitter(p.id + "lat", 3),
-        coords[1] + jitter(p.id + "lng", 3),
-        W, H
-      );
+      const src = project(coords[0] + jitter(p.id + "lat", 3), coords[1] + jitter(p.id + "lng", 3), W, H);
       ctx.beginPath();
       ctx.arc(src.x, src.y, 3.5, 0, Math.PI * 2);
       ctx.fillStyle = p.color;
@@ -231,17 +220,16 @@ function WorldMapCard({ packets }: { packets: Packet[] }) {
       ctx.shadowBlur = 8;
       ctx.fill();
       ctx.shadowBlur = 0;
-
       ctx.fillStyle = "rgba(200,220,255,0.5)";
       ctx.font = `${mobile ? 7 : 8}px Share Tech Mono`;
       ctx.fillText(p.country, src.x + 5, src.y - 3);
     });
 
-    // Target pulse rings
+    // Target rings
     [14, 9].forEach((r, i) => {
       ctx.beginPath();
       ctx.arc(tgt.x, tgt.y, r, 0, Math.PI * 2);
-      ctx.strokeStyle = `rgba(34,197,94,${i === 0 ? 0.15 : 0.3})`;
+      ctx.strokeStyle = `rgba(34,197,94,${i === 0 ? 0.15 : 0.35})`;
       ctx.lineWidth = 1;
       ctx.stroke();
     });
@@ -252,13 +240,11 @@ function WorldMapCard({ packets }: { packets: Packet[] }) {
     ctx.shadowBlur = 10;
     ctx.fill();
     ctx.shadowBlur = 0;
-
-    // Target label
-    ctx.fillStyle = "rgba(34,197,94,0.7)";
+    ctx.fillStyle = "rgba(34,197,94,0.8)";
     ctx.font = "8px Share Tech Mono";
     ctx.fillText("TARGET", tgt.x + 8, tgt.y + 3);
 
-  }, [packets, mobile]);
+  }, [packets, mapLoaded, mobile]);
 
   const attackerCount = packets.filter(p => p.label !== "NORMAL").slice(0, 25).length;
 
@@ -283,10 +269,15 @@ function WorldMapCard({ packets }: { packets: Packet[] }) {
         <canvas
           ref={canvasRef}
           width={800}
-          height={mobile ? 200 : 340}
-          style={{ width: "100%", height: mobile ? 200 : 340, display: "block" }}
+          height={mobile ? 200 : 360}
+          style={{ width: "100%", height: mobile ? 200 : 360, display: "block" }}
         />
-        {attackerCount === 0 && (
+        {!mapLoaded && (
+          <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, color: "rgba(200,220,255,0.18)", fontFamily: "Share Tech Mono" }}>
+            LOADING MAP...
+          </div>
+        )}
+        {mapLoaded && attackerCount === 0 && (
           <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, color: "rgba(200,220,255,0.18)", fontFamily: "Share Tech Mono", letterSpacing: "0.1em" }}>
             AWAITING THREAT DATA...
           </div>
