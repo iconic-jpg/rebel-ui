@@ -649,6 +649,9 @@ export default function RebelDashboard() {
           </div>
         </div>
 
+        <WorldMapCard packets={packets} />
+
+
         {/* LIVE FEED */}
         <div className="panel">
           <div className="ph">
