@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 
-const API = import.meta.env.VITE_API_URL;
+const API = "https://r3bel.onrender.com"
 
 export default function Signup() {
   const navigate = useNavigate();
