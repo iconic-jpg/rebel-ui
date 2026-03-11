@@ -358,26 +358,21 @@ function IPEnrichModal({ ip: initIp, onClose }: { ip: string; onClose: () => voi
 
 function parseMessage(text: string): { type: string; content: string; lang?: string }[] {
   const parts: { type: string; content: string; lang?: string }[] = [];
+  const normalized = text.replace(/\r\n/g, "\n");
   const codeBlockRegex = /```([^\s`]+)?\s*\n?([\s\S]*?)```/g;
-  //       broader lang capture: ^^^^^^^^^
-  //       matches c++, c#, f#, etc.
   let last = 0;
   let match: RegExpExecArray | null;
 
-  while ((match = codeBlockRegex.exec(text)) !== null) {
+  while ((match = codeBlockRegex.exec(normalized)) !== null) {
     if (match.index > last) {
-      parts.push({ type: "text", content: text.slice(last, match.index) });
+      parts.push({ type: "text", content: normalized.slice(last, match.index) });
     }
-    parts.push({
-      type: "code",
-      lang: match[1] || "code",
-      content: match[2].trim(),
-    });
+    parts.push({ type: "code", lang: match[1] || "code", content: match[2].trim() });
     last = match.index + match[0].length;
   }
 
-  if (last < text.length) {
-    parts.push({ type: "text", content: text.slice(last) });
+  if (last < normalized.length) {
+    parts.push({ type: "text", content: normalized.slice(last) });
   }
 
   return parts;
@@ -414,19 +409,28 @@ function MessageContent({ text, fontSize = 12 }: { text: string; fontSize?: numb
           <CodeBlock key={i} lang={part.lang!} content={part.content} />
         ) : (
           <p key={i} style={{ margin: 0, fontFamily: "Share Tech Mono", fontSize, color: "rgba(200,220,255,0.85)", lineHeight: 1.7, whiteSpace: "pre-wrap" }}>
-            {part.content.split(/(`[^`]+`)/g).map((s: string, j: number) =>
-              s.startsWith("`") && s.endsWith("`") ? (
-                <code key={j} style={{ background: "rgba(59,130,246,0.15)", border: "1px solid rgba(59,130,246,0.2)", borderRadius: 3, padding: "1px 5px", fontFamily: "Share Tech Mono", fontSize: fontSize - 1, color: "#3b82f6" }}>
-                  {s.slice(1, -1)}
-                </code>
-              ) : s
-            )}
+            {part.content.split(/(\*\*[^*]+\*\*|`[^`]+`)/g).map((s: string, j: number) => {
+              if (s.startsWith("**") && s.endsWith("**"))
+                return (
+                  <strong key={j} style={{ color: "rgba(200,220,255,1)", fontWeight: 700 }}>
+                    {s.slice(2, -2)}
+                  </strong>
+                );
+              if (s.startsWith("`") && s.endsWith("`"))
+                return (
+                  <code key={j} style={{ background: "rgba(59,130,246,0.15)", border: "1px solid rgba(59,130,246,0.2)", borderRadius: 3, padding: "1px 5px", fontFamily: "Share Tech Mono", fontSize: fontSize - 1, color: "#3b82f6" }}>
+                    {s.slice(1, -1)}
+                  </code>
+                );
+              return s;
+            })}
           </p>
         )
       )}
     </div>
   );
 }
+
 
 // ─── CHAT PANEL ───────────────────────────────────────────────────────────────
 function ChatPanel({ onClose }: { onClose: () => void }) {
