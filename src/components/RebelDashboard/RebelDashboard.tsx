@@ -356,6 +356,103 @@ function IPEnrichModal({ ip: initIp, onClose }: { ip: string; onClose: () => voi
   );
 }
 
+function parseMessage(text) {
+  const parts = [];
+  const codeBlockRegex = /```(\w+)?\n?([\s\S]*?)```/g;
+  let last = 0;
+  let match;
+
+  while ((match = codeBlockRegex.exec(text)) !== null) {
+    if (match.index > last) {
+      parts.push({ type: "text", content: text.slice(last, match.index) });
+    }
+    parts.push({ type: "code", lang: match[1] || "text", content: match[2].trim() });
+    last = match.index + match[0].length;
+  }
+  if (last < text.length) {
+    parts.push({ type: "text", content: text.slice(last) });
+  }
+  return parts;
+}
+
+function CodeBlock({ lang, content }) {
+  const [copied, setCopied] = useState(false);
+  const copy = () => {
+    navigator.clipboard.writeText(content);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+  return (
+    <div style={{
+      background: "#0d1117",
+      border: "1px solid rgba(59,130,246,0.2)",
+      borderRadius: 4,
+      margin: "6px 0",
+      overflow: "hidden"
+    }}>
+      <div style={{
+        display: "flex", justifyContent: "space-between", alignItems: "center",
+        padding: "4px 10px",
+        background: "rgba(59,130,246,0.08)",
+        borderBottom: "1px solid rgba(59,130,246,0.12)"
+      }}>
+        <span style={{ fontSize: 9, color: "#3b82f6", fontFamily: "'Orbitron',monospace", letterSpacing: "0.1em" }}>
+          {lang.toUpperCase()}
+        </span>
+        <button onClick={copy} style={{
+          background: "none", border: "none", cursor: "pointer",
+          fontSize: 9, color: copied ? "#22c55e" : "rgba(200,220,255,0.4)",
+          fontFamily: "Share Tech Mono", letterSpacing: "0.1em"
+        }}>
+          {copied ? "✓ COPIED" : "COPY"}
+        </button>
+      </div>
+      <pre style={{
+        margin: 0, padding: "10px 12px",
+        fontFamily: "Share Tech Mono", fontSize: 11,
+        color: "rgba(200,220,255,0.85)", lineHeight: 1.6,
+        overflowX: "auto", whiteSpace: "pre"
+      }}>
+        {content}
+      </pre>
+    </div>
+  );
+}
+
+function MessageContent({ text }) {
+  const parts = parseMessage(text);
+  return (
+    <div>
+      {parts.map((part, i) =>
+        part.type === "code" ? (
+          <CodeBlock key={i} lang={part.lang} content={part.content} />
+        ) : (
+          <p key={i} style={{
+            margin: 0, fontFamily: "Share Tech Mono",
+            fontSize: 12, color: "rgba(200,220,255,0.85)",
+            lineHeight: 1.7, whiteSpace: "pre-wrap"
+          }}>
+            {part.content.split(/(`[^`]+`)/g).map((s, j) =>
+              s.startsWith("`") && s.endsWith("`") ? (
+                <code key={j} style={{
+                  background: "rgba(59,130,246,0.15)",
+                  border: "1px solid rgba(59,130,246,0.2)",
+                  borderRadius: 3, padding: "1px 5px",
+                  fontFamily: "Share Tech Mono", fontSize: 11,
+                  color: "#3b82f6"
+                }}>
+                  {s.slice(1, -1)}
+                </code>
+              ) : s
+            )}
+          </p>
+        )
+      )}
+    </div>
+  );
+}
+
+
 // ─── CHAT PANEL ───────────────────────────────────────────────────────────────
 function ChatPanel({ onClose }: { onClose: () => void }) {
   const [msgs, setMsgs] = useState<{ role: string; text: string }[]>([{ role: "assistant", text: "REBEL ONLINE. Threat intelligence core active. Query the system." }]);
@@ -388,7 +485,7 @@ function ChatPanel({ onClose }: { onClose: () => void }) {
           {msgs.map((m, i) => (
             <div key={i} style={{ alignSelf: m.role === "user" ? "flex-end" : "flex-start", maxWidth: "88%", background: m.role === "user" ? "rgba(59,130,246,0.12)" : "rgba(255,255,255,0.04)", border: `1px solid ${m.role === "user" ? "rgba(59,130,246,0.3)" : "rgba(255,255,255,0.06)"}`, borderRadius: m.role === "user" ? "14px 14px 2px 14px" : "2px 14px 14px 14px", padding: "10px 14px" }}>
               {m.role === "assistant" && <div style={{ fontSize: 8, fontFamily: "'Orbitron',monospace", color: "#3b82f6", letterSpacing: "0.2em", marginBottom: 5 }}>REBEL</div>}
-              <p style={{ margin: 0, fontFamily: "Share Tech Mono", fontSize: 14, color: "rgba(200,220,255,0.85)", lineHeight: 1.7, whiteSpace: "pre-wrap" }}>{m.text}</p>
+              <MessageContent text={m.text} fontSize={14} />
             </div>
           ))}
           {loading && <div style={{ display: "flex", gap: 5, padding: "10px 14px" }}>{[0, 1, 2].map(i => <span key={i} style={{ width: 7, height: 7, borderRadius: "50%", background: "#3b82f6", animation: `bounce 1s ease infinite ${i * 0.15}s` }} />)}</div>}
@@ -412,7 +509,7 @@ function ChatPanel({ onClose }: { onClose: () => void }) {
         {msgs.map((m, i) => (
           <div key={i} style={{ alignSelf: m.role === "user" ? "flex-end" : "flex-start", maxWidth: "88%", background: m.role === "user" ? "rgba(59,130,246,0.1)" : "rgba(255,255,255,0.035)", border: `1px solid ${m.role === "user" ? "rgba(59,130,246,0.28)" : "rgba(255,255,255,0.055)"}`, borderRadius: m.role === "user" ? "10px 10px 2px 10px" : "2px 10px 10px 10px", padding: "8px 12px" }}>
             {m.role === "assistant" && <div style={{ fontSize: 7, fontFamily: "'Orbitron',monospace", color: "#3b82f6", letterSpacing: "0.2em", marginBottom: 4 }}>REBEL</div>}
-            <p style={{ margin: 0, fontFamily: "Share Tech Mono", fontSize: 12, color: "rgba(200,220,255,0.85)", lineHeight: 1.7, whiteSpace: "pre-wrap" }}>{m.text}</p>
+            <MessageContent text={m.text} fontSize={12} />
           </div>
         ))}
         {loading && <div style={{ display: "flex", gap: 4, padding: "8px 12px" }}>{[0, 1, 2].map(i => <span key={i} style={{ width: 5, height: 5, borderRadius: "50%", background: "#3b82f6", animation: `bounce 1s ease infinite ${i * 0.15}s` }} />)}</div>}
