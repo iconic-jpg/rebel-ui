@@ -356,30 +356,41 @@ function IPEnrichModal({ ip: initIp, onClose }: { ip: string; onClose: () => voi
   );
 }
 
+function normalizeCodeFences(text: string): string {
+  let normalized = text
+    .replace(/\r\n/g, "\n")
+    .replace(/ {0,}```/g, "\n```")
+    .replace(/```([^\s`]+) /g, "```$1\n");
+
+  const fences = normalized.match(/```/g) || [];
+  if (fences.length % 2 !== 0) {
+    normalized += "\n```";
+  }
+
+  return normalized;
+}
+
 function parseMessage(text: string): { type: string; content: string; lang?: string }[] {
   const parts: { type: string; content: string; lang?: string }[] = [];
-  const normalized = text.replace(/\r\n/g, "\n");
-  // Ensure code fences always start on their own line
-  const cleaned = normalized.replace(/([^\n])(\n?```)/g, "$1\n```");
+  const normalized = normalizeCodeFences(text);
   const codeBlockRegex = /```([^\s`]+)?\s*\n([\s\S]*?)```/g;
   let last = 0;
   let match: RegExpExecArray | null;
 
-  while ((match = codeBlockRegex.exec(cleaned)) !== null) {
+  while ((match = codeBlockRegex.exec(normalized)) !== null) {
     if (match.index > last) {
-      parts.push({ type: "text", content: cleaned.slice(last, match.index) });
+      parts.push({ type: "text", content: normalized.slice(last, match.index) });
     }
     parts.push({ type: "code", lang: match[1] || "code", content: match[2].trim() });
     last = match.index + match[0].length;
   }
 
-  if (last < cleaned.length) {
-    parts.push({ type: "text", content: cleaned.slice(last) });
+  if (last < normalized.length) {
+    parts.push({ type: "text", content: normalized.slice(last) });
   }
 
   return parts;
 }
-
 
 function CodeBlock({ lang, content }: { lang: string; content: string }) {
   const [copied, setCopied] = useState(false);
@@ -433,6 +444,7 @@ function MessageContent({ text, fontSize = 12 }: { text: string; fontSize?: numb
     </div>
   );
 }
+
 
 // ─── CHAT PANEL ───────────────────────────────────────────────────────────────
 function ChatPanel({ onClose }: { onClose: () => void }) {
