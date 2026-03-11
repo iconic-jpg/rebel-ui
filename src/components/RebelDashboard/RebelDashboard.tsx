@@ -356,26 +356,21 @@ function IPEnrichModal({ ip: initIp, onClose }: { ip: string; onClose: () => voi
   );
 }
 
-function parseMessage(text) {
-  const parts = [];
+function parseMessage(text: string): { type: string; content: string; lang?: string }[] {
+  const parts: { type: string; content: string; lang?: string }[] = [];
   const codeBlockRegex = /```(\w+)?\n?([\s\S]*?)```/g;
   let last = 0;
-  let match;
-
+  let match: RegExpExecArray | null;
   while ((match = codeBlockRegex.exec(text)) !== null) {
-    if (match.index > last) {
-      parts.push({ type: "text", content: text.slice(last, match.index) });
-    }
-    parts.push({ type: "code", lang: match[1] || "text", content: match[2].trim() });
+    if (match.index > last) parts.push({ type: "text", content: text.slice(last, match.index) });
+    parts.push({ type: "code", lang: match[1] || "code", content: match[2].trim() });
     last = match.index + match[0].length;
   }
-  if (last < text.length) {
-    parts.push({ type: "text", content: text.slice(last) });
-  }
+  if (last < text.length) parts.push({ type: "text", content: text.slice(last) });
   return parts;
 }
 
-function CodeBlock({ lang, content }) {
+function CodeBlock({ lang, content }: { lang: string; content: string }) {
   const [copied, setCopied] = useState(false);
   const copy = () => {
     navigator.clipboard.writeText(content);
@@ -383,64 +378,32 @@ function CodeBlock({ lang, content }) {
     setTimeout(() => setCopied(false), 2000);
   };
   return (
-    <div style={{
-      background: "#0d1117",
-      border: "1px solid rgba(59,130,246,0.2)",
-      borderRadius: 4,
-      margin: "6px 0",
-      overflow: "hidden"
-    }}>
-      <div style={{
-        display: "flex", justifyContent: "space-between", alignItems: "center",
-        padding: "4px 10px",
-        background: "rgba(59,130,246,0.08)",
-        borderBottom: "1px solid rgba(59,130,246,0.12)"
-      }}>
-        <span style={{ fontSize: 9, color: "#3b82f6", fontFamily: "'Orbitron',monospace", letterSpacing: "0.1em" }}>
-          {lang.toUpperCase()}
-        </span>
-        <button onClick={copy} style={{
-          background: "none", border: "none", cursor: "pointer",
-          fontSize: 9, color: copied ? "#22c55e" : "rgba(200,220,255,0.4)",
-          fontFamily: "Share Tech Mono", letterSpacing: "0.1em"
-        }}>
+    <div style={{ background: "#060a10", border: "1px solid rgba(59,130,246,0.25)", borderRadius: 4, margin: "6px 0", overflow: "hidden" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "4px 10px", background: "rgba(59,130,246,0.08)", borderBottom: "1px solid rgba(59,130,246,0.15)" }}>
+        <span style={{ fontSize: 9, color: "#3b82f6", fontFamily: "'Orbitron',monospace", letterSpacing: "0.1em" }}>{lang.toUpperCase()}</span>
+        <button onClick={copy} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 9, color: copied ? "#22c55e" : "rgba(200,220,255,0.4)", fontFamily: "Share Tech Mono", letterSpacing: "0.1em" }}>
           {copied ? "✓ COPIED" : "COPY"}
         </button>
       </div>
-      <pre style={{
-        margin: 0, padding: "10px 12px",
-        fontFamily: "Share Tech Mono", fontSize: 11,
-        color: "rgba(200,220,255,0.85)", lineHeight: 1.6,
-        overflowX: "auto", whiteSpace: "pre"
-      }}>
+      <pre style={{ margin: 0, padding: "10px 12px", fontFamily: "Share Tech Mono", fontSize: 11, color: "rgba(200,220,255,0.85)", lineHeight: 1.6, overflowX: "auto", whiteSpace: "pre" }}>
         {content}
       </pre>
     </div>
   );
 }
 
-function MessageContent({ text }) {
+function MessageContent({ text, fontSize = 12 }: { text: string; fontSize?: number }) {
   const parts = parseMessage(text);
   return (
     <div>
       {parts.map((part, i) =>
         part.type === "code" ? (
-          <CodeBlock key={i} lang={part.lang} content={part.content} />
+          <CodeBlock key={i} lang={part.lang!} content={part.content} />
         ) : (
-          <p key={i} style={{
-            margin: 0, fontFamily: "Share Tech Mono",
-            fontSize: 12, color: "rgba(200,220,255,0.85)",
-            lineHeight: 1.7, whiteSpace: "pre-wrap"
-          }}>
-            {part.content.split(/(`[^`]+`)/g).map((s, j) =>
+          <p key={i} style={{ margin: 0, fontFamily: "Share Tech Mono", fontSize, color: "rgba(200,220,255,0.85)", lineHeight: 1.7, whiteSpace: "pre-wrap" }}>
+            {part.content.split(/(`[^`]+`)/g).map((s: string, j: number) =>
               s.startsWith("`") && s.endsWith("`") ? (
-                <code key={j} style={{
-                  background: "rgba(59,130,246,0.15)",
-                  border: "1px solid rgba(59,130,246,0.2)",
-                  borderRadius: 3, padding: "1px 5px",
-                  fontFamily: "Share Tech Mono", fontSize: 11,
-                  color: "#3b82f6"
-                }}>
+                <code key={j} style={{ background: "rgba(59,130,246,0.15)", border: "1px solid rgba(59,130,246,0.2)", borderRadius: 3, padding: "1px 5px", fontFamily: "Share Tech Mono", fontSize: fontSize - 1, color: "#3b82f6" }}>
                   {s.slice(1, -1)}
                 </code>
               ) : s
@@ -451,7 +414,6 @@ function MessageContent({ text }) {
     </div>
   );
 }
-
 
 // ─── CHAT PANEL ───────────────────────────────────────────────────────────────
 function ChatPanel({ onClose }: { onClose: () => void }) {
