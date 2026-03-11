@@ -358,7 +358,9 @@ function IPEnrichModal({ ip: initIp, onClose }: { ip: string; onClose: () => voi
 
 function parseMessage(text: string): { type: string; content: string; lang?: string }[] {
   const parts: { type: string; content: string; lang?: string }[] = [];
-  const codeBlockRegex = /```(\w+)?\s*\n?([\s\S]*?)```/g;
+  const codeBlockRegex = /```([^\s`]+)?\s*\n?([\s\S]*?)```/g;
+  //       broader lang capture: ^^^^^^^^^
+  //       matches c++, c#, f#, etc.
   let last = 0;
   let match: RegExpExecArray | null;
 
@@ -366,7 +368,11 @@ function parseMessage(text: string): { type: string; content: string; lang?: str
     if (match.index > last) {
       parts.push({ type: "text", content: text.slice(last, match.index) });
     }
-    parts.push({ type: "code", lang: match[1] || "code", content: match[2].trim() });
+    parts.push({
+      type: "code",
+      lang: match[1] || "code",
+      content: match[2].trim(),
+    });
     last = match.index + match[0].length;
   }
 
@@ -376,7 +382,6 @@ function parseMessage(text: string): { type: string; content: string; lang?: str
 
   return parts;
 }
-
 
 function CodeBlock({ lang, content }: { lang: string; content: string }) {
   const [copied, setCopied] = useState(false);
