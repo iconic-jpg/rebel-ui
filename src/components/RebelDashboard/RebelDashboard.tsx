@@ -359,21 +359,27 @@ function IPEnrichModal({ ip: initIp, onClose }: { ip: string; onClose: () => voi
 function parseMessage(text: string): { type: string; content: string; lang?: string }[] {
   const parts: { type: string; content: string; lang?: string }[] = [];
   const normalized = text.replace(/\r\n/g, "\n");
-  const codeBlockRegex = /```([^\s`]+)?\s*\n?([\s\S]*?)```/g;
+  // Ensure code fences always start on their own line
+  const cleaned = normalized.replace(/([^\n])(\n?```)/g, "$1\n```");
+  const codeBlockRegex = /```([^\s`]+)?\s*\n([\s\S]*?)```/g;
   let last = 0;
   let match: RegExpExecArray | null;
-  while ((match = codeBlockRegex.exec(normalized)) !== null) {
+
+  while ((match = codeBlockRegex.exec(cleaned)) !== null) {
     if (match.index > last) {
-      parts.push({ type: "text", content: normalized.slice(last, match.index) });
+      parts.push({ type: "text", content: cleaned.slice(last, match.index) });
     }
     parts.push({ type: "code", lang: match[1] || "code", content: match[2].trim() });
     last = match.index + match[0].length;
   }
-  if (last < normalized.length) {
-    parts.push({ type: "text", content: normalized.slice(last) });
+
+  if (last < cleaned.length) {
+    parts.push({ type: "text", content: cleaned.slice(last) });
   }
+
   return parts;
 }
+
 
 function CodeBlock({ lang, content }: { lang: string; content: string }) {
   const [copied, setCopied] = useState(false);
