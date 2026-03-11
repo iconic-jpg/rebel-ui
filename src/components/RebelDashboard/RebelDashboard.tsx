@@ -358,7 +358,7 @@ function IPEnrichModal({ ip: initIp, onClose }: { ip: string; onClose: () => voi
 
 function parseMessage(text: string): { type: string; content: string; lang?: string }[] {
   const parts: { type: string; content: string; lang?: string }[] = [];
-  const codeBlockRegex = /```(\w+)?\n?([\s\S]*?)```/g;
+  const codeBlockRegex = /```(\w+)?\s*\n?([\s\S]*?)```/g;  // added \s* to handle spaces after lang tag
   let last = 0;
   let match: RegExpExecArray | null;
   while ((match = codeBlockRegex.exec(text)) !== null) {
