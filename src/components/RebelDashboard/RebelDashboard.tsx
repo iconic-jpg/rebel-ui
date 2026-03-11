@@ -362,7 +362,6 @@ function parseMessage(text: string): { type: string; content: string; lang?: str
   const codeBlockRegex = /```([^\s`]+)?\s*\n?([\s\S]*?)```/g;
   let last = 0;
   let match: RegExpExecArray | null;
-
   while ((match = codeBlockRegex.exec(normalized)) !== null) {
     if (match.index > last) {
       parts.push({ type: "text", content: normalized.slice(last, match.index) });
@@ -370,11 +369,9 @@ function parseMessage(text: string): { type: string; content: string; lang?: str
     parts.push({ type: "code", lang: match[1] || "code", content: match[2].trim() });
     last = match.index + match[0].length;
   }
-
   if (last < normalized.length) {
     parts.push({ type: "text", content: normalized.slice(last) });
   }
-
   return parts;
 }
 
@@ -430,7 +427,6 @@ function MessageContent({ text, fontSize = 12 }: { text: string; fontSize?: numb
     </div>
   );
 }
-
 
 // ─── CHAT PANEL ───────────────────────────────────────────────────────────────
 function ChatPanel({ onClose }: { onClose: () => void }) {
