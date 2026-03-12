@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 
 const API = "https://r3bel.onrender.com";
@@ -131,9 +131,7 @@ const styles = `
 `;
 
 declare global {
-  interface Window {
-    google?: any;
-  }
+  interface Window { google?: any; }
 }
 
 export default function Signup() {
@@ -144,20 +142,7 @@ export default function Signup() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
-
-  useEffect(() => {
-    const script = document.createElement("script");
-    script.src = "https://accounts.google.com/gsi/client";
-    script.async = true;
-    script.onload = () => {
-      window.google?.accounts.id.initialize({
-        client_id: import.meta.env.VITE_GOOGLE_CLIENT_ID,
-        callback: handleGoogleResponse,
-      });
-    };
-    document.body.appendChild(script);
-    return () => { document.body.removeChild(script); };
-  }, []);
+  const googleInitialized = useRef(false);
 
   const handleGoogleResponse = async (response: { credential: string }) => {
     setGoogleLoading(true);
@@ -183,8 +168,48 @@ export default function Signup() {
     }
   };
 
+  useEffect(() => {
+    if (googleInitialized.current) return;
+
+    const existing = document.getElementById("gsi-script");
+    if (existing) {
+      // Script already in DOM (e.g. Login page loaded it) — just initialize
+      window.google?.accounts.id.initialize({
+        client_id: import.meta.env.VITE_GOOGLE_CLIENT_ID,
+        callback: handleGoogleResponse,
+        use_fedcm_for_prompt: false,
+      });
+      googleInitialized.current = true;
+      return;
+    }
+
+    const script = document.createElement("script");
+    script.id = "gsi-script";
+    script.src = "https://accounts.google.com/gsi/client";
+    script.async = true;
+    script.defer = true;
+    script.onload = () => {
+      window.google?.accounts.id.initialize({
+        client_id: import.meta.env.VITE_GOOGLE_CLIENT_ID,
+        callback: handleGoogleResponse,
+        use_fedcm_for_prompt: false,
+      });
+      googleInitialized.current = true;
+    };
+    document.head.appendChild(script);
+
+    return () => {
+      window.google?.accounts.id.cancel();
+    };
+  }, []);
+
   const triggerGoogle = () => {
-    window.google?.accounts.id.prompt();
+    if (!googleInitialized.current) return;
+    window.google?.accounts.id.prompt((notification: any) => {
+      if (notification.isSkippedMoment?.() || notification.isDismissedMoment?.()) {
+        setError("Google sign-in was dismissed. Please try again.");
+      }
+    });
   };
 
   const handleSignup = async (e: React.FormEvent<HTMLFormElement>) => {
