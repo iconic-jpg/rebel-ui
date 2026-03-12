@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 
 const API = "https://r3bel.onrender.com";
@@ -214,6 +214,25 @@ const styles = `
   .signup-link a:hover {
     color: rgba(0, 255, 170, 0.9);
   }
+
+  .checking-root {
+    min-height: 100vh;
+    background: #020408;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .checking-text {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.3em;
+    color: rgba(0, 255, 170, 0.4);
+    animation: blink 1.2s ease-in-out infinite;
+  }
+  @keyframes blink {
+    0%, 100% { opacity: 0.4; }
+    50%       { opacity: 1; }
+  }
 `;
 
 export default function Login() {
@@ -222,6 +241,38 @@ export default function Login() {
   const [password, setPassword] = useState<string>("");
   const [error, setError] = useState<string>("");
   const [loading, setLoading] = useState<boolean>(false);
+  const [checkingSession, setCheckingSession] = useState<boolean>(true);
+
+  // ── Auto-login: silently restore session from stored refresh token ──────
+  useEffect(() => {
+    const refresh = localStorage.getItem("refresh");
+    if (!refresh) {
+      setCheckingSession(false);
+      return;
+    }
+
+    fetch(`${API}/api/token/refresh/`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refresh }),
+    })
+      .then((res) => {
+        if (!res.ok) throw new Error("expired");
+        return res.json();
+      })
+      .then((data) => {
+        localStorage.setItem("access", data.access);
+        // Some backends rotate the refresh token — store it if returned
+        if (data.refresh) localStorage.setItem("refresh", data.refresh);
+        navigate("/", { replace: true });
+      })
+      .catch(() => {
+        // Token invalid or expired — clear and show login form
+        localStorage.removeItem("access");
+        localStorage.removeItem("refresh");
+        setCheckingSession(false);
+      });
+  }, [navigate]);
 
   const handleLogin = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -239,7 +290,6 @@ export default function Login() {
 
       if (!response.ok) {
         setError(data.detail || "Invalid credentials");
-        setLoading(false);
         return;
       }
 
@@ -252,6 +302,18 @@ export default function Login() {
       setLoading(false);
     }
   };
+
+  // Blank screen while we silently check for an existing session
+  if (checkingSession) {
+    return (
+      <>
+        <style>{styles}</style>
+        <div className="checking-root">
+          <span className="checking-text">// verifying session...</span>
+        </div>
+      </>
+    );
+  }
 
   return (
     <>
@@ -277,6 +339,7 @@ export default function Login() {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
+                autoComplete="email"
               />
             </div>
 
@@ -289,6 +352,7 @@ export default function Login() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
+                autoComplete="current-password"
               />
             </div>
 
