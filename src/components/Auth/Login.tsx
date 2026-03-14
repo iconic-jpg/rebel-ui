@@ -280,11 +280,11 @@ export default function Login() {
     setLoading(true);
 
     try {
-      const response = await fetch(`${API}/api/token/`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username: email, password }),
-      });
+      const response = await fetch(`${API}/api/login`, {  // was /api/token/
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email, password }),  // FastAPI expects email not username
+        });
 
       const data = await response.json();
 

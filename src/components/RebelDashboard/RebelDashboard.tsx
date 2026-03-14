@@ -50,18 +50,45 @@ function ScanModal({ onClose }: { onClose: () => void }) {
   const [tab, setTab] = useState("url");
   const mobile = useMobile();
 
-  const runScan = async () => {
-    if (!url.trim()) return;
-    setLoading(true); setResult(null);
-    try {
-      const res = await fetch(`${API}${tab === "url" ? "/scan-url" : "/scan-crypto"}`, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: url.trim() }),
-      });
-      setResult(await res.json());
-    } catch (e) { setResult({ error: e instanceof Error ? e.message : "Unknown error" }); }
-    setLoading(false);
-  };
+  const DJANGO_API = "https://thriftstore-backend.onrender.com";
+
+const runScan = async () => {
+  if (!url.trim()) return;
+  setLoading(true); setResult(null);
+  try {
+    const token = localStorage.getItem("access");
+
+    // Run the scan on FastAPI
+    const res = await fetch(`${API}${tab === "url" ? "/scan-url" : "/scan-crypto"}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url: url.trim() }),
+    });
+    const data = await res.json();
+    setResult(data);
+
+    // Save to Django backend
+    if (token && data.score !== undefined) {
+      fetch(`${DJANGO_API}/api/scans/log/`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          url: url.trim(),
+          domain: data.domain || "",
+          risk_score: data.score,
+          level: data.level || "Low",
+        }),
+      }).catch(() => {}); // silent fail — don't block UI
+    }
+
+  } catch (e) {
+    setResult({ error: e instanceof Error ? e.message : "Unknown error" });
+  }
+  setLoading(false);
+};
 
   const sc = (s: number) => s >= 70 ? "#22c55e" : s >= 40 ? "#eab308" : "#ef4444";
 
