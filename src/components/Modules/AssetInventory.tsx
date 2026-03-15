@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import {
   API, T, S, GRID, Panel, PanelHeader, MetricCard, Badge, ProgBar,
   Table, TR, TD, Pulse, MOCK_ASSETS,
-} from "./shared";
+} from "./shared.js";
 
 type Asset = typeof MOCK_ASSETS[0];
 
@@ -200,7 +200,7 @@ export default function AssetInventoryPage() {
         <Panel>
           <PanelHeader left="CRYPTO & SECURITY OVERVIEW" />
           <Table cols={["ASSET","KEY LEN","CIPHER SUITE","TLS","CA"]}>
-            {MOCK_ASSETS.map((a, i) => (
+            {MOCK_ASSETS.map((a: any, i: number) => (
               <TR key={i}>
                 <TD style={{ fontSize:10, color:T.blue }}>{a.name}</TD>
                 <TD style={{ fontSize:10, color: keyColor(a.keylen) }}>{a.keylen}</TD>

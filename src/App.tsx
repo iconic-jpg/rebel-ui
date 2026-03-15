@@ -3,11 +3,11 @@ import { HashRouter as Router, Routes, Route } from "react-router-dom";
 import RebelDashboard from "./components/RebelDashboard/RebelDashboard.js";
 import Login from "./components/Auth/Login.js";
 import Signup from "./components/Auth/Signup.js";
-import AppShell from "./components/Shell/AppShell";
-import AssetInventoryPage from "./components/Modules/AssetInventory";
-import AssetDiscoveryPage from "./components/Modules/AssetDiscovery";
-import CBOMPage from "./components/Modules/CBOM";
-import PQCPosturePage from "./components/Modules/PQCPosture";
+import AppShell from "./components/Shell/AppShell.js";
+import AssetInventoryPage from "./components/Modules/AssetInventory.js";
+import AssetDiscoveryPage from "./components/Modules/AssetDiscovery.js";
+import CBOMPage from "./components/Modules/CBOM.js";
+import PQCPosturePage from "./components/Modules/PQCPosture.js";
 
 export default function App() {
   return (

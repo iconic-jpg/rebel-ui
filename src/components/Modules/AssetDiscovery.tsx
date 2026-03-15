@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import {
   T, S, GRID, Panel, PanelHeader, MetricCard, Badge, SubTabs,
   Table, TR, TD, Pulse, MOCK_DOMAINS, MOCK_SSL, MOCK_IPS, MOCK_SOFTWARE,
-} from "./shared";
+} from "./shared.js";
 
 type DiscTab = "domains"|"ssl"|"ips"|"software";
 type StatusFilter = "new"|"fp"|"confirmed"|"all";
@@ -81,7 +81,7 @@ export default function AssetDiscoveryPage() {
         (!query || d.domain.includes(query)));
       return (
         <Table cols={["DETECTION DATE","DOMAIN NAME","REGISTRATION DATE","REGISTRAR","COMPANY","STATUS"]}>
-          {data.map((d, i) => (
+          {data.map((d: any, i: number) => (
             <TR key={i}>
               <TD style={{ fontSize:10, color:T.text3 }}>{d.date}</TD>
               <TD style={{ fontSize:10, color:T.blue }}>{d.domain}</TD>
@@ -98,7 +98,7 @@ export default function AssetDiscoveryPage() {
       const data = MOCK_SSL.filter(d => filter(d.status));
       return (
         <Table cols={["DETECTION DATE","SSL SHA FINGERPRINT","VALID FROM","COMMON NAME","COMPANY","CA","STATUS"]}>
-          {data.map((d, i) => (
+          {data.map((d: any, i: number) => (
             <TR key={i}>
               <TD style={{ fontSize:10, color:T.text3 }}>{d.date}</TD>
               <TD style={{ fontSize:9, color:T.text3, maxWidth:120, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{d.sha}</TD>
@@ -116,7 +116,7 @@ export default function AssetDiscoveryPage() {
       const data = MOCK_IPS.filter(d => filter(d.status));
       return (
         <Table cols={["DETECTION DATE","IP ADDRESS","PORTS","SUBNET","ASN","NETNAME","LOCATION","COMPANY","STATUS"]}>
-          {data.map((d, i) => (
+          {data.map((d: any, i: number) => (
             <TR key={i}>
               <TD style={{ fontSize:10, color:T.text3 }}>{d.date}</TD>
               <TD style={{ fontSize:10, color:T.blue }}>{d.ip}</TD>
@@ -136,7 +136,7 @@ export default function AssetDiscoveryPage() {
     const data = MOCK_SOFTWARE.filter(d => filter(d.status));
     return (
       <Table cols={["DETECTION DATE","PRODUCT","VERSION","TYPE","PORT","HOST","COMPANY","STATUS"]}>
-        {data.map((d, i) => (
+        {data.map((d: any, i: number) => (
           <TR key={i}>
             <TD style={{ fontSize:10, color:T.text3 }}>{d.date}</TD>
             <TD style={{ fontSize:10, color:T.cyan }}>{d.product}</TD>
@@ -201,7 +201,9 @@ export default function AssetDiscoveryPage() {
               { id:"software", label:`SOFTWARE (52)` },
             ]}
             active={tab}
-            onChange={v => setTab(v as DiscTab)}
+
+            onChange={(v: string) => setTab(v as DiscTab)}
+
           />
           <SubTabs
             tabs={[
@@ -211,7 +213,7 @@ export default function AssetDiscoveryPage() {
               { id:"all",       label:`ALL (${STATUS_COUNTS[tab].all})` },
             ]}
             active={status}
-            onChange={v => setStatus(v as StatusFilter)}
+            onChange={(v: string) => setStatus(v as StatusFilter)}
           />
         </div>
         <div style={{ maxHeight: 340, overflowY: "auto" }}>

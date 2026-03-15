@@ -2,7 +2,7 @@ import React, { useEffect, useRef } from "react";
 import {
   T, S, GRID, Panel, PanelHeader, MetricCard, Badge, ProgBar,
   Table, TR, TD, MOCK_CBOM,
-} from "./shared";
+} from "./shared.js";
 
 const CIPHERS = [
   { name:"ECDHE-RSA-AES256-GGM-SHA384",    count:29, color:T.green  },
@@ -70,7 +70,7 @@ export default function CBOMPage() {
     const total = data.reduce((a, d) => a + d.val, 0);
     let angle = -Math.PI / 2;
     ctx.clearRect(0, 0, W, H);
-    data.forEach(d => {
+    data.forEach((d: any) => {
       const sweep = 2 * Math.PI * (d.val / total) - 0.04;
       ctx.beginPath(); ctx.moveTo(cx, cy); ctx.arc(cx, cy, r, angle, angle + sweep);
       ctx.fillStyle = d.color + "33"; ctx.fill();
@@ -94,7 +94,8 @@ export default function CBOMPage() {
   function exportCSV() {
     const rows = [
       ["Application","Key Length","Cipher Suite","TLS Version","CA","Status","PQC Ready"],
-      ...MOCK_CBOM.map(d => [d.app, d.keylen, d.cipher, d.tls, d.ca, d.status, d.pqc?"Yes":"No"])
+      ...MOCK_CBOM.map((d: any, i: number) => [d.app, d.keylen, d.cipher, d.tls, d.ca, d.status, d.pqc?"Yes":"No"])
+
     ];
     const csv = rows.map(r => r.join(",")).join("\n");
     const blob = new Blob([csv], { type:"text/csv" });

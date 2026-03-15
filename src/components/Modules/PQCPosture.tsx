@@ -2,7 +2,7 @@ import React from "react";
 import {
   T, S, GRID, Panel, PanelHeader, MetricCard, Badge, ProgBar,
   Table, TR, TD, MOCK_PQC_ASSETS,
-} from "./shared";
+} from "./shared.js";
 
 const RECS = [
   { icon:"⚠", color:T.yellow, text:"Upgrade to TLS 1.3 with PQC"         },
@@ -164,7 +164,7 @@ export default function PQCPosturePage() {
           right={<span style={{ fontSize:8, color:T.text3, fontFamily:"'Orbitron',monospace" }}>CRITICAL APPS: 8</span>}
         />
         <Table cols={["ASSET NAME","IP ADDRESS","PQC SUPPORT","TLS","SCORE","STATUS","OWNER"]}>
-          {MOCK_PQC_ASSETS.map((a, i) => (
+        {MOCK_PQC_ASSETS.map((a: any, i: number) => (
             <TR key={i}>
               <TD style={{ fontSize:10, color:T.blue }}>{a.name}</TD>
               <TD style={{ fontSize:10, color:T.text3 }}>{a.ip}</TD>
