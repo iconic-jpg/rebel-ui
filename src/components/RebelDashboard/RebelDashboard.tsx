@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { AreaChart, Area, XAxis, YAxis, ResponsiveContainer, Tooltip } from "recharts";
 import { ComposableMap, Geographies, Geography, Marker, Line } from "react-simple-maps";
+import { useNavigate } from "react-router-dom";
 
 const API = "https://r3bel-production.up.railway.app";
 
@@ -31,6 +32,8 @@ function useInterval(fn: () => void, ms: number) {
   useEffect(() => { ref.current = fn; }, [fn]);
   useEffect(() => { const id = setInterval(() => ref.current(), ms); return () => clearInterval(id); }, [ms]);
 }
+
+
 
 function useMobile() {
   const [mobile, setMobile] = useState(window.innerWidth < 768);
@@ -365,6 +368,215 @@ function IPEnrichModal({ ip: initIp, onClose }: { ip: string; onClose: () => voi
   );
 }
 
+function NavDrawer() {
+  const [open, setOpen] = useState(false);
+  const navigate = useNavigate();
+
+  const go = (path: string) => { navigate(path); setOpen(false); };
+
+  const NAV = [
+    { section: "CORE",
+      items: [
+        { path: "/",          icon: "⬡", label: "Dashboard",      sub: "Live threat feed"    },
+      ]
+    },
+    { section: "ASSET & PQC",
+      items: [
+        { path: "/inventory", icon: "◈", label: "Asset Inventory", sub: "128 assets tracked"  },
+        { path: "/discovery", icon: "◎", label: "Asset Discovery", sub: "Domains · SSL · IPs" },
+        { path: "/cbom",      icon: "◉", label: "CBOM",            sub: "Crypto bill of mat." },
+        { path: "/pqc",       icon: "⬟", label: "Posture of PQC",  sub: "755/1000 Elite"      },
+      ]
+    },
+    { section: "REPORTS",
+      items: [
+        { path: "/rating",    icon: "✦", label: "Cyber Rating",    sub: "Tier 1–4 scoring"   },
+        { path: "/reporting", icon: "▣", label: "Reporting",       sub: "Export & schedule"  },
+      ]
+    },
+  ];
+
+  return (
+    <>
+      {/* ── HAMBURGER BUTTON ── paste inside your <nav>, before the logo svg ── */}
+      <button
+        onClick={() => setOpen(o => !o)}
+        style={{
+          background: "none", border: "none", cursor: "pointer",
+          padding: "6px 8px", marginRight: 4,
+          display: "flex", flexDirection: "column", gap: 4.5,
+        }}
+      >
+        <span style={{
+          display: "block", width: 16, height: 1.5, borderRadius: 2,
+          background: open ? "#3b82f6" : "rgba(200,220,255,0.4)",
+          transform: open ? "translateY(6px) rotate(45deg)" : "none",
+          transition: "all 0.22s cubic-bezier(0.4,0,0.2,1)",
+        }}/>
+        <span style={{
+          display: "block", width: 16, height: 1.5, borderRadius: 2,
+          background: open ? "#3b82f6" : "rgba(200,220,255,0.4)",
+          transform: open ? "scaleX(0)" : "none", opacity: open ? 0 : 1,
+          transition: "all 0.22s cubic-bezier(0.4,0,0.2,1)",
+        }}/>
+        <span style={{
+          display: "block", width: 16, height: 1.5, borderRadius: 2,
+          background: open ? "#3b82f6" : "rgba(200,220,255,0.4)",
+          transform: open ? "translateY(-6px) rotate(-45deg)" : "none",
+          transition: "all 0.22s cubic-bezier(0.4,0,0.2,1)",
+        }}/>
+      </button>
+
+      {/* ── BACKDROP ── */}
+      {open && (
+        <div
+          onClick={() => setOpen(false)}
+          style={{
+            position: "fixed", inset: 0, zIndex: 198,
+            background: "rgba(0,0,0,0.5)",
+            backdropFilter: "blur(3px)",
+            WebkitBackdropFilter: "blur(3px)",
+          }}
+        />
+      )}
+
+      {/* ── DRAWER ── */}
+      <div style={{
+        position: "fixed", top: 0, left: 0, bottom: 0,
+        width: 260, zIndex: 199,
+        background: "linear-gradient(180deg, #070c16 0%, #080c14 100%)",
+        borderRight: "1px solid rgba(59,130,246,0.14)",
+        boxShadow: open ? "12px 0 60px rgba(0,0,0,0.7)" : "none",
+        display: "flex", flexDirection: "column",
+        transform: open ? "translateX(0)" : "translateX(-100%)",
+        transition: "transform 0.28s cubic-bezier(0.4,0,0.2,1)",
+      }}>
+
+        {/* Header */}
+        <div style={{
+          padding: "16px 16px 14px",
+          borderBottom: "1px solid rgba(59,130,246,0.09)",
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <svg width="20" height="20" viewBox="0 0 28 28">
+              <polygon points="14,2 26,8 26,20 14,26 2,20 2,8"
+                fill="none" stroke="#3b82f6" strokeWidth="1.5"
+                style={{ filter: "drop-shadow(0 0 4px #3b82f6)" }}/>
+              <polygon points="14,7 21,11 21,17 14,21 7,17 7,11"
+                fill="rgba(59,130,246,0.1)" stroke="rgba(59,130,246,0.3)" strokeWidth="1"/>
+              <circle cx="14" cy="14" r="3" fill="#3b82f6"
+                style={{ filter: "drop-shadow(0 0 5px #3b82f6)" }}/>
+            </svg>
+            <div>
+              <div style={{ fontFamily:"'Orbitron',monospace", fontWeight:900, fontSize:14, color:"#fff", letterSpacing:".22em" }}>REBEL</div>
+              <div style={{ fontSize:7, color:"rgba(200,220,255,0.2)", letterSpacing:".14em", fontFamily:"'Orbitron',monospace", marginTop:1 }}>THREAT INTELLIGENCE</div>
+            </div>
+          </div>
+          <button onClick={() => setOpen(false)} style={{
+            background:"rgba(59,130,246,0.06)", border:"1px solid rgba(59,130,246,0.15)",
+            borderRadius:2, color:"rgba(200,220,255,0.4)", cursor:"pointer",
+            width:26, height:26, display:"flex", alignItems:"center", justifyContent:"center", fontSize:13,
+          }}>✕</button>
+        </div>
+
+        {/* Nav Sections */}
+        <nav style={{ flex:1, overflowY:"auto", padding:"8px 10px" }}>
+          {NAV.map(section => (
+            <div key={section.section} style={{ marginBottom: 6 }}>
+              {/* Section label */}
+              <div style={{
+                fontSize:7, color:"rgba(200,220,255,0.18)", letterSpacing:".2em",
+                fontFamily:"'Orbitron',monospace", padding:"10px 8px 5px",
+              }}>
+                {section.section}
+              </div>
+
+              {/* Nav items */}
+              {section.items.map(item => (
+                <button
+                  key={item.path}
+                  onClick={() => go(item.path)}
+                  style={{
+                    width:"100%", display:"flex", alignItems:"center", gap:12,
+                    padding:"9px 10px", background:"none",
+                    border:"1px solid transparent", borderRadius:3,
+                    cursor:"pointer", textAlign:"left", transition:"all 0.15s",
+                  }}
+                  onMouseEnter={e => {
+                    const b = e.currentTarget;
+                    b.style.background = "rgba(59,130,246,0.08)";
+                    b.style.borderColor = "rgba(59,130,246,0.18)";
+                  }}
+                  onMouseLeave={e => {
+                    const b = e.currentTarget;
+                    b.style.background = "none";
+                    b.style.borderColor = "transparent";
+                  }}
+                >
+                  {/* Icon box */}
+                  <div style={{
+                    width: 32, height: 32, flexShrink: 0,
+                    background: "rgba(59,130,246,0.07)",
+                    border: "1px solid rgba(59,130,246,0.15)",
+                    borderRadius: 3,
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    fontFamily: "'Orbitron',monospace", fontSize: 13, color: "#3b82f6",
+                  }}>
+                    {item.icon}
+                  </div>
+
+                  {/* Label + sub */}
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{
+                      fontFamily: "'Share Tech Mono',monospace", fontSize: 11,
+                      color: "rgba(200,220,255,0.75)", lineHeight: 1,
+                    }}>
+                      {item.label}
+                    </div>
+                    <div style={{
+                      fontFamily: "'Share Tech Mono',monospace", fontSize: 9,
+                      color: "rgba(200,220,255,0.28)", marginTop: 3,
+                      overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                    }}>
+                      {item.sub}
+                    </div>
+                  </div>
+
+                  {/* Arrow */}
+                  <span style={{ fontSize: 10, color: "rgba(59,130,246,0.35)", flexShrink: 0 }}>›</span>
+                </button>
+              ))}
+            </div>
+          ))}
+        </nav>
+
+        {/* Footer */}
+        <div style={{
+          padding: "12px 16px",
+          borderTop: "1px solid rgba(59,130,246,0.08)",
+          display: "flex", flexDirection: "column", gap: 6,
+        }}>
+          {/* Live indicator */}
+          <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+            <span style={{ position:"relative", display:"inline-flex", width:7, height:7, flexShrink:0 }}>
+              <span style={{ position:"absolute", inset:0, borderRadius:"50%", background:"#22c55e", opacity:.5, animation:"ping 1.4s ease infinite" }}/>
+              <span style={{ width:7, height:7, borderRadius:"50%", background:"#22c55e", display:"block", boxShadow:"0 0 4px #22c55e" }}/>
+            </span>
+            <span style={{ fontSize:7.5, fontFamily:"'Orbitron',monospace", color:"#22c55e", letterSpacing:".12em" }}>
+              LIVE · CONNECTED
+            </span>
+          </div>
+          <div style={{ fontSize:7.5, color:"rgba(200,220,255,0.14)", fontFamily:"'Share Tech Mono',monospace" }}>
+            r3bel-production.up.railway.app
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+
+
 function normalizeCodeFences(text: string): string {
   let normalized = text
     .replace(/\r\n/g, "\n")
@@ -649,6 +861,7 @@ export default function RebelDashboard() {
       {/* NAV */}
       <nav style={{ height: mobile ? 48 : 52, display: "flex", alignItems: "center", justifyContent: "space-between", padding: mobile ? "0 14px" : "0 22px", paddingTop: mobile ? "env(safe-area-inset-top)" : 0, borderBottom: "1px solid rgba(59,130,246,0.09)", background: "rgba(8,12,20,0.97)", backdropFilter: "blur(10px)", position: "sticky", top: 0, zIndex: 100 }}>
         <div style={{ display: "flex", alignItems: "center", gap: mobile ? 8 : 12 }}>
+        <NavDrawer />
           <svg width="22" height="22" viewBox="0 0 28 28">
             <polygon points="14,2 26,8 26,20 14,26 2,20 2,8" fill="none" stroke="#3b82f6" strokeWidth="1.5" style={{ filter: "drop-shadow(0 0 4px #3b82f6)" }} />
             <polygon points="14,7 21,11 21,17 14,21 7,17 7,11" fill="rgba(59,130,246,0.1)" stroke="rgba(59,130,246,0.35)" strokeWidth="1" />
