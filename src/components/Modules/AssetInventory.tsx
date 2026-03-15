@@ -20,11 +20,18 @@ export default function AssetInventoryPage() {
 
   // Load from backend, fall back to mock
   useEffect(() => {
-    fetch(`${API}/assets`)
-      .then(r => r.json())
-      .then(d => { if (d?.assets?.length) setAssets(d.assets); })
-      .catch(() => {});
-  }, []);
+  fetch(`${API}/assets`)
+    .then(r => r.json())
+    .then(d => {
+      if (d?.assets?.length) {
+        setAssets(d.assets);
+        console.log("✓ Live assets loaded:", d.total, "from PostgreSQL");
+      }
+    })
+    .catch(() => {
+      console.log("Backend unreachable, using mock data");
+    });
+}, []);
 
   // Draw donut after assets load
   useEffect(() => { drawTypeChart(); drawRiskChart(); }, [assets]);
