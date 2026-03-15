@@ -200,7 +200,7 @@ export default function AssetInventoryPage() {
         <Panel>
           <PanelHeader left="CRYPTO & SECURITY OVERVIEW" />
           <Table cols={["ASSET","KEY LEN","CIPHER SUITE","TLS","CA"]}>
-            {MOCK_ASSETS.map((a: any, i: number) => (
+            {MOCK_ASSETS.map((a, i) => (
               <TR key={i}>
                 <TD style={{ fontSize:10, color:T.blue }}>{a.name}</TD>
                 <TD style={{ fontSize:10, color: keyColor(a.keylen) }}>{a.keylen}</TD>
