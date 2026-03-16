@@ -31,6 +31,8 @@ export default function CBOMPage() {
   const klRef    = useRef<HTMLCanvasElement>(null);
   const caRef    = useRef<HTMLCanvasElement>(null);
   const protoRef = useRef<HTMLCanvasElement>(null);
+  const caLegendRef    = useRef<HTMLDivElement>(null);
+const protoLegendRef = useRef<HTMLDivElement>(null);
 
   const [cbomData,    setCbomData]    = useState<any[]>([]);
   const [stats,       setStats]       = useState({ total_apps:0, weak_crypto:0, pqc_ready:0, active_certs:0 });
@@ -106,37 +108,38 @@ export default function CBOMPage() {
   }
 
   function drawDonut(
-    canvas: HTMLCanvasElement | null,
-    data: {label:string; val:number; color:string}[],
-    legendId: string
-  ) {
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d")!;
-    const W = 160, H = 160, cx = 80, cy = 80, r = 55;
-    const total = data.reduce((a, d) => a + d.val, 0);
-    if (total === 0) return;
-    let angle = -Math.PI / 2;
-    ctx.clearRect(0, 0, W, H);
-    data.forEach(d => {
-      const sweep = 2 * Math.PI * (d.val / total) - 0.04;
-      ctx.beginPath(); ctx.moveTo(cx, cy); ctx.arc(cx, cy, r, angle, angle + sweep);
-      ctx.fillStyle = d.color + "33"; ctx.fill();
-      ctx.strokeStyle = d.color; ctx.lineWidth = 1.5; ctx.stroke();
-      angle += 2 * Math.PI * (d.val / total);
-    });
-    ctx.beginPath(); ctx.arc(cx, cy, 28, 0, Math.PI * 2);
-    ctx.fillStyle = "#080c14"; ctx.fill();
-    const el = document.getElementById(legendId);
-    if (el) el.innerHTML = data.map(d => `
+  canvas: HTMLCanvasElement | null,
+  data: {label:string; val:number; color:string}[],
+  legendRef: React.RefObject<HTMLDivElement>
+) {
+  if (!canvas) return;
+  const ctx = canvas.getContext("2d")!;
+  const W = 160, H = 160, cx = 80, cy = 80, r = 55;
+  const total = data.reduce((a, d) => a + d.val, 0);
+  if (total === 0) return;
+  let angle = -Math.PI / 2;
+  ctx.clearRect(0, 0, W, H);
+  data.forEach(d => {
+    const sweep = 2 * Math.PI * (d.val / total) - 0.04;
+    ctx.beginPath(); ctx.moveTo(cx, cy); ctx.arc(cx, cy, r, angle, angle + sweep);
+    ctx.fillStyle = d.color + "33"; ctx.fill();
+    ctx.strokeStyle = d.color; ctx.lineWidth = 1.5; ctx.stroke();
+    angle += 2 * Math.PI * (d.val / total);
+  });
+  ctx.beginPath(); ctx.arc(cx, cy, 28, 0, Math.PI * 2);
+  ctx.fillStyle = "#080c14"; ctx.fill();
+  if (legendRef.current) {
+    legendRef.current.innerHTML = data.map(d => `
       <div style="display:flex;align-items:center;gap:6px;">
         <div style="width:8px;height:8px;border-radius:1px;background:${d.color};flex-shrink:0;"></div>
         <span style="font-size:9px;color:${T.text2};flex:1;">${d.label}</span>
         <span style="font-size:9px;font-family:'Orbitron',monospace;color:${d.color};">${d.val}</span>
       </div>`).join("");
   }
+}
 
-  function drawCA()    { drawDonut(caRef.current,    caData,    "ca-legend");    }
-  function drawProto() { drawDonut(protoRef.current, protoData, "proto-legend"); }
+    function drawCA()    { drawDonut(caRef.current,    caData,    caLegendRef);    }
+    function drawProto() { drawDonut(protoRef.current, protoData, protoLegendRef); }
 
   function exportCSV() {
     const data = cbomData.length ? cbomData : MOCK_CBOM;
@@ -202,7 +205,7 @@ export default function CBOMPage() {
           <PanelHeader left="TOP CERTIFICATE AUTHORITIES" />
           <div style={{ padding:14 }}>
             <canvas ref={caRef} width={160} height={160} style={{ display:"block", margin:"0 auto 10px" }} />
-            <div id="ca-legend" style={{ display:"flex", flexDirection:"column", gap:5 }} />
+            <div ref={caLegendRef} style={{ display:"flex", flexDirection:"column", gap:5 }} />
           </div>
         </Panel>
       </div>
@@ -233,15 +236,7 @@ export default function CBOMPage() {
         <PanelHeader left="ENCRYPTION PROTOCOLS" />
         <div style={{ padding:14, display:"flex", gap:16, alignItems:"center" }}>
           <canvas ref={protoRef} width={140} height={140} />
-          <div id="proto-legend" style={{ display:"flex", flexDirection:"column", gap:9, flex:1 }}>
-            {protoData.map(p => (
-              <div key={p.label} style={{ display:"flex", alignItems:"center", gap:8 }}>
-                <div style={{ width:10, height:10, borderRadius:1, background:p.color, flexShrink:0 }} />
-                <span style={{ fontSize:10, color:T.text2, flex:1 }}>{p.label}</span>
-                <div style={{ width:80 }}><ProgBar pct={p.val} color={p.color} /></div>
-                <span style={{ fontSize:10, fontFamily:"'Orbitron',monospace", color:p.color, minWidth:36, textAlign:"right" }}>{p.val}%</span>
-              </div>
-            ))}
+          <div ref={protoLegendRef} style={{ display:"flex", flexDirection:"column", gap:9, flex:1 }} />
           </div>
         </div>
       </Panel>
