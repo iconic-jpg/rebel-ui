@@ -53,6 +53,7 @@ function ScanModal({ onClose }: { onClose: () => void }) {
   const [result, setResult] = useState<ScanResult | null>(null);
   const [tab, setTab] = useState("url");
   const mobile = useMobile();
+  const navigate = useNavigate();
 
   const DJANGO_API = "https://thriftstore-backend.onrender.com";
 
