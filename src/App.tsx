@@ -8,6 +8,8 @@ import AssetInventoryPage from "./components/Modules/AssetInventory.js";
 import AssetDiscoveryPage from "./components/Modules/AssetDiscovery.js";
 import CBOMPage from "./components/Modules/CBOM.js";
 import PQCPosturePage from "./components/Modules/PQCPosture.js";
+import CyberRatingPage from "./components/Modules/CyberRating.js";
+import ReportingPage from "./components/Modules/Reporting.js";
 
 export default function App() {
   return (
@@ -24,6 +26,8 @@ export default function App() {
           <Route path="discovery" element={<AssetDiscoveryPage />} />
           <Route path="cbom"      element={<CBOMPage />} />
           <Route path="pqc"       element={<PQCPosturePage />} />
+          <Route path="rating"      element={<CyberRatingPage />} />
+          <Route path="reporting"   element={<ReportingPage />} />
         </Route>
       </Routes>
     </Router>
