@@ -232,14 +232,14 @@ const protoLegendRef = useRef<HTMLDivElement>(null);
       </Panel>
 
       {/* ENCRYPTION PROTOCOLS */}
-      <Panel>
-        <PanelHeader left="ENCRYPTION PROTOCOLS" />
-        <div style={{ padding:14, display:"flex", gap:16, alignItems:"center" }}>
-          <canvas ref={protoRef} width={140} height={140} />
-          <div ref={protoLegendRef} style={{ display:"flex", flexDirection:"column", gap:9, flex:1 }} />
-          </div>
-        </div>
-      </Panel>
+      {/* ENCRYPTION PROTOCOLS */}
+    <Panel>
+      <PanelHeader left="ENCRYPTION PROTOCOLS" />
+      <div style={{ padding:14, display:"flex", gap:16, alignItems:"center" }}>
+        <canvas ref={protoRef} width={140} height={140} />
+        <div ref={protoLegendRef} style={{ display:"flex", flexDirection:"column", gap:9, flex:1 }} />
+      </div>
+    </Panel>
     </div>
   );
 }
