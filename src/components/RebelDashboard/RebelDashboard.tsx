@@ -35,6 +35,7 @@ function useInterval(fn: () => void, ms: number) {
 
 
 
+
 function useMobile() {
   const [mobile, setMobile] = useState(window.innerWidth < 768);
   useEffect(() => {
@@ -796,6 +797,9 @@ export default function RebelDashboard() {
   const [enrichTarget, setEnrichTarget] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState("feed");
   const mobile = useMobile();
+  const navigate = useNavigate();
+
+
 
   const [packets, setPackets] = useState<Packet[]>([]);
   const [trafficHistory, setTrafficHistory] = useState<TrafficPoint[]>(Array.from({ length: 40 }, (_, i) => ({ t: i, normal: 0, anomaly: 0 })));
@@ -818,6 +822,12 @@ export default function RebelDashboard() {
 
   useInterval(fetchPacket, 2000);
   useEffect(() => { fetchPacket(); }, []);
+  useEffect(() => {
+  const token = localStorage.getItem("access");
+  if (!token) {
+    navigate("/login");
+  }
+}, []);
 
   const anomalyRate = stats.total > 0 ? Math.round((stats.anomalies / stats.total) * 100) : 0;
   const riskScores = [

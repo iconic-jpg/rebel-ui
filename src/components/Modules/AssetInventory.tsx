@@ -7,11 +7,9 @@ import {
 type Asset = typeof MOCK_ASSETS[0];
 
 export default function AssetInventoryPage() {
-  const [assets, setAssets] = useState<Asset[]>(MOCK_ASSETS);
-  const [query, setQuery] = useState("");
-  const [scanning, setScanning] = useState(false);
-  const typeRef  = useRef<HTMLCanvasElement>(null);
-  const riskRef  = useRef<HTMLCanvasElement>(null);
+  const [riskCounts, setRiskCounts] = useState({ Critical: 0, High: 0, Medium: 0, Low: 0 });
+    const [certBuckets, setCertBuckets] = useState({ "0-30": 0, "30-60": 0, "60-90": 0, "90+": 0 });
+    const [byType, setByType] = useState({ "Web Apps": 0, APIs: 0, Servers: 0, LB: 0, Other: 0 });
 
   const filtered = assets.filter(a =>
     !query || a.name.includes(query) || a.ip.includes(query) ||
@@ -25,12 +23,12 @@ export default function AssetInventoryPage() {
     .then(d => {
       if (d?.assets?.length) {
         setAssets(d.assets);
-        console.log("✓ Live assets loaded:", d.total, "from PostgreSQL");
+        setRiskCounts(d.risk_counts || riskCounts);
+        setCertBuckets(d.cert_buckets || certBuckets);
+        setByType(d.by_type || byType);
       }
     })
-    .catch(() => {
-      console.log("Backend unreachable, using mock data");
-    });
+    .catch(() => console.log("Backend unreachable, using mock data"));
 }, []);
 
   // Draw donut after assets load
@@ -73,16 +71,16 @@ export default function AssetInventoryPage() {
   }
 
   function drawRiskChart() {
-    const c = riskRef.current; if (!c) return;
-    const ctx = c.getContext("2d")!;
-    const W = c.offsetWidth || 280, H = 140;
-    c.width = W;
-    const bars = [
-      { label: "Critical", val: 14, color: T.red },
-      { label: "High",     val: 28, color: T.orange },
-      { label: "Medium",   val: 45, color: T.yellow },
-      { label: "Low",      val: 41, color: T.green },
-    ];
+      const c = riskRef.current; if (!c) return;
+      const ctx = c.getContext("2d")!;
+      const W = c.offsetWidth || 280, H = 140;
+      c.width = W;
+      const bars = [
+        { label: "Critical", val: riskCounts.Critical, color: T.red },
+        { label: "High",     val: riskCounts.High,     color: T.orange },
+        { label: "Medium",   val: riskCounts.Medium,   color: T.yellow },
+        { label: "Low",      val: riskCounts.Low,       color: T.green },
+      ];
     const max = 50, bw = 36, gap = 22;
     const startX = (W - (bars.length * (bw + gap) - gap)) / 2;
     ctx.clearRect(0, 0, W, H);
@@ -120,11 +118,11 @@ export default function AssetInventoryPage() {
 
       {/* METRICS */}
       <div style={GRID.g5}>
-        <MetricCard label="TOTAL ASSETS" value={assets.length}  sub="This session"      color={T.blue}   />
-        <MetricCard label="WEB APPS"     value={42}             sub="Public facing"     color={T.cyan}   />
-        <MetricCard label="APIs"         value={26}             sub="Endpoints"         color={T.purple} />
-        <MetricCard label="SERVERS"      value={37}             sub="Infrastructure"    color={T.text}   />
-        <MetricCard label="HIGH RISK"    value={14}             sub="Immediate action"  color={T.red}    />
+        <MetricCard label="TOTAL ASSETS" value={assets.length}        sub="This session"     color={T.blue}   />
+        <MetricCard label="WEB APPS"     value={byType["Web Apps"]}   sub="Public facing"    color={T.cyan}   />
+        <MetricCard label="HIGH RISK"    value={riskCounts.Critical + riskCounts.High} sub="Immediate action" color={T.red} />
+        <MetricCard label="MEDIUM"       value={riskCounts.Medium}    sub="Monitor closely"  color={T.yellow} />
+        <MetricCard label="LOW"          value={riskCounts.Low}       sub="Under control"    color={T.green}  />
       </div>
 
       {/* CHARTS ROW */}
@@ -186,11 +184,11 @@ export default function AssetInventoryPage() {
           <PanelHeader left="CERTIFICATE EXPIRY TIMELINE" />
           <div style={{ padding: 14 }}>
             {[
-              { label:"0–30 Days", count:3,  color:T.red },
-              { label:"30–60 Days",count:4,  color:T.orange },
-              { label:"60–90 Days",count:2,  color:T.yellow },
-              { label:">90 Days",  count:84, color:T.green },
-            ].map(row => (
+              { label: "0–30 Days",  count: certBuckets["0-30"],  color: T.red },
+              { label: "30–60 Days", count: certBuckets["30-60"], color: T.orange },
+              { label: "60–90 Days", count: certBuckets["60-90"], color: T.yellow },
+              { label: ">90 Days",   count: certBuckets["90+"],   color: T.green },
+            ].map(row =>(
               <div key={row.label} style={{ display:"flex", alignItems:"center", gap:10, marginBottom:10 }}>
                 <div style={{ width:8, height:8, borderRadius:"50%", background:row.color, boxShadow:`0 0 4px ${row.color}`, flexShrink:0 }} />
                 <div style={{ flex:1 }}>
