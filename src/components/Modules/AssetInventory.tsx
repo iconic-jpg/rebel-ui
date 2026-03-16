@@ -214,11 +214,7 @@ export default function AssetInventoryPage() {
               .filter(a => a.tls !== "—" && a.tls !== undefined)  // only show assets with TLS data
               .slice(0, 10)  // limit to 10 rows
               .map((a, i) => (
-                <tr>
-                    <td colSpan={5} style={{ textAlign:"center", color:T.text3, fontSize:10, padding:"14px" }}>
-                      No TLS data yet — run some scans first
-                    </td>
-                  </tr>
+
             ))}
             {assets.filter(a => a.tls !== "—").length === 0 && (
               <TR>
