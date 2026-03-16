@@ -110,7 +110,7 @@ const protoLegendRef = useRef<HTMLDivElement>(null);
   function drawDonut(
   canvas: HTMLCanvasElement | null,
   data: {label:string; val:number; color:string}[],
-  legendRef: React.RefObject<HTMLDivElement>
+  legendRef: React.RefObject<HTMLDivElement | null>
 ) {
   if (!canvas) return;
   const ctx = canvas.getContext("2d")!;
@@ -231,7 +231,7 @@ const protoLegendRef = useRef<HTMLDivElement>(null);
         </Table>
       </Panel>
 
-      {/* ENCRYPTION PROTOCOLS */}
+
       {/* ENCRYPTION PROTOCOLS */}
     <Panel>
       <PanelHeader left="ENCRYPTION PROTOCOLS" />
