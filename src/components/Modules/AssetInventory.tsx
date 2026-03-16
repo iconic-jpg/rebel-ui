@@ -7,6 +7,11 @@ import {
 type Asset = typeof MOCK_ASSETS[0];
 
 export default function AssetInventoryPage() {
+    const [assets, setAssets] = useState<Asset[]>(MOCK_ASSETS);
+  const [query, setQuery] = useState("");
+  const [scanning, setScanning] = useState(false);
+  const typeRef  = useRef<HTMLCanvasElement>(null);
+  const riskRef  = useRef<HTMLCanvasElement>(null);
   const [riskCounts, setRiskCounts] = useState({ Critical: 0, High: 0, Medium: 0, Low: 0 });
     const [certBuckets, setCertBuckets] = useState({ "0-30": 0, "30-60": 0, "60-90": 0, "90+": 0 });
     const [byType, setByType] = useState({ "Web Apps": 0, APIs: 0, Servers: 0, LB: 0, Other: 0 });
