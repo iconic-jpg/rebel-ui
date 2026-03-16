@@ -71,43 +71,10 @@ const styles = `
   .submit-btn:hover:not(:disabled) { border-color: rgba(0, 255, 170, 0.8); color: #00ffaa; box-shadow: 0 0 20px rgba(0, 255, 170, 0.1); }
   .submit-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
-  .divider {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    margin: 20px 0 0;
-    font-family: 'Share Tech Mono', monospace;
-    font-size: 9px;
-    letter-spacing: 0.2em;
-    color: rgba(255,255,255,0.12);
-  }
-  .divider::before, .divider::after {
-    content: '';
-    flex: 1;
-    height: 1px;
-    background: rgba(255,255,255,0.07);
-  }
+  .divider { display: flex; align-items: center; gap: 12px; margin: 20px 0 0; font-family: 'Share Tech Mono', monospace; font-size: 9px; letter-spacing: 0.2em; color: rgba(255,255,255,0.12); }
+  .divider::before, .divider::after { content: ''; flex: 1; height: 1px; background: rgba(255,255,255,0.07); }
 
-  .google-btn {
-    width: 100%;
-    margin-top: 12px;
-    padding: 13px;
-    background: transparent;
-    border: 1px solid rgba(255,255,255,0.1);
-    color: rgba(255,255,255,0.45);
-    font-family: 'Share Tech Mono', monospace;
-    font-size: 11px;
-    letter-spacing: 0.2em;
-    text-transform: uppercase;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 10px;
-    transition: all 0.2s ease;
-    position: relative;
-    overflow: hidden;
-  }
+  .google-btn { width: 100%; margin-top: 12px; padding: 13px; background: transparent; border: 1px solid rgba(255,255,255,0.1); color: rgba(255,255,255,0.45); font-family: 'Share Tech Mono', monospace; font-size: 11px; letter-spacing: 0.2em; text-transform: uppercase; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 10px; transition: all 0.2s ease; position: relative; overflow: hidden; }
   .google-btn::before { content: ''; position: absolute; inset: 0; background: rgba(255,255,255,0.03); transform: translateX(-100%); transition: transform 0.3s ease; }
   .google-btn:hover::before { transform: translateX(0); }
   .google-btn:hover { border-color: rgba(255,255,255,0.25); color: rgba(255,255,255,0.75); }
@@ -129,20 +96,19 @@ declare global {
 }
 
 export default function Login() {
-  const navigate = useNavigate();
-  const [email, setEmail]       = useState<string>("");
-  const [password, setPassword] = useState<string>("");
-  const [error, setError]       = useState<string>("");
-  const [loading, setLoading]   = useState<boolean>(false);
+  const navigate                        = useNavigate();
+  const [email, setEmail]               = useState<string>("");
+  const [password, setPassword]         = useState<string>("");
+  const [error, setError]               = useState<string>("");
+  const [loading, setLoading]           = useState<boolean>(false);
   const [googleLoading, setGoogleLoading] = useState<boolean>(false);
   const [checkingSession, setCheckingSession] = useState<boolean>(true);
-  const googleInitialized = useRef(false);
+  const googleInitialized               = useRef(false);
 
   // ── Auto-login from refresh token ──
   useEffect(() => {
     const refresh = localStorage.getItem("refresh");
     if (!refresh) { setCheckingSession(false); return; }
-
     fetch(`${API}/api/token/refresh/`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -161,7 +127,7 @@ export default function Login() {
       });
   }, [navigate]);
 
-  // ── Google sign-in init ──
+  // ── Google response handler ──
   const handleGoogleResponse = async (response: { credential: string }) => {
     setGoogleLoading(true);
     setError("");
@@ -183,46 +149,49 @@ export default function Login() {
     }
   };
 
+  // ── Google SDK init ──
   useEffect(() => {
     if (googleInitialized.current) return;
 
-    const existing = document.getElementById("gsi-script");
-    if (existing) {
+    const initGoogle = () => {
       window.google?.accounts.id.initialize({
         client_id: import.meta.env.VITE_GOOGLE_CLIENT_ID,
         callback: handleGoogleResponse,
         use_fedcm_for_prompt: false,
-      });
-      googleInitialized.current = true;
-      return;
-    }
-
-    const script = document.createElement("script");
-    script.id = "gsi-script";
-    script.src = "https://accounts.google.com/gsi/client";
-    script.async = true;
-    script.defer = true;
-    script.onload = () => {
-      window.google?.accounts.id.initialize({
-        client_id: import.meta.env.VITE_GOOGLE_CLIENT_ID,
-        callback: handleGoogleResponse,
-        use_fedcm_for_prompt: false,
+        auto_select: false,
+        cancel_on_tap_outside: false,
       });
       googleInitialized.current = true;
     };
+
+    const existing = document.getElementById("gsi-script");
+    if (existing) { initGoogle(); return; }
+
+    const script = document.createElement("script");
+    script.id    = "gsi-script";
+    script.src   = "https://accounts.google.com/gsi/client";
+    script.async = true;
+    script.defer = true;
+    script.onload = initGoogle;
     document.head.appendChild(script);
+
     return () => { window.google?.accounts.id.cancel(); };
   }, []);
 
+  // ── Trigger Google One Tap ──
   const triggerGoogle = () => {
-    if (!googleInitialized.current) return;
+    if (!googleInitialized.current) {
+      setError("Google not loaded yet, please wait...");
+      return;
+    }
     window.google?.accounts.id.prompt((notification: any) => {
-      if (notification.isSkippedMoment?.() || notification.isDismissedMoment?.()) {
-        setError("Google sign-in was dismissed. Please try again.");
+      if (notification.isNotDisplayed() || notification.isSkippedMoment()) {
+        setError("Google sign-in blocked by browser. Please allow popups and try again.");
       }
     });
   };
 
+  // ── Email/password login ──
   const handleLogin = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setError(""); setLoading(true);

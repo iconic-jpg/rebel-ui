@@ -169,48 +169,63 @@ export default function Signup() {
   };
 
   useEffect(() => {
-    if (googleInitialized.current) return;
+  if (googleInitialized.current) return;
 
-    const existing = document.getElementById("gsi-script");
-    if (existing) {
-      // Script already in DOM (e.g. Login page loaded it) — just initialize
-      window.google?.accounts.id.initialize({
-        client_id: import.meta.env.VITE_GOOGLE_CLIENT_ID,
-        callback: handleGoogleResponse,
-        use_fedcm_for_prompt: false,
+  const initGoogle = () => {
+    window.google?.accounts.id.initialize({
+      client_id: import.meta.env.VITE_GOOGLE_CLIENT_ID,
+      callback: handleGoogleResponse,
+      use_fedcm_for_prompt: false,
+    });
+
+    // Render actual Google button — never gets dismissed
+    const btn = document.getElementById("google-signin-btn");
+    if (btn) {
+      window.google?.accounts.id.renderButton(btn, {
+        theme: "outline",
+        size: "large",
+        width: btn.offsetWidth || 300,
+        text: "continue_with",
       });
-      googleInitialized.current = true;
-      return;
     }
+    googleInitialized.current = true;
+  };
 
-    const script = document.createElement("script");
-    script.id = "gsi-script";
-    script.src = "https://accounts.google.com/gsi/client";
-    script.async = true;
-    script.defer = true;
-    script.onload = () => {
-      window.google?.accounts.id.initialize({
-        client_id: import.meta.env.VITE_GOOGLE_CLIENT_ID,
-        callback: handleGoogleResponse,
-        use_fedcm_for_prompt: false,
-      });
-      googleInitialized.current = true;
-    };
-    document.head.appendChild(script);
+  const existing = document.getElementById("gsi-script");
+  if (existing) { initGoogle(); return; }
 
-    return () => {
-      window.google?.accounts.id.cancel();
-    };
-  }, []);
+  const script = document.createElement("script");
+  script.id = "gsi-script";
+  script.src = "https://accounts.google.com/gsi/client";
+  script.async = true;
+  script.defer = true;
+  script.onload = initGoogle;
+  document.head.appendChild(script);
+
+  return () => { window.google?.accounts.id.cancel(); };
+}, []);
 
   const triggerGoogle = () => {
-    if (!googleInitialized.current) return;
-    window.google?.accounts.id.prompt((notification: any) => {
-      if (notification.isSkippedMoment?.() || notification.isDismissedMoment?.()) {
-        setError("Google sign-in was dismissed. Please try again.");
-      }
-    });
-  };
+      if (!googleInitialized.current) return;
+
+      // Use popup flow instead of One Tap prompt
+      window.google?.accounts.oauth2 ?
+        window.google.accounts.id.prompt() :
+        window.google?.accounts.id.renderButton(
+          document.getElementById("g-signin-btn"),
+          { theme: "outline", size: "large" }
+        );
+
+      window.google?.accounts.id.prompt((notification: any) => {
+        if (notification.isNotDisplayed()) {
+          // One Tap blocked — fall back to popup
+          window.google?.accounts.id.renderButton(
+            document.getElementById("g-signin-btn-hidden"),
+            { theme: "outline", size: "large", width: 1 }
+          );
+        }
+      });
+    };
 
   const handleSignup = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
