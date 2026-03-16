@@ -18,29 +18,39 @@ const RECS = [
 const TIERS = [
   {
     tier:"TIER-1 ELITE", level:"Modern best-practice crypto posture",
-    criteria:"TLS 1.2/1.3 only; Strong Ciphers (AES-GCM/ChaCha20); ECDHE; cert >2048-bit; no weak protocols; HSTS enabled",
-    action:"Maintain config; periodic monitoring; recommended baseline for public-facing apps",
+    criteria:"TLS 1.2/1.3 only; Strong Ciphers; ECDHE; cert >2048-bit; no weak protocols; HSTS enabled",
+    action:"Maintain config; periodic monitoring; recommended baseline",
     v:"blue" as const,
   },
   {
     tier:"TIER-2 STANDARD", level:"Acceptable enterprise configuration",
-    criteria:"TLS 1.2 supported but legacy protocols allowed; Key >2048-bit; mostly strong ciphers; forward secrecy optional",
+    criteria:"TLS 1.2 supported but legacy allowed; Key >2048-bit; mostly strong ciphers",
     action:"Improve gradually; disable legacy protocols; standardise cipher suites",
     v:"yellow" as const,
   },
   {
     tier:"TIER-3 LEGACY", level:"Weak but still operational",
-    criteria:"TLS 1.0/1.1 enabled; weak ciphers (CBC, 3DES); forward secrecy missing; key possibly 1024-bit",
-    action:"Remediation required; upgrade TLS stack; rotate certificates; remove weak cipher suites",
+    criteria:"TLS 1.0/1.1 enabled; weak ciphers; forward secrecy missing; key possibly 1024-bit",
+    action:"Remediation required; upgrade TLS stack; rotate certificates",
     v:"orange" as const,
   },
   {
     tier:"CRITICAL", level:"Insecure / exploitable",
-    criteria:"SSL v2/v3 enabled; Key <1024-bit; weak cipher suites (<112-bit security); known vulnerabilities",
-    action:"Immediate action — block or isolate; replace certificate and TLS config; patch vulnerabilities",
+    criteria:"SSL v2/v3 enabled; Key <1024-bit; known vulnerabilities",
+    action:"Immediate action — block or isolate; replace certificate and TLS config",
     v:"red" as const,
   },
 ];
+
+function useMobile() {
+  const [mobile, setMobile] = useState(window.innerWidth < 768);
+  useEffect(() => {
+    const h = () => setMobile(window.innerWidth < 768);
+    window.addEventListener("resize", h);
+    return () => window.removeEventListener("resize", h);
+  }, []);
+  return mobile;
+}
 
 export default function PQCPosturePage() {
   const [assets, setAssets] = useState<any[]>([]);
@@ -48,16 +58,12 @@ export default function PQCPosturePage() {
     avg_score:0, total:0, elite:0, standard:0, legacy:0, critical:0,
     pqc_ready:0, elite_pct:0, standard_pct:0, legacy_pct:0, critical_pct:0
   });
+  const mobile = useMobile();
 
   useEffect(() => {
     fetch(`${API}/pqc`)
       .then(r => r.json())
-      .then(d => {
-        if (d.assets?.length) {
-          setAssets(d.assets);
-          setStats(d.stats);
-        }
-      })
+      .then(d => { if (d.assets?.length) { setAssets(d.assets); setStats(d.stats); } })
       .catch(() => {});
   }, []);
 
@@ -68,7 +74,6 @@ export default function PQCPosturePage() {
 
   const displayAssets = assets.length ? assets : MOCK_PQC_ASSETS;
   const score         = stats.avg_score || 755;
-  const scorePct      = Math.round(score / 10);
   const sc            = scoreColor(score);
 
   return (
@@ -76,27 +81,63 @@ export default function PQCPosturePage() {
 
       {/* ── SCORE HEADER ── */}
       <Panel style={{ background:"linear-gradient(135deg,rgba(59,130,246,0.06) 0%,transparent 100%)" }}>
-        <div style={{ padding:"18px 20px", display:"flex", gap:24, alignItems:"center", flexWrap:"wrap" }}>
-          <div>
-            <div style={{ fontFamily:"'Orbitron',monospace", fontSize:9, color:T.text3, letterSpacing:".15em", marginBottom:6 }}>
-              CONSOLIDATED PQC CYBER-RATING SCORE
+        <div style={{ padding: mobile ? "14px 16px" : "18px 20px",
+          display:"flex", gap: mobile ? 14 : 24,
+          alignItems:"center", flexWrap:"wrap" }}>
+
+          {/* Score + SVG side by side on mobile */}
+          <div style={{ display:"flex", gap:14, alignItems:"center",
+            flex: mobile ? "1 1 100%" : "unset" }}>
+            <div style={{ flex:1 }}>
+              <div style={{ fontFamily:"'Orbitron',monospace", fontSize: mobile ? 7 : 9,
+                color:T.text3, letterSpacing:".15em", marginBottom:6 }}>
+                CONSOLIDATED PQC CYBER-RATING SCORE
+              </div>
+              <div style={{ display:"flex", alignItems:"baseline", gap: mobile ? 6 : 10 }}>
+                <span style={{ fontFamily:"'Orbitron',monospace",
+                  fontSize: mobile ? 40 : 52, fontWeight:900, color:sc,
+                  textShadow:`0 0 30px ${sc}66`, lineHeight:1 }}>{score}</span>
+                <span style={{ fontFamily:"'Orbitron',monospace",
+                  fontSize: mobile ? 14 : 18, color:T.text2 }}>/1000</span>
+                <Badge v={score >= 700 ? "green" : score >= 400 ? "yellow" : "red"}>
+                  {score >= 700 ? "ELITE-PQC" : score >= 400 ? "STANDARD" : "CRITICAL"}
+                </Badge>
+              </div>
+              <div style={{ fontSize:11, color:T.text3, marginTop:6 }}>
+                Indicates a stronger security posture
+              </div>
             </div>
-            <div style={{ display:"flex", alignItems:"baseline", gap:10 }}>
-              <span style={{ fontFamily:"'Orbitron',monospace", fontSize:52, fontWeight:900, color:sc, textShadow:`0 0 30px ${sc}66`, lineHeight:1 }}>{score}</span>
-              <span style={{ fontFamily:"'Orbitron',monospace", fontSize:18, color:T.text2 }}>/1000</span>
-              <Badge v={score >= 700 ? "green" : score >= 400 ? "yellow" : "red"}>
-                {score >= 700 ? "ELITE-PQC" : score >= 400 ? "STANDARD" : "CRITICAL"}
-              </Badge>
-            </div>
-            <div style={{ fontSize:11, color:T.text3, marginTop:6 }}>Indicates a stronger security posture</div>
+
+            <svg width={mobile ? 110 : 160} height={mobile ? 110 : 160}
+              viewBox="0 0 160 160" style={{ flexShrink:0 }}>
+              <circle cx="80" cy="80" r="60" fill="none" stroke="rgba(255,255,255,0.05)" strokeWidth="14"/>
+              <circle cx="80" cy="80" r="60" fill="none" stroke={T.green} strokeWidth="14"
+                strokeDasharray={`${stats.elite_pct * 3.77 || 170} 377`} strokeLinecap="round"
+                transform="rotate(-90 80 80)" style={{ filter:"drop-shadow(0 0 8px rgba(34,197,94,.4))" }}/>
+              <circle cx="80" cy="80" r="60" fill="none" stroke={T.yellow} strokeWidth="14"
+                strokeDasharray={`${stats.standard_pct * 3.77 || 113} 377`}
+                strokeDashoffset={`-${stats.elite_pct * 3.77 || 170}`} strokeLinecap="round"
+                transform="rotate(-90 80 80)"/>
+              <circle cx="80" cy="80" r="60" fill="none" stroke={T.orange} strokeWidth="14"
+                strokeDasharray={`${stats.legacy_pct * 3.77 || 57} 377`}
+                strokeDashoffset={`-${(stats.elite_pct + stats.standard_pct) * 3.77 || 283}`}
+                strokeLinecap="round" transform="rotate(-90 80 80)"/>
+              <text x="80" y="74" textAnchor="middle" fill={sc}
+                fontFamily="Orbitron,monospace" fontSize="22" fontWeight="700">
+                {stats.elite_pct || 45}%
+              </text>
+              <text x="80" y="94" textAnchor="middle" fill="rgba(200,220,255,0.35)"
+                fontFamily="Share Tech Mono" fontSize="9">ELITE-PQC</text>
+            </svg>
           </div>
 
-          <div style={{ flex:1, minWidth:200 }}>
+          {/* Progress bars */}
+          <div style={{ flex:1, minWidth: mobile ? "100%" : 200 }}>
             {[
               { label:"Elite-PQC Ready", pct: stats.elite_pct    || 45, color:T.green  },
               { label:"Standard",        pct: stats.standard_pct || 30, color:T.yellow },
               { label:"Legacy",          pct: stats.legacy_pct   || 15, color:T.orange },
-              { label:`Critical Apps: ${stats.critical || 8}`, pct: stats.critical_pct || 8, color:T.red },
+              { label:`Critical: ${stats.critical || 8}`, pct: stats.critical_pct || 8, color:T.red },
             ].map(row => (
               <div key={row.label} style={{ marginBottom:10 }}>
                 <div style={{ display:"flex", justifyContent:"space-between", marginBottom:4 }}>
@@ -107,41 +148,26 @@ export default function PQCPosturePage() {
               </div>
             ))}
           </div>
-
-          <svg width="160" height="160" viewBox="0 0 160 160">
-            <circle cx="80" cy="80" r="60" fill="none" stroke="rgba(255,255,255,0.05)" strokeWidth="14"/>
-            <circle cx="80" cy="80" r="60" fill="none" stroke={T.green} strokeWidth="14"
-              strokeDasharray={`${stats.elite_pct * 3.77 || 170} 377`} strokeLinecap="round"
-              transform="rotate(-90 80 80)" style={{ filter:"drop-shadow(0 0 8px rgba(34,197,94,.4))" }}/>
-            <circle cx="80" cy="80" r="60" fill="none" stroke={T.yellow} strokeWidth="14"
-              strokeDasharray={`${stats.standard_pct * 3.77 || 113} 377`}
-              strokeDashoffset={`-${stats.elite_pct * 3.77 || 170}`} strokeLinecap="round"
-              transform="rotate(-90 80 80)"/>
-            <circle cx="80" cy="80" r="60" fill="none" stroke={T.orange} strokeWidth="14"
-              strokeDasharray={`${stats.legacy_pct * 3.77 || 57} 377`}
-              strokeDashoffset={`-${(stats.elite_pct + stats.standard_pct) * 3.77 || 283}`}
-              strokeLinecap="round" transform="rotate(-90 80 80)"/>
-            <text x="80" y="74" textAnchor="middle" fill={sc} fontFamily="Orbitron,monospace" fontSize="22" fontWeight="700">{stats.elite_pct || 45}%</text>
-            <text x="80" y="94" textAnchor="middle" fill="rgba(200,220,255,0.35)" fontFamily="Share Tech Mono" fontSize="9">ELITE-PQC</text>
-          </svg>
         </div>
       </Panel>
 
       {/* ── CLASSIFICATION + RISK MATRIX ── */}
-      <div style={GRID.g2}>
+      <div style={{ display:"grid", gridTemplateColumns: mobile ? "1fr" : "1fr 1fr", gap: mobile ? 8 : 10 }}>
         <Panel>
           <PanelHeader left="ASSETS BY CLASSIFICATION GRADE" />
-          <div style={{ padding:16, display:"flex", gap:16, alignItems:"flex-end", justifyContent:"center" }}>
+          <div style={{ padding:16, display:"flex", gap: mobile ? 12 : 16,
+            alignItems:"flex-end", justifyContent:"center" }}>
             {[
-              { label:"ELITE",    val: stats.elite    || 37, h:90, color:T.green  },
-              { label:"CRITICAL", val: stats.critical || 2,  h:40, color:T.red    },
-              { label:"STANDARD", val: stats.standard || 4,  h:55, color:T.purple },
+              { label:"ELITE",    val: stats.elite    || 37, h: mobile ? 70 : 90, color:T.green  },
+              { label:"CRITICAL", val: stats.critical || 2,  h: mobile ? 30 : 40, color:T.red    },
+              { label:"STANDARD", val: stats.standard || 4,  h: mobile ? 45 : 55, color:T.purple },
             ].map(bar => (
               <div key={bar.label} style={{ textAlign:"center" }}>
-                <div style={{ width:70, height:bar.h,
+                <div style={{ width: mobile ? 56 : 70, height:bar.h,
                   background:`${bar.color}18`, border:`1px solid ${bar.color}44`,
                   borderRadius:"2px 2px 0 0", display:"flex", alignItems:"center", justifyContent:"center" }}>
-                  <span style={{ fontFamily:"'Orbitron',monospace", fontSize:24, color:bar.color }}>{bar.val}</span>
+                  <span style={{ fontFamily:"'Orbitron',monospace",
+                    fontSize: mobile ? 18 : 24, color:bar.color }}>{bar.val}</span>
                 </div>
                 <div style={{ fontFamily:"'Orbitron',monospace", fontSize:7.5, color:T.text3, marginTop:6,
                   padding:"3px 6px", background:`${bar.color}10`, border:`1px solid ${bar.color}28` }}>
@@ -161,8 +187,8 @@ export default function PQCPosturePage() {
                 T.red+"1a",T.orange+"12",T.green+"0d",
                 T.orange+"12",T.green+"0d",T.green+"14",
               ].map((bg, i) => (
-                <div key={i} style={{ width:52, height:52, background:bg,
-                  border:`1px solid ${bg.slice(0,7)}44`, borderRadius:2 }} />
+                <div key={i} style={{ width: mobile ? 40 : 52, height: mobile ? 40 : 52,
+                  background:bg, border:`1px solid ${bg.slice(0,7)}44`, borderRadius:2 }} />
               ))}
             </div>
             <div style={{ display:"flex", flexDirection:"column", gap:9 }}>
@@ -185,47 +211,90 @@ export default function PQCPosturePage() {
       {/* ── PQC ASSET TABLE ── */}
       <Panel>
         <PanelHeader left="PQC ASSET STATUS"
-          right={<span style={{ fontSize:8, color:T.text3, fontFamily:"'Orbitron',monospace" }}>CRITICAL APPS: {stats.critical || 8}</span>}
+          right={<span style={{ fontSize:8, color:T.text3, fontFamily:"'Orbitron',monospace" }}>
+            CRITICAL: {stats.critical || 8}
+          </span>}
         />
-        <Table cols={["ASSET NAME","IP ADDRESS","PQC SUPPORT","TLS","SCORE","STATUS","OWNER"]}>
-          {displayAssets.map((a: any, i: number) => (
-            <TR key={i}>
-              <TD style={{ fontSize:10, color:T.blue }}>{a.name}</TD>
-              <TD style={{ fontSize:10, color:T.text3 }}>{a.ip}</TD>
-              <TD style={{ textAlign:"center", fontSize:16 }}>
-                {a.pqc ? <span style={{ color:T.green }}>✓</span> : <span style={{ color:T.red }}>✗</span>}
-              </TD>
-              <TD><Badge v={a.tls==="1.0"?"red":a.tls==="1.2"?"yellow":"green"}>TLS {a.tls}</Badge></TD>
-              <TD>
-                <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-                  <div style={{ width:60 }}><ProgBar pct={Math.round(a.score/10)} color={scoreColor(a.score)} /></div>
-                  <span style={{ fontFamily:"'Orbitron',monospace", fontSize:11, color:scoreColor(a.score) }}>{a.score}</span>
+        {mobile ? (
+          <div style={{ maxHeight:360, overflowY:"auto" }}>
+            {displayAssets.map((a: any, i: number) => (
+              <div key={i} style={{ padding:"10px 14px", borderBottom:`1px solid rgba(59,130,246,0.05)` }}>
+                <div style={{ display:"flex", justifyContent:"space-between", marginBottom:4 }}>
+                  <span style={{ fontSize:11, color:T.blue }}>{a.name}</span>
+                  <Badge v={statusVariant(a.status)}>{a.status.toUpperCase()}</Badge>
                 </div>
-              </TD>
-              <TD><Badge v={statusVariant(a.status)}>{a.status.toUpperCase()}</Badge></TD>
-              <TD style={{ fontSize:10, color:T.text3 }}>{a.owner}</TD>
-            </TR>
-          ))}
-        </Table>
+                <div style={{ display:"flex", gap:8, alignItems:"center", marginBottom:4 }}>
+                  <Badge v={a.tls==="1.0"?"red":a.tls==="1.2"?"yellow":"green"}>TLS {a.tls}</Badge>
+                  <span style={{ fontSize:14, color: a.pqc ? T.green : T.red }}>{a.pqc ? "✓" : "✗"}</span>
+                  <span style={{ fontSize:9, color:T.text3 }}>{a.ip}</span>
+                </div>
+                <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                  <div style={{ flex:1 }}>
+                    <ProgBar pct={Math.round(a.score/10)} color={scoreColor(a.score)} />
+                  </div>
+                  <span style={{ fontFamily:"'Orbitron',monospace", fontSize:11, color:scoreColor(a.score) }}>
+                    {a.score}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <Table cols={["ASSET NAME","IP ADDRESS","PQC SUPPORT","TLS","SCORE","STATUS","OWNER"]}>
+            {displayAssets.map((a: any, i: number) => (
+              <TR key={i}>
+                <TD style={{ fontSize:10, color:T.blue }}>{a.name}</TD>
+                <TD style={{ fontSize:10, color:T.text3 }}>{a.ip}</TD>
+                <TD style={{ textAlign:"center", fontSize:16 }}>
+                  {a.pqc ? <span style={{ color:T.green }}>✓</span> : <span style={{ color:T.red }}>✗</span>}
+                </TD>
+                <TD><Badge v={a.tls==="1.0"?"red":a.tls==="1.2"?"yellow":"green"}>TLS {a.tls}</Badge></TD>
+                <TD>
+                  <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                    <div style={{ width:60 }}><ProgBar pct={Math.round(a.score/10)} color={scoreColor(a.score)} /></div>
+                    <span style={{ fontFamily:"'Orbitron',monospace", fontSize:11, color:scoreColor(a.score) }}>{a.score}</span>
+                  </div>
+                </TD>
+                <TD><Badge v={statusVariant(a.status)}>{a.status.toUpperCase()}</Badge></TD>
+                <TD style={{ fontSize:10, color:T.text3 }}>{a.owner}</TD>
+              </TR>
+            ))}
+          </Table>
+        )}
       </Panel>
 
       {/* ── TIER TABLE ── */}
       <Panel>
         <PanelHeader left="PQC COMPLIANCE TIERS" />
-        <Table cols={["TIER","SECURITY LEVEL","COMPLIANCE CRITERIA","PRIORITY / ACTION"]}>
-          {TIERS.map((t, i) => (
-            <TR key={i}>
-              <TD><Badge v={t.v}>{t.tier}</Badge></TD>
-              <TD style={{ fontSize:10, color:scoreColor(i===0?800:i===1?500:i===2?350:0) }}>{t.level}</TD>
-              <TD style={{ fontSize:10, color:T.text2, maxWidth:280 }}>{t.criteria}</TD>
-              <TD style={{ fontSize:10, color:T.text3 }}>{t.action}</TD>
-            </TR>
-          ))}
-        </Table>
+        {mobile ? (
+          <div>
+            {TIERS.map((t, i) => (
+              <div key={i} style={{ padding:"12px 14px", borderBottom:`1px solid rgba(59,130,246,0.05)` }}>
+                <div style={{ display:"flex", justifyContent:"space-between", marginBottom:6 }}>
+                  <Badge v={t.v}>{t.tier}</Badge>
+                  <span style={{ fontSize:10, color:scoreColor(i===0?800:i===1?500:i===2?350:0) }}>{t.level}</span>
+                </div>
+                <div style={{ fontSize:9, color:T.text2, marginBottom:4, lineHeight:1.5 }}>{t.criteria}</div>
+                <div style={{ fontSize:9, color:T.text3, lineHeight:1.5 }}>{t.action}</div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <Table cols={["TIER","SECURITY LEVEL","COMPLIANCE CRITERIA","PRIORITY / ACTION"]}>
+            {TIERS.map((t, i) => (
+              <TR key={i}>
+                <TD><Badge v={t.v}>{t.tier}</Badge></TD>
+                <TD style={{ fontSize:10, color:scoreColor(i===0?800:i===1?500:i===2?350:0) }}>{t.level}</TD>
+                <TD style={{ fontSize:10, color:T.text2, maxWidth:280 }}>{t.criteria}</TD>
+                <TD style={{ fontSize:10, color:T.text3 }}>{t.action}</TD>
+              </TR>
+            ))}
+          </Table>
+        )}
       </Panel>
 
       {/* ── RECOMMENDATIONS + APP DETAIL ── */}
-      <div style={GRID.g2}>
+      <div style={{ display:"grid", gridTemplateColumns: mobile ? "1fr" : "1fr 1fr", gap: mobile ? 8 : 10 }}>
         <Panel>
           <PanelHeader left="IMPROVEMENT RECOMMENDATIONS" />
           <div>
@@ -238,7 +307,7 @@ export default function PQCPosturePage() {
                   fontSize:11, color:r.color, flexShrink:0 }}>
                   {r.icon}
                 </div>
-                <span style={{ fontSize:11, color:T.text2 }}>{r.text}</span>
+                <span style={{ fontSize: mobile ? 12 : 11, color:T.text2 }}>{r.text}</span>
               </div>
             ))}
           </div>
@@ -255,12 +324,12 @@ export default function PQCPosturePage() {
                 {assets[0]?.name || "App A"}
               </span>
             </div>
-            <div style={GRID.g2}>
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
               {[
-                ["OWNER",    assets[0]?.owner  || "Team 1",   T.text2],
-                ["EXPOSURE", "Internet",                       T.text2],
-                ["TLS",      `TLS ${assets[0]?.tls || "1.2"}`,T.text2],
-                ["STATUS",   assets[0]?.status  || "Legacy",  T.orange],
+                ["OWNER",    assets[0]?.owner  || "Team 1",    T.text2],
+                ["EXPOSURE", "Internet",                        T.text2],
+                ["TLS",      `TLS ${assets[0]?.tls || "1.2"}`, T.text2],
+                ["STATUS",   assets[0]?.status  || "Legacy",   T.orange],
               ].map(([k,v,c]) => (
                 <div key={k as string}>
                   <div style={{ fontSize:8, color:T.text3, marginBottom:2 }}>{k}</div>
@@ -271,11 +340,17 @@ export default function PQCPosturePage() {
             <div>
               <div style={{ fontSize:8, color:T.text3, marginBottom:5 }}>PQC SCORE</div>
               <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-                <div style={{ flex:1 }}><ProgBar pct={Math.round((assets[0]?.score || 480) / 10)} color={scoreColor(assets[0]?.score || 480)} /></div>
-                <span style={{ fontFamily:"'Orbitron',monospace", fontSize:14, color:scoreColor(assets[0]?.score || 480) }}>
+                <div style={{ flex:1 }}>
+                  <ProgBar pct={Math.round((assets[0]?.score || 480) / 10)}
+                    color={scoreColor(assets[0]?.score || 480)} />
+                </div>
+                <span style={{ fontFamily:"'Orbitron',monospace", fontSize:14,
+                  color:scoreColor(assets[0]?.score || 480) }}>
                   {assets[0]?.score || 480}
                 </span>
-                <Badge v={statusVariant(assets[0]?.status || "Critical")}>{(assets[0]?.status || "Critical").toUpperCase()}</Badge>
+                <Badge v={statusVariant(assets[0]?.status || "Critical")}>
+                  {(assets[0]?.status || "Critical").toUpperCase()}
+                </Badge>
               </div>
             </div>
             <div style={{ padding:"10px 12px", background:"rgba(239,68,68,0.05)",
