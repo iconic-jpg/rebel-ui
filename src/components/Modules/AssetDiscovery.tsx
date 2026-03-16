@@ -13,6 +13,27 @@ export default function AssetDiscoveryPage() {
   const [query, setQuery]   = useState("");
   const mapRef              = useRef<HTMLCanvasElement>(null);
 
+    const [domainData, setDomainData]   = useState<any[]>([]);
+  const [sslData, setSslData]         = useState<any[]>([]);
+  const [ipData, setIpData]           = useState<any[]>([]);
+  const [softwareData, setSoftwareData] = useState<any[]>([]);
+  const [counts, setCounts]           = useState({ domains: 0, ssl: 0, ips: 0, software: 0 });
+  const [loading, setLoading]         = useState(true);
+
+  useEffect(() => {
+    fetch(`${API}/discovery`)
+      .then(r => r.json())
+      .then(d => {
+        setDomainData(d.domains || []);
+        setSslData(d.ssl || []);
+        setIpData(d.ips || []);
+        setSoftwareData(d.software || []);
+        setCounts(d.counts || counts);
+        setLoading(false);
+      })
+      .catch(() => setLoading(false));
+  }, []);
+
   useEffect(() => { drawNetMap(); }, []);
 
   function filter(s: string) {
@@ -76,81 +97,88 @@ export default function AssetDiscoveryPage() {
 
   // ── Render discovery table based on active tab + status ──────────────────
   function renderTable() {
-    if (tab === "domains") {
-      const data = MOCK_DOMAINS.filter(d => filter(d.status) &&
-        (!query || d.domain.includes(query)));
-      return (
-        <Table cols={["DETECTION DATE","DOMAIN NAME","REGISTRATION DATE","REGISTRAR","COMPANY","STATUS"]}>
-          {data.map((d: any, i: number) => (
-            <TR key={i}>
-              <TD style={{ fontSize:10, color:T.text3 }}>{d.date}</TD>
-              <TD style={{ fontSize:10, color:T.blue }}>{d.domain}</TD>
-              <TD style={{ fontSize:10, color:T.text3 }}>{d.regdate}</TD>
-              <TD style={{ fontSize:10, color:T.text2 }}>{d.registrar}</TD>
-              <TD><Badge v="blue">{d.company}</Badge></TD>
-              <TD><Badge v={d.status==="new"?"yellow":d.status==="confirmed"?"green":"gray"}>{d.status.toUpperCase()}</Badge></TD>
-            </TR>
-          ))}
-        </Table>
-      );
-    }
-    if (tab === "ssl") {
-      const data = MOCK_SSL.filter(d => filter(d.status));
-      return (
-        <Table cols={["DETECTION DATE","SSL SHA FINGERPRINT","VALID FROM","COMMON NAME","COMPANY","CA","STATUS"]}>
-          {data.map((d: any, i: number) => (
-            <TR key={i}>
-              <TD style={{ fontSize:10, color:T.text3 }}>{d.date}</TD>
-              <TD style={{ fontSize:9, color:T.text3, maxWidth:120, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{d.sha}</TD>
-              <TD style={{ fontSize:10, color:T.text3 }}>{d.from}</TD>
-              <TD style={{ fontSize:10, color:T.text2 }}>{d.common}</TD>
-              <TD><Badge v="blue">{d.company}</Badge></TD>
-              <TD style={{ fontSize:10, color:T.cyan }}>{d.ca}</TD>
-              <TD><Badge v={d.status==="new"?"yellow":d.status==="confirmed"?"green":"gray"}>{d.status.toUpperCase()}</Badge></TD>
-            </TR>
-          ))}
-        </Table>
-      );
-    }
-    if (tab === "ips") {
-      const data = MOCK_IPS.filter(d => filter(d.status));
-      return (
-        <Table cols={["DETECTION DATE","IP ADDRESS","PORTS","SUBNET","ASN","NETNAME","LOCATION","COMPANY","STATUS"]}>
-          {data.map((d: any, i: number) => (
-            <TR key={i}>
-              <TD style={{ fontSize:10, color:T.text3 }}>{d.date}</TD>
-              <TD style={{ fontSize:10, color:T.blue }}>{d.ip}</TD>
-              <TD style={{ fontSize:10, color:T.text2 }}>{d.ports}</TD>
-              <TD style={{ fontSize:10, color:T.text3 }}>{d.subnet}</TD>
-              <TD style={{ fontSize:10, color:T.cyan }}>{d.asn}</TD>
-              <TD style={{ fontSize:10, color:T.text2 }}>{d.netname}</TD>
-              <TD style={{ fontSize:10, color:T.text3 }}>{d.location}</TD>
-              <TD><Badge v="blue">PNB</Badge></TD>
-              <TD><Badge v={d.status==="new"?"yellow":d.status==="confirmed"?"green":"gray"}>{d.status.toUpperCase()}</Badge></TD>
-            </TR>
-          ))}
-        </Table>
-      );
-    }
-    // software
-    const data = MOCK_SOFTWARE.filter(d => filter(d.status));
+  if (tab === "domains") {
+    const data = domainData.filter(d =>
+      !query || d.domain.includes(query)
+    );
     return (
-      <Table cols={["DETECTION DATE","PRODUCT","VERSION","TYPE","PORT","HOST","COMPANY","STATUS"]}>
+      <Table cols={["DETECTION DATE","DOMAIN NAME","REGISTRATION DATE","REGISTRAR","COMPANY","STATUS"]}>
         {data.map((d: any, i: number) => (
           <TR key={i}>
             <TD style={{ fontSize:10, color:T.text3 }}>{d.date}</TD>
-            <TD style={{ fontSize:10, color:T.cyan }}>{d.product}</TD>
-            <TD style={{ fontSize:10, color:T.text3 }}>{d.version}</TD>
-            <TD><Badge v="gray">{d.type}</Badge></TD>
-            <TD style={{ fontSize:10, color:T.text2 }}>{d.port}</TD>
-            <TD style={{ fontSize:10, color:T.blue }}>{d.host}</TD>
+            <TD style={{ fontSize:10, color:T.blue }}>{d.domain}</TD>
+            <TD style={{ fontSize:10, color:T.text3 }}>{d.regdate}</TD>
+            <TD style={{ fontSize:10, color:T.text2 }}>{d.registrar}</TD>
             <TD><Badge v="blue">{d.company}</Badge></TD>
-            <TD><Badge v={d.status==="new"?"yellow":d.status==="confirmed"?"green":"gray"}>{d.status.toUpperCase()}</Badge></TD>
+            <TD><Badge v="green">CONFIRMED</Badge></TD>
           </TR>
         ))}
+        {data.length === 0 && !loading && (
+          <TR><TD style={{ color:T.text3, fontSize:10 }}>No domains found</TD></TR>
+        )}
       </Table>
     );
   }
+  if (tab === "ssl") {
+    return (
+      <Table cols={["DATE","CIPHER","VALID FROM","COMMON NAME","COMPANY","CA","TLS"]}>
+        {sslData.map((d: any, i: number) => (
+          <TR key={i}>
+            <TD style={{ fontSize:10, color:T.text3 }}>{d.date}</TD>
+            <TD style={{ fontSize:9, color:T.text3, maxWidth:120, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{d.sha}</TD>
+            <TD style={{ fontSize:10, color:T.text3 }}>{d.from}</TD>
+            <TD style={{ fontSize:10, color:T.text2 }}>{d.common}</TD>
+            <TD><Badge v="blue">{d.company}</Badge></TD>
+            <TD style={{ fontSize:10, color:T.cyan }}>{d.ca}</TD>
+            <TD><Badge v={d.tls_version==="TLSv1.0"?"red":d.tls_version==="TLSv1.2"?"yellow":"green"}>{d.tls_version}</Badge></TD>
+          </TR>
+        ))}
+        {sslData.length === 0 && !loading && (
+          <TR><TD style={{ color:T.text3, fontSize:10 }}>No SSL data — run crypto scans first</TD></TR>
+        )}
+      </Table>
+    );
+  }
+  if (tab === "ips") {
+    return (
+      <Table cols={["DATE","IP ADDRESS","PORTS","SUBNET","ASN","NETNAME","LOCATION","STATUS"]}>
+        {ipData.map((d: any, i: number) => (
+          <TR key={i}>
+            <TD style={{ fontSize:10, color:T.text3 }}>{d.date}</TD>
+            <TD style={{ fontSize:10, color:T.blue }}>{d.ip}</TD>
+            <TD style={{ fontSize:10, color:T.text2 }}>{d.ports}</TD>
+            <TD style={{ fontSize:10, color:T.text3 }}>{d.subnet}</TD>
+            <TD style={{ fontSize:10, color:T.cyan }}>{d.asn}</TD>
+            <TD style={{ fontSize:10, color:T.text2 }}>{d.netname}</TD>
+            <TD style={{ fontSize:10, color:T.text3 }}>{d.location}</TD>
+            <TD><Badge v="green">CONFIRMED</Badge></TD>
+          </TR>
+        ))}
+        {ipData.length === 0 && !loading && (
+          <TR><TD style={{ color:T.text3, fontSize:10 }}>No IPs resolved yet</TD></TR>
+        )}
+      </Table>
+    );
+  }
+  return (
+    <Table cols={["DATE","PRODUCT","VERSION","TYPE","PORT","HOST","STATUS"]}>
+      {softwareData.map((d: any, i: number) => (
+        <TR key={i}>
+          <TD style={{ fontSize:10, color:T.text3 }}>{d.date}</TD>
+          <TD style={{ fontSize:10, color:T.cyan }}>{d.product}</TD>
+          <TD style={{ fontSize:10, color:T.text3 }}>{d.version}</TD>
+          <TD><Badge v="gray">{d.type}</Badge></TD>
+          <TD style={{ fontSize:10, color:T.text2 }}>{d.port}</TD>
+          <TD style={{ fontSize:10, color:T.blue }}>{d.host}</TD>
+          <TD><Badge v="green">CONFIRMED</Badge></TD>
+        </TR>
+      ))}
+      {softwareData.length === 0 && !loading && (
+        <TR><TD style={{ color:T.text3, fontSize:10 }}>No software detected yet</TD></TR>
+      )}
+    </Table>
+  );
+}
 
   const STATUS_COUNTS: Record<DiscTab, Record<StatusFilter, number>> = {
     domains:  { new:5, fp:1, confirmed:2, all:7 },
@@ -183,28 +211,24 @@ export default function AssetDiscoveryPage() {
       </Panel>
 
       {/* DISCOVERY METRICS */}
-      <div style={GRID.g4}>
-        <MetricCard label="DOMAINS"    value={20} sub="Discovered"         color={T.blue}   />
-        <MetricCard label="SSL CERTS"  value={15} sub="Active certificates" color={T.yellow} />
-        <MetricCard label="IP/SUBNETS" value={34} sub="Mapped ranges"      color={T.orange} />
-        <MetricCard label="SOFTWARE"   value={52} sub="Identified stacks"  color={T.purple} />
-      </div>
+    <div style={GRID.g4}>
+      <MetricCard label="DOMAINS"    value={counts.domains}  sub="Discovered"          color={T.blue}   />
+      <MetricCard label="SSL CERTS"  value={counts.ssl}      sub="Active certificates"  color={T.yellow} />
+      <MetricCard label="IP/SUBNETS" value={counts.ips}      sub="Mapped ranges"       color={T.orange} />
+      <MetricCard label="SOFTWARE"   value={counts.software} sub="Identified stacks"   color={T.purple} />
+    </div>
 
-      {/* DISCOVERY TABLE */}
-      <Panel>
-        <div style={S.ph}>
-          <SubTabs
-            tabs={[
-              { id:"domains",  label:`DOMAINS (20)` },
-              { id:"ssl",      label:`SSL (15)` },
-              { id:"ips",      label:`IP/SUBNETS (34)` },
-              { id:"software", label:`SOFTWARE (52)` },
-            ]}
-            active={tab}
-
-            onChange={(v: string) => setTab(v as DiscTab)}
-
-          />
+    {/* Tab labels with real counts */}
+    <SubTabs
+      tabs={[
+        { id:"domains",  label:`DOMAINS (${counts.domains})` },
+        { id:"ssl",      label:`SSL (${counts.ssl})` },
+        { id:"ips",      label:`IP/SUBNETS (${counts.ips})` },
+        { id:"software", label:`SOFTWARE (${counts.software})` },
+      ]}
+      active={tab}
+      onChange={(v: string) => setTab(v as DiscTab)}
+    />
           <SubTabs
             tabs={[
               { id:"new",       label:`NEW (${STATUS_COUNTS[tab].new})` },
