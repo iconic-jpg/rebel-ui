@@ -58,14 +58,21 @@ function ScanModal({ onClose }: { onClose: () => void }) {
 
 const runScan = async () => {
   if (!url.trim()) return;
+
+  // ── Check auth before scanning ──
+  const token = localStorage.getItem("access");
+  if (!token) {
+    navigate("/#/login");
+    return;
+  }
+
   setLoading(true); setResult(null);
   try {
-    const token = localStorage.getItem("access"); // Django JWT token
     const res = await fetch(`${API}${tab === "url" ? "/scan-url" : "/scan-crypto"}`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        ...(token ? { "Authorization": `Bearer ${token}` } : {})
+        "Authorization": `Bearer ${token}`
       },
       body: JSON.stringify({ url: url.trim() }),
     });
