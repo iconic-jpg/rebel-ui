@@ -2,13 +2,14 @@ import React, { useState } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 
 const NAV_ITEMS = [
-  { path: "/",          label: "Dashboard",      icon: "⬡", section: "CORE"       },
-  { path: "/inventory", label: "Asset Inventory",icon: "◈", section: "ASSET & PQC"},
-  { path: "/discovery", label: "Asset Discovery",icon: "◎", section: null         },
-  { path: "/cbom",      label: "CBOM",           icon: "◉", section: null         },
-  { path: "/pqc",       label: "Posture of PQC", icon: "⬟", section: null         },
-  { path: "/rating",    label: "Cyber Rating",   icon: "✦", section: "REPORTS"    },
-  { path: "/reporting", label: "Reporting",      icon: "▣", section: null         },
+  { path: "/",               label: "Dashboard",        icon: "⬡", section: "CORE"       },
+  { path: "/inventory",      label: "Asset Inventory",  icon: "◈", section: "ASSET & PQC"},
+  { path: "/discovery",      label: "Asset Discovery",  icon: "◎", section: null         },
+  { path: "/cbom",           label: "CBOM",             icon: "◉", section: null         },
+  { path: "/pqc",            label: "Posture of PQC",   icon: "⬟", section: null         },
+  { path: "/pqc-readiness",  label: "PQC Readiness",    icon: "◐", section: null         },
+  { path: "/rating",         label: "Cyber Rating",     icon: "✦", section: "REPORTS"    },
+  { path: "/reporting",      label: "Reporting",        icon: "▣", section: null         },
 ];
 
 export default function AppShell() {
@@ -156,6 +157,17 @@ export default function AppShell() {
                   <span style={{ width:4, height:4, borderRadius:"50%",
                     background:"#3b82f6", boxShadow:"0 0 6px #3b82f6",
                     flexShrink:0 }}/>
+                )}
+
+                {/* NEW badge for PQC Readiness */}
+                {item.path === "/pqc-readiness" && !isActive(item.path) && (
+                  <span style={{
+                    fontSize:7, color:"#22c55e",
+                    border:"1px solid rgba(34,197,94,0.4)",
+                    borderRadius:2, padding:"1px 4px",
+                    fontFamily:"'Orbitron',monospace",
+                    letterSpacing:".08em", flexShrink:0,
+                  }}>NEW</span>
                 )}
               </button>
             </React.Fragment>
