@@ -22,11 +22,11 @@ export default function App() {
 
         {/* AppShell draws the sidebar, Outlet renders the page */}
         <Route path="/" element={<AppShell />}>
-          <Route index        element={<RebelDashboard />} />
-          <Route path="inventory" element={<AssetInventoryPage />} />
-          <Route path="discovery" element={<AssetDiscoveryPage />} />
-          <Route path="cbom"      element={<CBOMPage />} />
-          <Route path="pqc"       element={<PQCPosturePage />} />
+          <Route index              element={<RebelDashboard />} />
+          <Route path="inventory"   element={<AssetInventoryPage />} />
+          <Route path="discovery"   element={<AssetDiscoveryPage />} />
+          <Route path="cbom"        element={<CBOMPage />} />
+          <Route path="pqc"         element={<PQCPosturePage />} />
           <Route path="pqc-readiness" element={<PQCReadinessPage />} />
           <Route path="rating"      element={<CyberRatingPage />} />
           <Route path="reporting"   element={<ReportingPage />} />

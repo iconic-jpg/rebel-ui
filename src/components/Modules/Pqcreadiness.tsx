@@ -300,13 +300,14 @@ export default function PQCReadinessPage() {
         <MetricCard label="NEED MIGRATION" value={enriched.length} sub="Weak assets"        color={T.red}    />
         <MetricCard label="CRITICAL"       value={critCount}        sub="Immediate action"   color={T.red}    />
         <MetricCard label="EST. DAYS"       value={calDays}          sub={`${teamSize} dev team`} color={T.cyan} />
-        <MetricCard
-          label="EST. COST"
-          value={`$${(totalCost/1000).toFixed(1)}k`}
-          sub="At $800/day"
-          color={T.orange}
-          style={isMobile ? { gridColumn:"1/-1" } : {}}
-        />
+        <div style={isMobile ? { gridColumn:"1/-1" } : {}}>
+          <MetricCard
+            label="EST. COST"
+            value={`$${(totalCost/1000).toFixed(1)}k`}
+            sub="At $800/day"
+            color={T.orange}
+          />
+        </div>
       </div>
 
       {/* ── SCORE GAUGE + PLAN ── */}
@@ -480,7 +481,7 @@ export default function PQCReadinessPage() {
         <div className="pqc-show-table">
           <Table cols={["#","APPLICATION","TYPE","RISK","KEY LEN","CIPHER","TLS","CA","DAYS","COST","PUB","PQC"]}>
             {enriched.map((a, i) => (
-              <TR key={i} style={{ animationDelay:`${i*0.04}s` } as any}>
+              <TR key={i}>
                 <TD style={{ fontFamily:"'Orbitron',monospace", fontSize:9, color:T.text3 }}>{i+1}</TD>
                 <TD style={{ color:T.blue, fontSize:10 }}>{a.app}</TD>
                 <TD><Badge v="gray">{a.assetType}</Badge></TD>
