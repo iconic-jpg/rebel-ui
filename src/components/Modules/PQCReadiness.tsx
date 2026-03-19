@@ -71,7 +71,7 @@ function useBreakpoint() {
 
 // ── PDF Export ────────────────────────────────────────────────────────────────
 function exportAuditPDF(
-  enriched: any[], overallPQCScore: number, pqcReady: number, total: number,
+  enriched: any[], migrationScore: number, pqcReady: number, total: number,
   totalDays: number, calDays: number, totalCost: number,
   teamSize: number, devRate: number, dateStr: string,
   clientName: string, clientDomain: string,
@@ -80,19 +80,19 @@ function exportAuditPDF(
   const timestamp = now.toLocaleString("en-US",{year:"numeric",month:"long",day:"numeric",hour:"2-digit",minute:"2-digit",timeZoneName:"short"});
   const scanDate  = now.toISOString().split("T")[0];
   const reportId  = `REBEL-${scanDate.replace(/-/g,"")}-${Math.random().toString(36).slice(2,8).toUpperCase()}`;
-  const scoreColor= overallPQCScore>=70?"#16a34a":overallPQCScore>=40?"#d97706":"#dc2626";
-  const scoreLabel= overallPQCScore>=70?"COMPLIANT":overallPQCScore>=40?"AT RISK":"CRITICAL";
+  const scoreColor= migrationScore>=70?"#16a34a":migrationScore>=40?"#d97706":"#dc2626";
+  const scoreLabel= migrationScore>=70?"COMPLIANT":migrationScore>=40?"AT RISK":"CRITICAL";
   const displayName = clientName.trim()||(clientDomain?normaliseDomain(clientDomain):"All Assets");
 
   // Gauge SVG
-  const pct=overallPQCScore/100, gr=54, gcx=70, gcy=76;
+  const pct=migrationScore/100, gr=54, gcx=70, gcy=76;
   const gx1=gcx+gr*Math.cos(Math.PI), gy1=gcy+gr*Math.sin(Math.PI);
   const gx2=gcx+gr*Math.cos(Math.PI+Math.PI*pct), gy2=gcy+gr*Math.sin(Math.PI+Math.PI*pct);
   const glf=pct>0.5?1:0;
   const gaugeSVG=`<svg width="140" height="84" viewBox="0 0 140 84" xmlns="http://www.w3.org/2000/svg">
     <path d="M ${gcx-gr} ${gcy} A ${gr} ${gr} 0 0 1 ${gcx+gr} ${gcy}" fill="none" stroke="#e5e7eb" stroke-width="10" stroke-linecap="round"/>
     <path d="M ${gx1.toFixed(2)} ${gy1.toFixed(2)} A ${gr} ${gr} 0 ${glf} 1 ${gx2.toFixed(2)} ${gy2.toFixed(2)}" fill="none" stroke="${scoreColor}" stroke-width="10" stroke-linecap="round"/>
-    <text x="${gcx}" y="${gcy-5}" text-anchor="middle" font-family="Arial" font-size="22" font-weight="bold" fill="${scoreColor}">${overallPQCScore}</text>
+    <text x="${gcx}" y="${gcy-5}" text-anchor="middle" font-family="Arial" font-size="22" font-weight="bold" fill="${scoreColor}">${migrationScore}</text>
     <text x="${gcx}" y="${gcy+13}" text-anchor="middle" font-family="Arial" font-size="7" fill="#6b7280" letter-spacing="1">${scoreLabel}</text>
   </svg>`;
 
@@ -416,7 +416,7 @@ function ScoreGauge({ score, size=200 }: { score:number; size?:number }) {
       <div style={{marginTop:-6,textAlign:"center"}}>
         <div style={{fontFamily:"'Orbitron',monospace",fontSize:Math.round(size*0.18),fontWeight:900,color:col,textShadow:`0 0 20px ${col}44`}}>{shown}</div>
         <div style={{fontFamily:"'Orbitron',monospace",fontSize:9,color:col,letterSpacing:".2em",marginTop:2}}>{label}</div>
-        <div style={{fontSize:9,color:T.text3,marginTop:4}}>AVG PQC READINESS SCORE</div>
+        <div style={{fontSize:9,color:T.text3,marginTop:4}}>MIGRATION PROGRESS</div>
       </div>
     </div>
   );
@@ -492,10 +492,45 @@ export default function PQCReadinessPage() {
     return {...app, analysis, pqcScore:ps};
   });
 
-  // Overall = average per-app score
-  const overallPQCScore = withPQCScore.length
-    ? Math.round(withPQCScore.reduce((s:number,a:any)=>s+(a.pqcScore?.score??0),0)/withPQCScore.length)
-    : 0;
+  // ── Migration Progress Score ──────────────────────────────────────────────
+  // NOT an average of per-app cert scores (that's always ~10 for public sites).
+  // Instead: how far along is the portfolio in the PQC migration journey?
+  //
+  // Five milestones, each worth 20pts:
+  //   1. TLS 1.3 deployed on all apps             (20pts)
+  //   2. No broken ciphers (DES/RC4/3DES/CBC)     (20pts)
+  //   3. No 1024-bit keys anywhere                (20pts)
+  //   4. AES-256-GCM enforced on all apps         (20pts)
+  //   5. At least one app running Kyber hybrid    (20pts — shows active programme)
+  //
+  // This scores the BANK'S PROGRESS, not how good the public internet is.
+  // A bank that has done nothing scores 0-40. One actively deploying Kyber scores 80-100.
+  const n = withPQCScore.length || 1;
+
+  const tls13Pct    = withPQCScore.filter((a:any) => normaliseTLS(a.tls) === "1.3").length / n;
+  const nobrokenPct = withPQCScore.filter((a:any) => {
+    const bulk = a.analysis?.components?.bulkCipher ?? "";
+    return !bulk.includes("CBC") && bulk !== "DES-CBC" && bulk !== "RC4-128" && bulk !== "3DES-CBC";
+  }).length / n;
+  const no1024Pct   = withPQCScore.filter((a:any) => !a.keylen?.startsWith("1024")).length / n;
+  const aes256Pct   = withPQCScore.filter((a:any) => {
+    const bulk = a.analysis?.components?.bulkCipher ?? "";
+    return bulk === "AES-256-GCM" || bulk === "ChaCha20-Poly1305";
+  }).length / n;
+  const anyKyber    = withPQCScore.some((a:any) => a.pqcScore?.active) ? 1 : 0;
+
+  const migrationScore = Math.round(
+    tls13Pct * 20 + nobrokenPct * 20 + no1024Pct * 20 + aes256Pct * 20 + anyKyber * 20
+  );
+
+  // Milestones for display
+  const milestones = [
+    { label:"TLS 1.3 deployed",      pct: Math.round(tls13Pct * 100),    done: tls13Pct >= 1   },
+    { label:"No broken ciphers",     pct: Math.round(nobrokenPct * 100),  done: nobrokenPct >= 1},
+    { label:"No 1024-bit keys",      pct: Math.round(no1024Pct * 100),    done: no1024Pct >= 1  },
+    { label:"AES-256-GCM enforced",  pct: Math.round(aes256Pct * 100),    done: aes256Pct >= 1  },
+    { label:"Kyber hybrid active",   pct: anyKyber * 100,                 done: anyKyber === 1  },
+  ];
 
   const weakApps = withPQCScore.filter((a:any)=>a.status==="weak"||a.status==="WEAK"||!a.pqc||a.keylen?.startsWith("1024"));
 
@@ -589,7 +624,7 @@ export default function PQCReadinessPage() {
 
       {/* METRICS */}
       <div style={{display:"grid",gridTemplateColumns:metricCols,gap:isMobile?8:9}}>
-        <MetricCard label="PQC SCORE" value={`${overallPQCScore}/100`} sub="Avg per-app readiness" color={overallPQCScore>=70?T.green:overallPQCScore>=40?T.yellow:T.red}/>
+        <MetricCard label="MIGRATION SCORE" value={`${migrationScore}/100`} sub="Migration progress" color={migrationScore>=70?T.green:migrationScore>=40?T.yellow:T.red}/>
         <MetricCard label="NEED MIGRATION" value={enriched.length} sub="Weak assets" color={T.red}/>
         <MetricCard label="CRITICAL" value={critCount} sub="Immediate action" color={T.red}/>
         <MetricCard label="EST. DAYS" value={calDays} sub={`${teamSize} dev team`} color={T.cyan}/>
@@ -601,9 +636,25 @@ export default function PQCReadinessPage() {
       {/* SCORE + PLAN */}
       <div style={{display:"grid",gridTemplateColumns:isDesktop?"1fr 1fr":"1fr",gap:isMobile?8:10}}>
         <Panel>
-          <PanelHeader left="PQC MIGRATION READINESS SCORE" />
+          <PanelHeader left="PQC MIGRATION PROGRESS" />
           <div style={{padding:14,display:"flex",flexDirection:"column",alignItems:"center",gap:16}}>
-            <div style={{width:"100%",maxWidth:gaugeSize+40,margin:"0 auto"}}><ScoreGauge score={overallPQCScore} size={gaugeSize}/></div>
+            <div style={{width:"100%",maxWidth:gaugeSize+40,margin:"0 auto"}}><ScoreGauge score={migrationScore} size={gaugeSize}/></div>
+            {/* Milestone bars */}
+            <div style={{width:"100%",display:"flex",flexDirection:"column",gap:6}}>
+              {milestones.map(m=>(
+                <div key={m.label}>
+                  <div style={{display:"flex",justifyContent:"space-between",marginBottom:3}}>
+                    <span style={{fontSize:8,color:m.done?T.green:T.text3,display:"flex",alignItems:"center",gap:5}}>
+                      <span style={{fontSize:9}}>{m.done?"✓":"○"}</span>{m.label}
+                    </span>
+                    <span style={{fontSize:8,fontFamily:"'Orbitron',monospace",color:m.done?T.green:T.text3}}>{m.pct}%</span>
+                  </div>
+                  <div style={{height:3,background:"rgba(255,255,255,0.06)",borderRadius:2}}>
+                    <div style={{height:"100%",width:`${m.pct}%`,background:m.done?T.green:m.pct>50?T.yellow:T.orange,borderRadius:2,transition:"width 0.8s ease"}}/>
+                  </div>
+                </div>
+              ))}
+            </div>
             <div style={{width:"100%",display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
               {[
                 {label:"PQC ACTIVE",val:withPQCScore.filter((a:any)=>a.pqcScore?.active).length,color:T.green},
@@ -685,7 +736,7 @@ export default function PQCReadinessPage() {
           <div style={{display:"flex",gap:6}}>
             <button style={{...S.btn,fontSize:isMobile?9:11}} onClick={exportCSV}>↓ CSV</button>
             <button style={{...S.btn,fontSize:isMobile?9:11,background:"rgba(59,130,246,0.12)",borderColor:"rgba(59,130,246,0.35)"}}
-              onClick={()=>exportAuditPDF(enriched,overallPQCScore,pqcReady,total,totalDays,calDays,totalCost,teamSize,devRate,dateStr,clientName,activeDomain)}>
+              onClick={()=>exportAuditPDF(enriched,migrationScore,pqcReady,total,totalDays,calDays,totalCost,teamSize,devRate,dateStr,clientName,activeDomain)}>
               {isMobile?"⬡ PDF":"⬡ AUDIT PDF"}
             </button>
           </div>
