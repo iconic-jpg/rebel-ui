@@ -1,20 +1,27 @@
 // ─── cipherAnalysis.ts ────────────────────────────────────────────────────────
 // Parses TLS cipher suite strings into components and produces
-// accurate DORA/NIST findings. Drop into src/utils/ or src/components/Modules/
+// accurate DORA/NIST findings.
+//
+// FIX 1: parseCipher now accepts optional kxGroup (from backend key_exchange_group)
+//         — uses real negotiated curve (X25519, secp256r1, X25519Kyber768) when available
+// FIX 2: fullAnalysis normalises TLS version — handles "TLSv1.3", "TLS1.3", "1.3"
+// FIX 3: PQC hybrid (X25519Kyber768) detected and shown as PQC ACTIVE not flagged
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 export interface CipherComponents {
-  keyExchange:   string;   // ECDHE, RSA, DHE, etc.
-  authentication:string;   // RSA, ECDSA, anon
-  bulkCipher:    string;   // AES-256-GCM, AES-128-CBC, RC4, DES, 3DES
-  mac:           string;   // SHA384, SHA256, SHA, MD5
-  pfs:           boolean;  // Perfect Forward Secrecy
-  raw:           string;   // original string
+  keyExchange:    string;   // X25519, secp256r1, RSA, DHE, TLS 1.3, etc.
+  authentication: string;   // RSA, ECDSA, Certificate, anon
+  bulkCipher:     string;   // AES-256-GCM, AES-128-GCM, RC4, DES, 3DES
+  mac:            string;   // SHA-384, SHA-256, SHA-1, MD5, HKDF
+  pfs:            boolean;  // Perfect Forward Secrecy
+  pqcHybrid:      boolean;  // True if X25519Kyber768 or similar hybrid detected
+  raw:            string;   // original cipher string
+  kxSource:       "backend" | "parsed";  // whether kx came from real negotiation or string parsing
 }
 
 export interface CipherFinding {
   severity:    "critical" | "high" | "medium" | "low" | "ok";
-  code:        string;   // machine-readable DORA finding code
+  code:        string;
   title:       string;
   description: string;
   doraArticle: string;
@@ -25,154 +32,223 @@ export interface CipherAnalysis {
   components:  CipherComponents;
   findings:    CipherFinding[];
   overallRisk: "critical" | "high" | "medium" | "low" | "ok";
-  pqcImpact:   string;  // how this cipher behaves post-quantum
+  pqcImpact:   string;
+}
+
+// ── TLS version normaliser ────────────────────────────────────────────────────
+// Handles: "TLSv1.3", "TLS1.3", "TLSv1", "TLS 1.2", "1.2", "1.3"
+export function normaliseTLS(raw: string): string {
+  if (!raw) return "";
+  return raw
+    .replace(/^TLSv?/i, "")   // strip TLS / TLSv prefix
+    .replace(/^v/i, "")        // strip any remaining v
+    .trim();
+  // result: "1.3", "1.2", "1.1", "1.0"
+}
+
+// ── PQC group detector ────────────────────────────────────────────────────────
+// Matches known post-quantum and hybrid key exchange group names
+function isPQCGroup(kxGroup: string): boolean {
+  const g = kxGroup.toLowerCase();
+  return (
+    g.includes("kyber")   ||
+    g.includes("mlkem")   ||
+    g.includes("hybrid")  ||
+    g.includes("x25519kyber") ||
+    g.includes("p256kyber")   ||
+    g.includes("pq")
+  );
+}
+
+// ── Named group cleaner ───────────────────────────────────────────────────────
+// Maps raw SSL group names to clean display names
+function cleanKxGroup(kxGroup: string): string {
+  const g = kxGroup.trim();
+  if (!g || g === "None" || g === "null") return "";
+
+  const map: Record<string, string> = {
+    "X25519":          "X25519",
+    "x25519":          "X25519",
+    "secp256r1":       "P-256",
+    "prime256v1":      "P-256",
+    "secp384r1":       "P-384",
+    "secp521r1":       "P-521",
+    "X448":            "X448",
+    "x448":            "X448",
+    "ffdhe2048":       "FFDHE-2048",
+    "ffdhe3072":       "FFDHE-3072",
+    "ffdhe4096":       "FFDHE-4096",
+    "X25519Kyber768":  "X25519+Kyber768",
+    "x25519kyber768draft00": "X25519+Kyber768",
+    "SecP256r1Kyber768Draft00": "P-256+Kyber768",
+  };
+
+  return map[g] ?? g;
 }
 
 // ── Cipher string parser ───────────────────────────────────────────────────────
-// Handles both IANA format (TLS_AES_256_GCM_SHA384) and
-// OpenSSL format (ECDHE-RSA-AES256-GCM-SHA384)
-export function parseCipher(cipher: string): CipherComponents {
-  if (!cipher) return unknown(cipher);
+// kxGroup: optional — pass tls_info.key_exchange_group from backend
+export function parseCipher(cipher: string, kxGroup?: string | null): CipherComponents {
+  if (!cipher) return unknownComponents(cipher ?? "");
+
   const c = cipher.trim().toUpperCase();
 
-  // ── TLS 1.3 IANA format ──────────────────────────────────────────────────
-  // TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256, TLS_AES_128_GCM_SHA256
-  if (c.startsWith("TLS_") && !c.includes("WITH")) {
-    // TLS 1.3 always uses ECDHE key exchange — it's baked into the protocol
-    const sha = c.includes("SHA384") ? "SHA-384"
-              : c.includes("SHA256") ? "SHA-256"
-              : c.includes("SHA")    ? "SHA-1"   : "unknown";
+  // ── Always parse bulk cipher and MAC from the cipher string ──────────────
+  // These are reliable from the string regardless of key exchange source
 
-    const bulk = c.includes("AES_256_GCM")       ? "AES-256-GCM"
-               : c.includes("AES_128_GCM")       ? "AES-128-GCM"
-               : c.includes("CHACHA20_POLY1305") ? "ChaCha20-Poly1305"
-               : c.includes("AES_256_CCM")       ? "AES-256-CCM"
-               : c.includes("AES_128_CCM")       ? "AES-128-CCM"   : "unknown";
+  let bulk = "unknown";
+  let mac  = "unknown";
+
+  // Bulk cipher detection
+  if      (c.includes("AES_256_GCM")  || c.includes("AES256-GCM"))  bulk = "AES-256-GCM";
+  else if (c.includes("AES_128_GCM")  || c.includes("AES128-GCM"))  bulk = "AES-128-GCM";
+  else if (c.includes("CHACHA20_POLY1305") || c.includes("CHACHA20")) bulk = "ChaCha20-Poly1305";
+  else if (c.includes("AES_256_CCM")  || c.includes("AES256-CCM"))  bulk = "AES-256-CCM";
+  else if (c.includes("AES_128_CCM")  || c.includes("AES128-CCM"))  bulk = "AES-128-CCM";
+  else if (c.includes("AES_256_CBC")  || c.includes("AES256-CBC") || (c.includes("AES256") && !c.includes("GCM") && !c.includes("CCM"))) bulk = "AES-256-CBC";
+  else if (c.includes("AES_128_CBC")  || c.includes("AES128-CBC") || (c.includes("AES128") && !c.includes("GCM") && !c.includes("CCM"))) bulk = "AES-128-CBC";
+  else if (c.includes("3DES_EDE_CBC") || c.includes("3DES"))       bulk = "3DES-CBC";
+  else if (c.includes("DES_CBC")      || (c.includes("DES") && !c.includes("3DES"))) bulk = "DES-CBC";
+  else if (c.includes("RC4_128")      || c.includes("RC4-128"))     bulk = "RC4-128";
+  else if (c.includes("RC4_40"))                                     bulk = "RC4-40";
+  else if (c.includes("NULL"))                                       bulk = "NULL";
+  else if (c.includes("CAMELLIA"))                                   bulk = "Camellia";
+  else if (c.includes("ARIA"))                                       bulk = "ARIA";
+
+  // MAC detection
+  if      (c.includes("SHA384") || c.endsWith("SHA384")) mac = "SHA-384";
+  else if (c.includes("SHA256") || c.endsWith("SHA256")) mac = "SHA-256";
+  else if (c.endsWith("SHA") || c.includes("_SHA_") || c.includes("-SHA"))  mac = "SHA-1";
+  else if (c.includes("MD5"))                            mac = "MD5";
+  else if (c.includes("NULL"))                           mac = "NULL";
+
+  // TLS 1.3 uses HKDF, not a traditional MAC
+  if (c.startsWith("TLS_") && !c.includes("WITH")) mac = "HKDF";
+
+  // ── FIX 1: Use real kxGroup from backend if provided ─────────────────────
+  if (kxGroup && kxGroup !== "None" && kxGroup !== "null" && kxGroup.trim() !== "") {
+    const cleanGroup = cleanKxGroup(kxGroup);
+    const isHybridPQ = isPQCGroup(kxGroup);
 
     return {
-      keyExchange:    "TLS 1.3",   // protocol mandates ephemeral KX — no single named method
+      keyExchange:    cleanGroup,
       authentication: "Certificate",
       bulkCipher:     bulk,
-      mac:            sha,
-      pfs:            true,        // TLS 1.3 always provides PFS
+      mac,
+      pfs:            true,       // all named groups provide PFS
+      pqcHybrid:      isHybridPQ,
       raw:            cipher,
+      kxSource:       "backend",
     };
   }
 
-  // ── TLS 1.2 IANA format with WITH keyword ────────────────────────────────
-  // TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384
-  // TLS_RSA_WITH_AES_128_CBC_SHA256
-  // TLS_RSA_WITH_DES_CBC_SHA
-  // TLS_RSA_WITH_RC4_128_SHA
-  if (c.includes("_WITH_")) {
-    const [prefix, suffix] = c.split("_WITH_");
+  // ── Fallback: parse key exchange from cipher string ───────────────────────
 
-    const kx = prefix.includes("ECDHE")  ? "ECDHE"
-              : prefix.includes("DHE")   ? "DHE"
-              : prefix.includes("ECDH")  ? "ECDH"
-              : prefix.includes("DH")    ? "DH"
-              : prefix.includes("RSA")   ? "RSA"
-              : prefix.includes("PSK")   ? "PSK"
-              : prefix.includes("SRP")   ? "SRP"   : "unknown";
+  // TLS 1.3 IANA format (TLS_AES_256_GCM_SHA384 etc.)
+  if (c.startsWith("TLS_") && !c.includes("WITH")) {
+    return {
+      keyExchange:    "TLS 1.3",
+      authentication: "Certificate",
+      bulkCipher:     bulk,
+      mac,
+      pfs:            true,
+      pqcHybrid:      false,
+      raw:            cipher,
+      kxSource:       "parsed",
+    };
+  }
+
+  // TLS 1.2 IANA format (TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384)
+  if (c.includes("_WITH_")) {
+    const prefix = c.split("_WITH_")[0];
+
+    const kx   = prefix.includes("ECDHE") ? "ECDHE"
+               : prefix.includes("DHE")   ? "DHE"
+               : prefix.includes("ECDH")  ? "ECDH"
+               : prefix.includes("DH")    ? "DH"
+               : prefix.includes("RSA")   ? "RSA"
+               : prefix.includes("PSK")   ? "PSK"
+               : prefix.includes("SRP")   ? "SRP"   : "RSA";
 
     const auth = prefix.includes("ECDSA") ? "ECDSA"
-               : prefix.includes("RSA")  ? "RSA"
-               : prefix.includes("DSS")  ? "DSS"
-               : prefix.includes("anon") ? "anon"  : "RSA";
-
-    const bulk = suffix.includes("AES_256_GCM")  ? "AES-256-GCM"
-               : suffix.includes("AES_128_GCM")  ? "AES-128-GCM"
-               : suffix.includes("AES_256_CBC")  ? "AES-256-CBC"
-               : suffix.includes("AES_128_CBC")  ? "AES-128-CBC"
-               : suffix.includes("3DES_EDE_CBC") ? "3DES-CBC"
-               : suffix.includes("DES_CBC")      ? "DES-CBC"
-               : suffix.includes("RC4_128")      ? "RC4-128"
-               : suffix.includes("RC4_40")       ? "RC4-40"
-               : suffix.includes("NULL")         ? "NULL"
-               : suffix.includes("CAMELLIA")     ? "Camellia"
-               : suffix.includes("ARIA")         ? "ARIA"         : "unknown";
-
-    const mac = suffix.includes("SHA384") ? "SHA-384"
-              : suffix.includes("SHA256") ? "SHA-256"
-              : suffix.includes("SHA")    ? "SHA-1"
-              : suffix.includes("MD5")    ? "MD5"
-              : suffix.includes("NULL")   ? "NULL"    : "unknown";
+               : prefix.includes("RSA")   ? "RSA"
+               : prefix.includes("DSS")   ? "DSS"
+               : prefix.includes("anon")  ? "anon"  : "RSA";
 
     const pfs = kx === "ECDHE" || kx === "DHE";
 
-    return { keyExchange: kx, authentication: auth, bulkCipher: bulk, mac, pfs, raw: cipher };
+    return {
+      keyExchange: kx, authentication: auth,
+      bulkCipher: bulk, mac, pfs,
+      pqcHybrid: false, raw: cipher, kxSource: "parsed",
+    };
   }
 
-  // ── OpenSSL shorthand format ──────────────────────────────────────────────
-  // ECDHE-RSA-AES256-GCM-SHA384, ECDHE-ECDSA-AES256-GCM-SHA384
-  // AES128-SHA, RC4-MD5, DES-CBC-SHA
-  const parts = c.split("-");
-
-  const kx = c.startsWith("ECDHE") ? "ECDHE"
-            : c.startsWith("DHE")  ? "DHE"
-            : c.startsWith("ECDH") ? "ECDH"
-            : c.startsWith("DH")   ? "DH"
-            : c.startsWith("RSA")  ? "RSA"
-            : c.startsWith("ADH")  ? "anon-DH"
-            : c.startsWith("AECDH")? "anon-ECDH" : "RSA";
+  // OpenSSL shorthand (ECDHE-RSA-AES256-GCM-SHA384)
+  const kx   = c.startsWith("ECDHE")  ? "ECDHE"
+             : c.startsWith("DHE")    ? "DHE"
+             : c.startsWith("ECDH")   ? "ECDH"
+             : c.startsWith("AECDH")  ? "anon-ECDH"
+             : c.startsWith("ADH")    ? "anon-DH"
+             : c.startsWith("DH")     ? "DH"
+             : c.startsWith("RSA")    ? "RSA"     : "RSA";
 
   const auth = c.includes("ECDSA") ? "ECDSA"
              : c.includes("RSA")   ? "RSA"
-             : c.includes("DSS")   ? "DSS"       : "RSA";
-
-  const bulk = c.includes("AES256-GCM") || c.includes("AES-256-GCM")  ? "AES-256-GCM"
-             : c.includes("AES128-GCM") || c.includes("AES-128-GCM")  ? "AES-128-GCM"
-             : c.includes("AES256-CCM")                                ? "AES-256-CCM"
-             : c.includes("AES128-CCM")                                ? "AES-128-CCM"
-             : c.includes("AES256-CBC") || c.includes("AES256")        ? "AES-256-CBC"
-             : c.includes("AES128-CBC") || c.includes("AES128")        ? "AES-128-CBC"
-             : c.includes("3DES")                                      ? "3DES-CBC"
-             : c.includes("DES-CBC") || c.includes("DES")              ? "DES-CBC"
-             : c.includes("RC4-128") || c.includes("RC4")              ? "RC4-128"
-             : c.includes("CHACHA20")                                  ? "ChaCha20-Poly1305"
-             : c.includes("CAMELLIA")                                  ? "Camellia"
-             : c.includes("NULL")                                      ? "NULL"     : "unknown";
-
-  const mac = c.endsWith("SHA384") ? "SHA-384"
-            : c.endsWith("SHA256") ? "SHA-256"
-            : c.endsWith("SHA")    ? "SHA-1"
-            : c.endsWith("MD5")    ? "MD5"
-            : c.endsWith("NULL")   ? "NULL"     : "unknown";
+             : c.includes("DSS")   ? "DSS"    : "RSA";
 
   const pfs = kx === "ECDHE" || kx === "DHE";
 
-  return { keyExchange: kx, authentication: auth, bulkCipher: bulk, mac, pfs, raw: cipher };
+  return {
+    keyExchange: kx, authentication: auth,
+    bulkCipher: bulk, mac, pfs,
+    pqcHybrid: false, raw: cipher, kxSource: "parsed",
+  };
 }
 
-function unknown(raw: string): CipherComponents {
+function unknownComponents(raw: string): CipherComponents {
   return {
     keyExchange: "unknown", authentication: "unknown",
-    bulkCipher: "unknown", mac: "unknown", pfs: false, raw,
+    bulkCipher: "unknown", mac: "unknown",
+    pfs: false, pqcHybrid: false, raw, kxSource: "parsed",
   };
 }
 
 // ── Finding generator ─────────────────────────────────────────────────────────
-// Produces specific DORA-mapped findings from parsed cipher components.
-// Each finding maps to a DORA article and a specific NIST/BSI reference.
 export function analyseCipher(
   components: CipherComponents,
-  tlsVersion: string
+  tlsNormalised: string   // already normalised — "1.3", "1.2", "1.1", "1.0"
 ): CipherFinding[] {
   const findings: CipherFinding[] = [];
-  const { keyExchange: kx, bulkCipher: bulk, mac, pfs } = components;
+  const { keyExchange: kx, bulkCipher: bulk, mac, pfs, pqcHybrid } = components;
+
+  // ── PQC hybrid active — best possible state ───────────────────────────────
+  if (pqcHybrid) {
+    findings.push({
+      severity:    "ok",
+      code:        "PQC-ACTIVE",
+      title:       "Post-quantum hybrid key exchange active",
+      description: `${kx} combines classical ECDHE with a NIST-approved PQC algorithm. ` +
+                   "This is the gold standard for quantum-safe TLS. " +
+                   "Traffic is protected against both classical and quantum attackers.",
+      doraArticle: "DORA Art. 9.2 — NIST FIPS 203 compliant",
+      remediation: "No action required. Ensure hybrid KX is enforced for all clients.",
+    });
+    // Still check bulk cipher and MAC — PQC on KX doesn't fix a weak bulk cipher
+  }
 
   // ── 1. No Perfect Forward Secrecy ────────────────────────────────────────
-  if (!pfs && tlsVersion !== "1.3") {
+  if (!pfs && tlsNormalised !== "1.3") {
     findings.push({
       severity:    "high",
       code:        "NO-PFS-001",
       title:       "No Perfect Forward Secrecy",
-      description: `Key exchange is ${kx}. Static RSA key exchange means all past sessions are ` +
-                   "decryptable if the server's private key is ever compromised. " +
-                   "Adversaries recording traffic today can decrypt it once quantum computers are available.",
+      description: `Key exchange is ${kx}. Static RSA key exchange means all past sessions ` +
+                   "are decryptable if the server's private key is ever compromised. " +
+                   "Adversaries recording traffic today can decrypt it once quantum computers arrive.",
       doraArticle: "DORA Art. 9.4 — Cryptographic Controls",
-      remediation: "Migrate to ECDHE or DHE key exchange. Disable RSA key exchange cipher suites " +
-                   "in server configuration. Enforce TLS 1.3 which mandates PFS.",
+      remediation: "Migrate to ECDHE or DHE key exchange. Disable static RSA cipher suites. " +
+                   "Enforce TLS 1.3 which mandates PFS.",
     });
   }
 
@@ -181,12 +257,11 @@ export function analyseCipher(
     findings.push({
       severity:    "critical",
       code:        "BROKEN-CIPHER-001",
-      title:       "Broken bulk cipher — DES / NULL",
-      description: `Cipher suite uses ${bulk}. DES has a 56-bit key space and was broken in 1997. ` +
-                   "NULL provides no encryption at all. Both are prohibited under NIST SP 800-52r2.",
+      title:       `Broken bulk cipher — ${bulk}`,
+      description: `${bulk === "NULL" ? "NULL cipher provides no encryption." : "DES has a 56-bit key space and was broken in 1997."} ` +
+                   "Both are prohibited under NIST SP 800-52r2 and RBI IT Framework.",
       doraArticle: "DORA Art. 9.4 — Cryptographic Controls",
-      remediation: "Immediately disable all DES and NULL cipher suites. " +
-                   "Replace with TLS_AES_256_GCM_SHA384 under TLS 1.3.",
+      remediation: "Immediately disable. Replace with TLS_AES_256_GCM_SHA384 under TLS 1.3.",
     });
   }
 
@@ -195,9 +270,8 @@ export function analyseCipher(
       severity:    "critical",
       code:        "BROKEN-CIPHER-002",
       title:       "Broken bulk cipher — RC4",
-      description: "RC4 has known statistical biases that allow plaintext recovery. " +
-                   "Prohibited by RFC 7465. Multiple practical attacks published since 2013. " +
-                   "Any data encrypted with RC4 should be considered compromised.",
+      description: "RC4 has known statistical biases allowing plaintext recovery. " +
+                   "Prohibited by RFC 7465. Multiple practical attacks published since 2013.",
       doraArticle: "DORA Art. 9.4 — Cryptographic Controls",
       remediation: "Immediately disable RC4 cipher suites. Deploy TLS_AES_256_GCM_SHA384.",
     });
@@ -215,18 +289,17 @@ export function analyseCipher(
     });
   }
 
-  // ── 3. CBC mode (padding oracle risk) ────────────────────────────────────
-  if (bulk?.includes("CBC") && !bulk.includes("DES")) {
+  // ── 3. CBC mode ───────────────────────────────────────────────────────────
+  if (bulk?.includes("CBC") && bulk !== "DES-CBC" && bulk !== "3DES-CBC") {
     findings.push({
       severity:    "medium",
       code:        "CBC-MODE-001",
       title:       "CBC mode encryption — padding oracle risk",
       description: `Bulk cipher ${bulk} uses Cipher Block Chaining mode. ` +
-                   "CBC is vulnerable to BEAST (TLS 1.0), Lucky13, and POODLE attacks. " +
-                   "While mitigations exist, GCM mode is strictly preferable for DORA compliance.",
+                   "Vulnerable to BEAST (TLS 1.0), Lucky13, and POODLE. " +
+                   "GCM mode is strictly preferable for DORA compliance.",
       doraArticle: "DORA Art. 9.4 — Cryptographic Controls",
-      remediation: "Migrate to AES-256-GCM or AES-128-GCM. " +
-                   "Disable all CBC-mode cipher suites in server configuration.",
+      remediation: "Migrate to AES-256-GCM. Disable all CBC-mode cipher suites.",
     });
   }
 
@@ -236,12 +309,12 @@ export function analyseCipher(
       severity:    "medium",
       code:        "WEAK-MAC-001",
       title:       "SHA-1 MAC — collision attacks possible",
-      description: "SHA-1 was broken in 2017 (SHAttered attack, CWE-327). " +
+      description: "SHA-1 was broken in 2017 (SHAttered attack). " +
                    "NIST deprecated SHA-1 for all cryptographic uses as of 2023. " +
                    "BSI TR-02102-2 prohibits SHA-1 in new TLS deployments.",
       doraArticle: "DORA Art. 9.4 — Cryptographic Controls",
       remediation: "Use cipher suites with SHA-256 or SHA-384. " +
-                   "Deploy TLS 1.3 which uses HKDF and eliminates MAC negotiation.",
+                   "Deploy TLS 1.3 which uses HKDF.",
     });
   }
 
@@ -250,128 +323,114 @@ export function analyseCipher(
       severity:    "critical",
       code:        "BROKEN-MAC-001",
       title:       "MD5 MAC — cryptographically broken",
-      description: "MD5 was fully broken for collision resistance in 2004. " +
-                   "Practical chosen-prefix attacks demonstrated in 2009. " +
-                   "Prohibited by all major standards bodies including NIST and BSI.",
+      description: "MD5 collision resistance was broken in 2004. " +
+                   "Prohibited by all major standards bodies.",
       doraArticle: "DORA Art. 9.4 — Cryptographic Controls",
       remediation: "Immediately disable all MD5 cipher suites.",
     });
   }
 
-  // ── 5. TLS version issues ─────────────────────────────────────────────────
-  if (tlsVersion === "1.0") {
+  // ── 5. TLS version ────────────────────────────────────────────────────────
+  if (tlsNormalised === "1.0") {
     findings.push({
       severity:    "critical",
       code:        "TLS-VER-001",
       title:       "TLS 1.0 — prohibited",
-      description: "TLS 1.0 was deprecated in 2021 (RFC 8996). " +
-                   "Vulnerable to BEAST, POODLE, and CRIME attacks. " +
+      description: "TLS 1.0 deprecated RFC 8996. Vulnerable to BEAST, POODLE, CRIME. " +
                    "PCI-DSS 4.0 prohibits TLS 1.0 effective March 2024. " +
                    "RBI IT Framework requires minimum TLS 1.2.",
-      doraArticle: "DORA Art. 9.4 — Cryptographic Controls · PCI-DSS 4.0 Req 4.2.1",
+      doraArticle: "DORA Art. 9.4 — PCI-DSS 4.0 Req 4.2.1",
       remediation: "Disable TLS 1.0 and 1.1 immediately. Enable TLS 1.2 minimum, TLS 1.3 preferred.",
     });
-  } else if (tlsVersion === "1.1") {
+  } else if (tlsNormalised === "1.1") {
     findings.push({
       severity:    "high",
       code:        "TLS-VER-002",
       title:       "TLS 1.1 — deprecated",
-      description: "TLS 1.1 was deprecated in 2021 (RFC 8996). " +
-                   "No longer supported by major browsers since 2020. " +
-                   "Shares many vulnerabilities with TLS 1.0.",
+      description: "TLS 1.1 deprecated RFC 8996. Dropped by all major browsers 2020.",
       doraArticle: "DORA Art. 9.4 — Cryptographic Controls",
-      remediation: "Disable TLS 1.1. Enable TLS 1.2 minimum, TLS 1.3 preferred.",
+      remediation: "Disable TLS 1.1. Enable TLS 1.3.",
     });
-  } else if (tlsVersion === "1.2") {
+  } else if (tlsNormalised === "1.2") {
     findings.push({
       severity:    "low",
       code:        "TLS-VER-003",
       title:       "TLS 1.2 — supported but not optimal",
-      description: "TLS 1.2 is currently acceptable under NIST SP 800-52r2 and RBI guidelines. " +
-                   "However it requires careful cipher suite configuration to be secure. " +
-                   "TLS 1.3 is strongly recommended for all new and public-facing deployments.",
+      description: "TLS 1.2 is acceptable under NIST SP 800-52r2 and RBI guidelines " +
+                   "with correct cipher configuration. TLS 1.3 is strongly recommended.",
       doraArticle: "DORA Art. 9.4 — best practice",
-      remediation: "Enable TLS 1.3 alongside TLS 1.2. Plan migration to TLS 1.3-only by 2026.",
+      remediation: "Enable TLS 1.3. Plan TLS 1.3-only migration by 2026.",
     });
   }
 
-  // ── 6. Post-quantum vulnerability ─────────────────────────────────────────
-  // TLS 1.3: key exchange is secure today, broken by future quantum computers.
-  //   - AES-256-GCM: low PQC risk (128-bit PQ security from bulk cipher)
-  //   - AES-128-GCM: medium PQC risk (only 64-bit PQ security from Grover)
-  // TLS 1.2 with ECDHE/DHE: medium — same future quantum threat + older protocol
-  // TLS 1.2 with RSA key exchange: high — no PFS + quantum breaks RSA faster
+  // ── 6. PQC finding — only if not already running hybrid ──────────────────
+  if (!pqcHybrid) {
+    const isTLS13  = tlsNormalised === "1.3";
+    const isRSAkx  = !pfs;
+    const isDHEkx  = pfs && !isTLS13;
 
-  const isTLS13  = kx === "TLS 1.3";
-  const isRSAkx  = !pfs && (kx === "RSA" || kx === "unknown");
-  const isDHEkx  = kx === "ECDHE" || kx === "DHE";
-
-  if (isRSAkx) {
-    // Already caught by NO-PFS-001 above — skip duplicate PQC entry
-  } else if (isTLS13) {
-    // TLS 1.3: PQC is a future concern only, severity depends on bulk cipher
-    const pqcSev = bulk === "AES-256-GCM" || bulk === "ChaCha20-Poly1305"
-      ? "low" as const : "medium" as const;
-    findings.push({
-      severity:    pqcSev,
-      code:        "PQC-001",
-      title:       "Post-quantum migration required",
-      description: `TLS 1.3 key exchange will be broken by Shor's algorithm on a quantum computer. ` +
-                   `Bulk cipher ${bulk} provides ` +
-                   (pqcSev === "low"
-                     ? "128-bit post-quantum security via Grover's algorithm — adequate until migration."
-                     : "only 64-bit post-quantum security against Grover's algorithm — migration urgent.") +
-                   " NIST estimates quantum threat horizon: 2030–2035.",
-      doraArticle: "DORA Art. 9.2 — ICT Risk Assessment · NIST FIPS 203/204",
-      remediation: "Implement CRYSTALS-Kyber (FIPS 203) as a hybrid with current key exchange. " +
-                   "Begin transition per NIST IR 8413. Priority: " +
-                   (pqcSev === "low" ? "plan by 2027." : "plan by 2025."),
-    });
-  } else if (isDHEkx) {
-    findings.push({
-      severity:    "medium",
-      code:        "PQC-001",
-      title:       "Post-quantum migration required",
-      description: `${kx} key exchange is broken by Shor's algorithm on a quantum computer. ` +
-                   "'Harvest now, decrypt later' attacks mean traffic recorded today is at risk. " +
-                   "NIST estimates quantum threat horizon: 2030–2035.",
-      doraArticle: "DORA Art. 9.2 — ICT Risk Assessment · NIST FIPS 203/204",
-      remediation: "Implement CRYSTALS-Kyber (FIPS 203) for key encapsulation as a hybrid with ECDHE. " +
-                   "Begin transition per NIST IR 8413 migration guidance.",
-    });
+    if (isRSAkx) {
+      // Already covered by NO-PFS-001 — skip duplicate
+    } else if (isTLS13) {
+      const pqcSev = (bulk === "AES-256-GCM" || bulk === "ChaCha20-Poly1305")
+        ? "low" as const : "medium" as const;
+      findings.push({
+        severity:    pqcSev,
+        code:        "PQC-001",
+        title:       "Post-quantum migration required",
+        description: `Key exchange will be broken by Shor's algorithm on a quantum computer. ` +
+                     `Bulk cipher ${bulk} provides ` +
+                     (pqcSev === "low"
+                       ? "128-bit post-quantum security — adequate until migration."
+                       : "only 64-bit post-quantum security against Grover's algorithm.") +
+                     " NIST threat horizon: 2030–2035.",
+        doraArticle: "DORA Art. 9.2 — NIST FIPS 203/204",
+        remediation: "Implement CRYSTALS-Kyber (FIPS 203) hybrid key exchange. " +
+                     "Target: " + (pqcSev === "low" ? "plan by 2027." : "plan by 2025."),
+      });
+    } else if (isDHEkx) {
+      findings.push({
+        severity:    "medium",
+        code:        "PQC-001",
+        title:       "Post-quantum migration required",
+        description: `${kx} key exchange broken by Shor's algorithm. ` +
+                     "'Harvest now, decrypt later' — traffic recorded today is at future risk.",
+        doraArticle: "DORA Art. 9.2 — NIST FIPS 203/204",
+        remediation: "Implement CRYSTALS-Kyber (FIPS 203) hybrid with ECDHE. " +
+                     "Begin per NIST IR 8413.",
+      });
+    }
   }
 
-  // ── 7. AES-128 vs AES-256 ─────────────────────────────────────────────────
+  // ── 7. AES-128 margin ─────────────────────────────────────────────────────
   if (bulk === "AES-128-GCM") {
     findings.push({
       severity:    "low",
       code:        "KEY-SIZE-001",
-      title:       "AES-128 — reduced quantum security margin",
-      description: "AES-128 has 128-bit classical security but only 64-bit security against " +
-                   "Grover's algorithm on a quantum computer. AES-256 provides 128-bit post-quantum " +
-                   "security and is preferred for long-lived data and high-assurance environments.",
+      title:       "AES-128 — reduced post-quantum security margin",
+      description: "AES-128 provides 128-bit classical security but only 64-bit against " +
+                   "Grover's algorithm. AES-256 provides 128-bit post-quantum security.",
       doraArticle: "DORA Art. 9.4 — NIST SP 800-131A",
-      remediation: "Prefer TLS_AES_256_GCM_SHA384 over TLS_AES_128_GCM_SHA256 " +
-                   "for all financial and sensitive data.",
+      remediation: "Prefer TLS_AES_256_GCM_SHA384 for financial and sensitive data.",
     });
   }
 
-  // ── If nothing bad found ──────────────────────────────────────────────────
+  // ── Clean bill of health ──────────────────────────────────────────────────
   if (findings.length === 0) {
     findings.push({
       severity:    "ok",
       code:        "OK-001",
       title:       "Cipher suite is compliant",
-      description: `${components.raw} meets current NIST SP 800-52r2 and DORA Art. 9.4 requirements.`,
+      description: `${components.raw} meets NIST SP 800-52r2 and DORA Art. 9.4 requirements.`,
       doraArticle: "DORA Art. 9.4 — compliant",
-      remediation: "Monitor for future NIST guidance on post-quantum migration timelines.",
+      remediation: "Monitor NIST guidance on post-quantum migration timelines.",
     });
   }
 
   return findings;
 }
 
-// ── Overall risk calculator ───────────────────────────────────────────────────
+// ── Overall risk ──────────────────────────────────────────────────────────────
 export function overallRisk(
   findings: CipherFinding[]
 ): "critical" | "high" | "medium" | "low" | "ok" {
@@ -383,8 +442,11 @@ export function overallRisk(
 }
 
 // ── PQC impact summary ────────────────────────────────────────────────────────
-export function pqcImpact(components: CipherComponents): string {
-  const { keyExchange: kx, bulkCipher: bulk } = components;
+export function pqcImpact(components: CipherComponents, tlsNorm: string): string {
+  const { keyExchange: kx, bulkCipher: bulk, pqcHybrid } = components;
+
+  if (pqcHybrid)
+    return `${kx} is a post-quantum hybrid — protected against Shor's and Grover's algorithms.`;
 
   if (bulk === "DES-CBC" || bulk === "RC4-128" || bulk === "NULL")
     return "Already broken classically. Quantum adds no additional threat.";
@@ -392,31 +454,35 @@ export function pqcImpact(components: CipherComponents): string {
   if (!components.pfs)
     return "RSA key exchange broken by Shor's algorithm. All recorded sessions at risk.";
 
-  if (kx === "TLS 1.3") {
+  if (tlsNorm === "1.3") {
     if (bulk === "AES-256-GCM" || bulk === "ChaCha20-Poly1305")
-      return "Key exchange broken by Shor's algorithm (future). AES-256 bulk cipher provides 128-bit PQ security — low near-term risk.";
-    return "Key exchange broken by Shor's algorithm (future). AES-128 bulk cipher provides only 64-bit PQ security via Grover's — medium risk.";
+      return "Key exchange broken by Shor's (future). AES-256 bulk cipher provides 128-bit PQ security — low near-term risk.";
+    return "Key exchange broken by Shor's (future). AES-128 provides only 64-bit PQ security via Grover's.";
   }
 
-  if (kx === "ECDHE" || kx === "DHE")
-    return "Key exchange broken by Shor's algorithm. Migrate to CRYSTALS-Kyber (FIPS 203) hybrid.";
-
-  return "Key exchange broken by quantum computers. Migrate to NIST FIPS 203 (Kyber).";
+  return `${kx} key exchange broken by Shor's algorithm. Migrate to CRYSTALS-Kyber (FIPS 203) hybrid.`;
 }
 
 // ── Full analysis entry point ─────────────────────────────────────────────────
-export function fullAnalysis(cipher: string, tlsVersion: string): CipherAnalysis {
-  const components = parseCipher(cipher);
-  const findings   = analyseCipher(components, tlsVersion);
+// FIX 2: normalises TLS version here so callers don't need to
+// FIX 1: accepts optional kxGroup from backend
+export function fullAnalysis(
+  cipher:    string,
+  tlsRaw:    string,
+  kxGroup?:  string | null
+): CipherAnalysis {
+  const tlsNorm  = normaliseTLS(tlsRaw);
+  const components = parseCipher(cipher, kxGroup);
+  const findings   = analyseCipher(components, tlsNorm);
   return {
     components,
     findings,
     overallRisk: overallRisk(findings),
-    pqcImpact:   pqcImpact(components),
+    pqcImpact:   pqcImpact(components, tlsNorm),
   };
 }
 
-// ── Severity colour helper (matches REBEL T.* tokens) ────────────────────────
+// ── Colour helpers ────────────────────────────────────────────────────────────
 export function severityColor(s: string): string {
   return s === "critical" ? "#ef4444"
        : s === "high"     ? "#f97316"
