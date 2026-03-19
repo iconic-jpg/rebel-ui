@@ -10,7 +10,7 @@ import {
   severityColor, severityVariant,
 } from "./cipherAnalysis.js";
 
-import type { CipherAnalysis, CipherFinding } from "./cipherAnalysis";
+import type { CipherAnalysis, CipherFinding } from "./cipherAnalysis.js";
 
 const API = "https://r3bel-production.up.railway.app";
 
