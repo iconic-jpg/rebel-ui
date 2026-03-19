@@ -85,8 +85,9 @@ function exportAuditPDF(
   const scoreLabel= migrationScore>=70?"COMPLIANT":migrationScore>=40?"AT RISK":"CRITICAL";
   const displayName = clientName.trim()||(clientDomain?normaliseDomain(clientDomain):"All Assets");
 
-  // Gauge SVG
-  const pct=migrationScore/100, gr=54, gcx=70, gcy=76;
+  // Gauge SVG — clamp pct to avoid degenerate arc at 0% and 100%
+  const pct = Math.min(0.999, Math.max(0.001, migrationScore / 100));
+  const gr=54, gcx=70, gcy=76;
   const gx1=gcx+gr*Math.cos(Math.PI), gy1=gcy+gr*Math.sin(Math.PI);
   const gx2=gcx+gr*Math.cos(Math.PI+Math.PI*pct), gy2=gcy+gr*Math.sin(Math.PI+Math.PI*pct);
   const glf=pct>0.5?1:0;
@@ -397,7 +398,8 @@ function ScoreGauge({ score, size=200 }: { score:number; size?:number }) {
     c.width=W; c.height=H; ctx.clearRect(0,0,W,H);
     ctx.beginPath(); ctx.arc(cx,cy,r,Math.PI,0,false); ctx.lineWidth=Math.round(size*0.06); ctx.strokeStyle="rgba(59,130,246,0.1)"; ctx.stroke();
     const col=shown>=70?T.green:shown>=40?T.yellow:T.red;
-    ctx.beginPath(); ctx.arc(cx,cy,r,Math.PI,Math.PI+Math.PI*(shown/100),false); ctx.lineWidth=Math.round(size*0.06); ctx.strokeStyle=col; ctx.lineCap="round"; ctx.shadowColor=col; ctx.shadowBlur=10; ctx.stroke(); ctx.shadowBlur=0;
+    const safePct = Math.min(0.999, Math.max(0.001, shown/100));
+    ctx.beginPath(); ctx.arc(cx,cy,r,Math.PI,Math.PI+Math.PI*safePct,false); ctx.lineWidth=Math.round(size*0.06); ctx.strokeStyle=col; ctx.lineCap="round"; ctx.shadowColor=col; ctx.shadowBlur=10; ctx.stroke(); ctx.shadowBlur=0;
     for(let i=0;i<=10;i++){const a=Math.PI+(Math.PI*i)/10;ctx.beginPath();ctx.moveTo(cx+(r-size*0.09)*Math.cos(a),cy+(r-size*0.09)*Math.sin(a));ctx.lineTo(cx+(r-size*0.05)*Math.cos(a),cy+(r-size*0.05)*Math.sin(a));ctx.strokeStyle="rgba(200,220,255,0.15)";ctx.lineWidth=1;ctx.stroke();}
   },[shown,size]);
   const col=shown>=70?T.green:shown>=40?T.yellow:T.red;
@@ -508,7 +510,8 @@ export default function PQCReadinessPage() {
   });
 
   // Milestone 2: ZERO wildcard certs
-  const noWildcards = withPQCScore.every((a: any) => !a.is_wildcard);
+  // is_wildcard must be explicitly false — undefined (not sent by backend) = unknown = fail
+  const noWildcards = withPQCScore.every((a: any) => a.is_wildcard === false);
 
   // Milestone 3: AES-256-GCM or ChaCha20 on ALL apps (no AES-128 anywhere)
   const allAES256 = withPQCScore.every((a: any) => {
@@ -532,7 +535,7 @@ export default function PQCReadinessPage() {
 
   // Partial progress bars (% of apps passing each criterion)
   const certStrongPct  = Math.round(withPQCScore.filter((a:any)=>{ const b=parseInt(String(a.keylen??"0").match(/(\d+)/)?.[1]??"0",10); return b>=4096||b===384; }).length/n*100);
-  const noWildPct      = Math.round(withPQCScore.filter((a:any)=>!a.is_wildcard).length/n*100);
+  const noWildPct      = Math.round(withPQCScore.filter((a:any)=>a.is_wildcard===false).length/n*100);
   const aes256Pct      = Math.round(withPQCScore.filter((a:any)=>{ const bulk=a.analysis?.components?.bulkCipher??""; return bulk==="AES-256-GCM"||bulk==="ChaCha20-Poly1305"; }).length/n*100);
   const tls13Pct       = Math.round(withPQCScore.filter((a:any)=>normaliseTLS(a.tls)==="1.3").length/n*100);
 
