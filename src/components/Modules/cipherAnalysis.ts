@@ -103,8 +103,7 @@ function isValidKxGroup(kxGroup: any): boolean {
 }
 
 // ── ECDHE group detector ──────────────────────────────────────────────────────
-// Returns true for any key exchange value that provides ephemeral ECDH —
-// whether it came from the backend (X25519, P-256 …) or parsed (ECDHE).
+// Broad check — any ephemeral group. Used internally only.
 export function isECDHEGroup(kx: string): boolean {
   const k = (kx ?? "").toLowerCase();
   return (
@@ -118,9 +117,33 @@ export function isECDHEGroup(kx: string): boolean {
     k === "ffdhe-4096"   ||
     k.startsWith("secp") ||
     k === "ecdhe"        ||
-    // PQC hybrids are also ECDHE-based
     k.includes("x25519+") ||
     k.includes("p-256+")
+  );
+}
+
+// ── Strict PQC-READY detector ─────────────────────────────────────────────────
+// READY means the server is genuinely PQC-migration-ready:
+//   - Must be TLS 1.3 (TLS 1.2 ECDHE is NOT ready — CBC suites, no HKDF, etc.)
+//   - Must use a modern named group: X25519, P-256, P-384, P-521, X448
+//   - DHE (ffdhe*), generic "ECDHE" string, or unknown = NOT ready
+//   - Anything TLS 1.2 or below = NOT ready regardless of group
+//
+// This is stricter than isECDHEGroup() which is used for PFS detection only.
+export function isPQCReadyGroup(kx: string, tlsVersion: string): boolean {
+  const tls = normaliseTLS(tlsVersion);
+  if (tls !== "1.3") return false;   // TLS 1.2 ECDHE is not PQC-ready
+
+  const k = (kx ?? "").toLowerCase();
+  return (
+    k === "x25519"  ||
+    k === "p-256"   ||
+    k === "p-384"   ||
+    k === "p-521"   ||
+    k === "x448"
+    // ffdhe-* excluded: DHE groups are not the PQC migration path
+    // bare "ecdhe" excluded: too vague, could be TLS 1.2 fallback
+    // secp* raw names excluded: only accept cleaned names from cleanKxGroup
   );
 }
 
@@ -517,6 +540,9 @@ export function fullAnalysis(
 }
 
 // ── Colour helpers ────────────────────────────────────────────────────────────
+// re-exported so CBOMPage can import without reaching into internals
+export { normaliseTLS };
+
 export function severityColor(s: string): string {
   return s === "critical" ? "#ef4444"
        : s === "high"     ? "#f97316"

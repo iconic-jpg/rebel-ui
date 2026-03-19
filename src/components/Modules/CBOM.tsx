@@ -9,6 +9,7 @@ import {
   normaliseTLS,
   severityColor, severityVariant,
   isECDHEGroup,
+  isPQCReadyGroup,
 } from "./cipherAnalysis.js";
 
 import type { CipherAnalysis, CipherFinding } from "./cipherAnalysis.js";
@@ -75,18 +76,27 @@ function FindingBadge({ severity }: { severity: string }) {
 }
 
 // ── Single source of truth for ACTIVE / READY / ✗ ────────────────────────────
-function PQCBadge({ c, pqc }: { c: CipherAnalysis["components"]; pqc?: boolean }) {
+// ACTIVE  → Kyber/ML-KEM hybrid confirmed
+// READY   → TLS 1.3 + modern named group (X25519, P-256/384/521, X448)
+// ✗       → everything else: TLS 1.2 ECDHE, DHE, RSA, unknown
+function PQCBadge({ c, pqc, tls }: {
+  c:    CipherAnalysis["components"];
+  pqc?: boolean;
+  tls?: string;
+}) {
   if (c.pqcHybrid || pqc === true)
     return <span style={{ fontSize:8, fontWeight:600, color:T.green,
       border:`1px solid ${T.green}44`, borderRadius:2,
       padding:"1px 5px", letterSpacing:".06em" }}>ACTIVE</span>;
 
-  if (isECDHEGroup(c.keyExchange))
+  if (isPQCReadyGroup(c.keyExchange, tls ?? ""))
     return <span style={{ fontSize:8, fontWeight:600, color:T.yellow,
       border:`1px solid ${T.yellow}44`, borderRadius:2,
       padding:"1px 5px", letterSpacing:".06em" }}>READY</span>;
 
-  return <span style={{ color:T.red, fontSize:13 }}>✗</span>;
+  return <span style={{ fontSize:8, fontWeight:600, color:T.red,
+    border:`1px solid ${T.red}44`, borderRadius:2,
+    padding:"1px 5px", letterSpacing:".06em" }}>NOT PQC</span>;
 }
 
 function CipherBreakdown({
@@ -189,7 +199,7 @@ function AppCard({ d, compact }: { d: any; compact: boolean }) {
             <span style={{ fontSize:11, color:T.blue,
               overflow:"hidden", textOverflow:"ellipsis",
               whiteSpace:"nowrap" as const }}>{d.app}</span>
-            <PQCBadge c={c} pqc={d.pqc} />
+            <PQCBadge c={c} pqc={d.pqc} tls={d.tls} />
           </div>
           <div style={{ display:"flex", gap:6, flexWrap:"wrap" as const }}>
             <Badge v={tlsNorm==="1.0"?"red":tlsNorm==="1.2"?"yellow":"green"}>
@@ -589,7 +599,7 @@ export default function CBOMPage() {
                       <Badge v={severityVariant(risk) as any}>{risk.toUpperCase()}</Badge>
                     </TD>
                     <TD style={{ textAlign:"center" }}>
-                      <PQCBadge c={c} pqc={d.pqc} />
+                      <PQCBadge c={c} pqc={d.pqc} tls={d.tls} />
                     </TD>
                     <TD>
                       <button onClick={() => setExpandedRow(isOpen ? null : i)}
