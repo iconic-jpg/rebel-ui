@@ -6,10 +6,13 @@
 //         — uses real negotiated curve (X25519, secp256r1, X25519Kyber768) when available
 // FIX 2: fullAnalysis normalises TLS version — handles "TLSv1.3", "TLS1.3", "1.3"
 // FIX 3: PQC hybrid (X25519Kyber768) detected and shown as PQC ACTIVE not flagged
+// FIX 4: Pure numeric kxGroup values (e.g. "256", "128") are ignored — they are
+//         key sizes reported by some SSL libs, not group names. Without this guard
+//         keyExchange rendered as "256 •" in the table and ECDHE/PQC logic never fired.
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 export interface CipherComponents {
-  keyExchange:    string;   // X25519, secp256r1, RSA, DHE, TLS 1.3, etc.
+  keyExchange:    string;   // X25519, P-256, RSA, DHE, TLS 1.3, etc.
   authentication: string;   // RSA, ECDSA, Certificate, anon
   bulkCipher:     string;   // AES-256-GCM, AES-128-GCM, RC4, DES, 3DES
   mac:            string;   // SHA-384, SHA-256, SHA-1, MD5, HKDF
@@ -47,22 +50,20 @@ export function normaliseTLS(raw: any): string {
 }
 
 // ── PQC group detector ────────────────────────────────────────────────────────
-// Matches known post-quantum and hybrid key exchange group names
 function isPQCGroup(kxGroup: any): boolean {
   if (!kxGroup) return false;
   const g = String(kxGroup).toLowerCase();
   return (
-    g.includes("kyber")   ||
-    g.includes("mlkem")   ||
-    g.includes("hybrid")  ||
-    g.includes("x25519kyber") ||
-    g.includes("p256kyber")   ||
+    g.includes("kyber")        ||
+    g.includes("mlkem")        ||
+    g.includes("hybrid")       ||
+    g.includes("x25519kyber")  ||
+    g.includes("p256kyber")    ||
     g.includes("pq")
   );
 }
 
 // ── Named group cleaner ───────────────────────────────────────────────────────
-// Maps raw SSL group names to clean display names
 function cleanKxGroup(kxGroup: any): string {
   if (kxGroup === null || kxGroup === undefined) return "";
   const g = String(kxGroup).trim();
@@ -81,15 +82,49 @@ function cleanKxGroup(kxGroup: any): string {
     "ffdhe3072":       "FFDHE-3072",
     "ffdhe4096":       "FFDHE-4096",
     "X25519Kyber768":  "X25519+Kyber768",
-    "x25519kyber768draft00": "X25519+Kyber768",
-    "SecP256r1Kyber768Draft00": "P-256+Kyber768",
+    "x25519kyber768draft00":        "X25519+Kyber768",
+    "SecP256r1Kyber768Draft00":     "P-256+Kyber768",
   };
 
   return map[g] ?? g;
 }
 
+// ── FIX 4: Guard — reject kxGroup values that are purely numeric ──────────────
+// Python's ssl module sometimes returns the key size (e.g. 256) as cipher()[2]
+// instead of a group name. A numeric string is NOT a named group; treating it
+// as one causes keyExchange to display as "256" and breaks all ECDHE/PQC logic.
+function isValidKxGroup(kxGroup: any): boolean {
+  if (kxGroup === null || kxGroup === undefined) return false;
+  const s = String(kxGroup).trim();
+  if (!s || s === "None" || s === "null" || s === "") return false;
+  // Reject pure integers / pure floats (e.g. "256", "128", "4096", "2048.0")
+  if (/^\d+(\.\d+)?$/.test(s)) return false;
+  return true;
+}
+
+// ── ECDHE group detector ──────────────────────────────────────────────────────
+// Returns true for any key exchange value that provides ephemeral ECDH —
+// whether it came from the backend (X25519, P-256 …) or parsed (ECDHE).
+export function isECDHEGroup(kx: string): boolean {
+  const k = (kx ?? "").toLowerCase();
+  return (
+    k === "x25519"       ||
+    k === "p-256"        ||
+    k === "p-384"        ||
+    k === "p-521"        ||
+    k === "x448"         ||
+    k === "ffdhe-2048"   ||
+    k === "ffdhe-3072"   ||
+    k === "ffdhe-4096"   ||
+    k.startsWith("secp") ||
+    k === "ecdhe"        ||
+    // PQC hybrids are also ECDHE-based
+    k.includes("x25519+") ||
+    k.includes("p-256+")
+  );
+}
+
 // ── Cipher string parser ───────────────────────────────────────────────────────
-// kxGroup: optional — pass tls_info.key_exchange_group from backend
 export function parseCipher(cipher: any, kxGroup?: string | null): CipherComponents {
   if (!cipher) return unknownComponents("");
   const cipherStr = String(cipher);
@@ -97,20 +132,19 @@ export function parseCipher(cipher: any, kxGroup?: string | null): CipherCompone
 
   const c = cipherStr.trim().toUpperCase();
 
-  // ── Always parse bulk cipher and MAC from the cipher string ──────────────
-  // These are reliable from the string regardless of key exchange source
-
+  // ── Bulk cipher detection ─────────────────────────────────────────────────
   let bulk = "unknown";
   let mac  = "unknown";
 
-  // Bulk cipher detection
   if      (c.includes("AES_256_GCM")  || c.includes("AES256-GCM"))  bulk = "AES-256-GCM";
   else if (c.includes("AES_128_GCM")  || c.includes("AES128-GCM"))  bulk = "AES-128-GCM";
   else if (c.includes("CHACHA20_POLY1305") || c.includes("CHACHA20")) bulk = "ChaCha20-Poly1305";
   else if (c.includes("AES_256_CCM")  || c.includes("AES256-CCM"))  bulk = "AES-256-CCM";
   else if (c.includes("AES_128_CCM")  || c.includes("AES128-CCM"))  bulk = "AES-128-CCM";
-  else if (c.includes("AES_256_CBC")  || c.includes("AES256-CBC") || (c.includes("AES256") && !c.includes("GCM") && !c.includes("CCM"))) bulk = "AES-256-CBC";
-  else if (c.includes("AES_128_CBC")  || c.includes("AES128-CBC") || (c.includes("AES128") && !c.includes("GCM") && !c.includes("CCM"))) bulk = "AES-128-CBC";
+  else if (c.includes("AES_256_CBC")  || c.includes("AES256-CBC") ||
+           (c.includes("AES256") && !c.includes("GCM") && !c.includes("CCM"))) bulk = "AES-256-CBC";
+  else if (c.includes("AES_128_CBC")  || c.includes("AES128-CBC") ||
+           (c.includes("AES128") && !c.includes("GCM") && !c.includes("CCM"))) bulk = "AES-128-CBC";
   else if (c.includes("3DES_EDE_CBC") || c.includes("3DES"))       bulk = "3DES-CBC";
   else if (c.includes("DES_CBC")      || (c.includes("DES") && !c.includes("3DES"))) bulk = "DES-CBC";
   else if (c.includes("RC4_128")      || c.includes("RC4-128"))     bulk = "RC4-128";
@@ -119,27 +153,28 @@ export function parseCipher(cipher: any, kxGroup?: string | null): CipherCompone
   else if (c.includes("CAMELLIA"))                                   bulk = "Camellia";
   else if (c.includes("ARIA"))                                       bulk = "ARIA";
 
-  // MAC detection
+  // ── MAC detection ─────────────────────────────────────────────────────────
   if      (c.includes("SHA384") || c.endsWith("SHA384")) mac = "SHA-384";
   else if (c.includes("SHA256") || c.endsWith("SHA256")) mac = "SHA-256";
-  else if (c.endsWith("SHA") || c.includes("_SHA_") || c.includes("-SHA"))  mac = "SHA-1";
+  else if (c.endsWith("SHA") || c.includes("_SHA_") || c.includes("-SHA")) mac = "SHA-1";
   else if (c.includes("MD5"))                            mac = "MD5";
   else if (c.includes("NULL"))                           mac = "NULL";
 
   // TLS 1.3 uses HKDF, not a traditional MAC
   if (c.startsWith("TLS_") && !c.includes("WITH")) mac = "HKDF";
 
-  // ── FIX 1: Use real kxGroup from backend if provided ─────────────────────
-  if (kxGroup && kxGroup !== "None" && kxGroup !== "null" && String(kxGroup).trim() !== "") {
-    const cleanGroup = cleanKxGroup(kxGroup);
+  // ── FIX 1 + FIX 4: Use real kxGroup from backend only if it is a valid name ─
+  if (isValidKxGroup(kxGroup)) {
+    const cleanGroup = cleanKxGroup(kxGroup!);
     const isHybridPQ = isPQCGroup(String(kxGroup));
+    const pfs        = isECDHEGroup(cleanGroup) || isHybridPQ;
 
     return {
       keyExchange:    cleanGroup,
       authentication: "Certificate",
       bulkCipher:     bulk,
       mac,
-      pfs:            true,       // all named groups provide PFS
+      pfs,
       pqcHybrid:      isHybridPQ,
       raw:            cipher,
       kxSource:       "backend",
@@ -221,12 +256,12 @@ function unknownComponents(raw: string): CipherComponents {
 // ── Finding generator ─────────────────────────────────────────────────────────
 export function analyseCipher(
   components: CipherComponents,
-  tlsNormalised: string   // already normalised — "1.3", "1.2", "1.1", "1.0"
+  tlsNormalised: string
 ): CipherFinding[] {
   const findings: CipherFinding[] = [];
   const { keyExchange: kx, bulkCipher: bulk, mac, pfs, pqcHybrid } = components;
 
-  // ── PQC hybrid active — best possible state ───────────────────────────────
+  // ── PQC hybrid active ─────────────────────────────────────────────────────
   if (pqcHybrid) {
     findings.push({
       severity:    "ok",
@@ -238,7 +273,6 @@ export function analyseCipher(
       doraArticle: "DORA Art. 9.2 — NIST FIPS 203 compliant",
       remediation: "No action required. Ensure hybrid KX is enforced for all clients.",
     });
-    // Still check bulk cipher and MAC — PQC on KX doesn't fix a weak bulk cipher
   }
 
   // ── 1. No Perfect Forward Secrecy ────────────────────────────────────────
@@ -317,8 +351,7 @@ export function analyseCipher(
                    "NIST deprecated SHA-1 for all cryptographic uses as of 2023. " +
                    "BSI TR-02102-2 prohibits SHA-1 in new TLS deployments.",
       doraArticle: "DORA Art. 9.4 — Cryptographic Controls",
-      remediation: "Use cipher suites with SHA-256 or SHA-384. " +
-                   "Deploy TLS 1.3 which uses HKDF.",
+      remediation: "Use cipher suites with SHA-256 or SHA-384. Deploy TLS 1.3 which uses HKDF.",
     });
   }
 
@@ -369,12 +402,12 @@ export function analyseCipher(
 
   // ── 6. PQC finding — only if not already running hybrid ──────────────────
   if (!pqcHybrid) {
-    const isTLS13  = tlsNormalised === "1.3";
-    const isRSAkx  = !pfs;
-    const isDHEkx  = pfs && !isTLS13;
+    const isTLS13 = tlsNormalised === "1.3";
+    const isRSAkx = !pfs;
+    const isDHEkx = pfs && !isTLS13;
 
     if (isRSAkx) {
-      // Already covered by NO-PFS-001 — skip duplicate
+      // Already covered by NO-PFS-001
     } else if (isTLS13) {
       const pqcSev = (bulk === "AES-256-GCM" || bulk === "ChaCha20-Poly1305")
         ? "low" as const : "medium" as const;
@@ -400,8 +433,7 @@ export function analyseCipher(
         description: `${kx} key exchange broken by Shor's algorithm. ` +
                      "'Harvest now, decrypt later' — traffic recorded today is at future risk.",
         doraArticle: "DORA Art. 9.2 — NIST FIPS 203/204",
-        remediation: "Implement CRYSTALS-Kyber (FIPS 203) hybrid with ECDHE. " +
-                     "Begin per NIST IR 8413.",
+        remediation: "Implement CRYSTALS-Kyber (FIPS 203) hybrid with ECDHE. Begin per NIST IR 8413.",
       });
     }
   }
@@ -468,8 +500,6 @@ export function pqcImpact(components: CipherComponents, tlsNorm: string): string
 }
 
 // ── Full analysis entry point ─────────────────────────────────────────────────
-// FIX 2: normalises TLS version here so callers don't need to
-// FIX 1: accepts optional kxGroup from backend
 export function fullAnalysis(
   cipher:   any,
   tlsRaw:   any,
