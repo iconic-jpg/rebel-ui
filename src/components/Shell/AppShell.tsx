@@ -2,25 +2,85 @@ import React, { useState } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 
 const NAV_ITEMS = [
-  { path: "/",               label: "Dashboard",        icon: "⬡", section: "CORE"       },
-  { path: "/inventory",      label: "Asset Inventory",  icon: "◈", section: "ASSET & PQC"},
-  { path: "/discovery",      label: "Asset Discovery",  icon: "◎", section: null         },
-  { path: "/cbom",           label: "CBOM",             icon: "◉", section: null         },
-  { path: "/pqc",            label: "Posture of PQC",   icon: "⬟", section: null         },
-  { path: "/pqc-readiness",  label: "PQC Readiness",    icon: "◐", section: null         },
-  { path: "/rating",         label: "Cyber Rating",     icon: "✦", section: "REPORTS"    },
-  { path: "/reporting",      label: "Reporting",        icon: "▣", section: null         },
+  { path: "/",              label: "Dashboard",      icon: "⬡", section: "CORE"       },
+  { path: "/inventory",     label: "Asset Inventory",icon: "◈", section: "ASSET & PQC"},
+  { path: "/discovery",     label: "Asset Discovery",icon: "◎", section: null         },
+  { path: "/cbom",          label: "CBOM",           icon: "◉", section: null         },
+  { path: "/pqc",           label: "Posture of PQC", icon: "⬟", section: null         },
+  { path: "/pqc-readiness", label: "PQC Readiness",  icon: "◐", section: null         },
+  { path: "/rating",        label: "Cyber Rating",   icon: "✦", section: "REPORTS"    },
+  { path: "/reporting",     label: "Reporting",      icon: "▣", section: null         },
+];
+
+const SETTINGS_ITEMS = [
+  { path: "/settings/assets", label: "Asset Registry", icon: "⚙" },
 ];
 
 export default function AppShell() {
-  const location  = useLocation();
-  const navigate  = useNavigate();
+  const location = useLocation();
+  const navigate = useNavigate();
   const [open, setOpen] = useState(false);
 
   const isActive = (path: string) =>
     path === "/" ? location.pathname === "/" : location.pathname.startsWith(path);
 
   const go = (path: string) => { navigate(path); setOpen(false); };
+
+  function NavButton({ path, label, icon, badge }: {
+    path: string; label: string; icon: string; badge?: React.ReactNode;
+  }) {
+    const active = isActive(path);
+    return (
+      <button
+        onClick={() => go(path)}
+        style={{
+          width:"100%", display:"flex", alignItems:"center", gap:12,
+          padding:"9px 10px",
+          background: active ? "rgba(59,130,246,0.1)" : "none",
+          border:`1px solid ${active ? "rgba(59,130,246,0.22)" : "transparent"}`,
+          borderRadius:3, cursor:"pointer", textAlign:"left",
+          transition:"all 0.15s", marginBottom:1,
+        }}
+        onMouseEnter={e => {
+          if (!active) {
+            (e.currentTarget as HTMLButtonElement).style.background = "rgba(59,130,246,0.07)";
+            (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(59,130,246,0.14)";
+          }
+        }}
+        onMouseLeave={e => {
+          if (!active) {
+            (e.currentTarget as HTMLButtonElement).style.background = "none";
+            (e.currentTarget as HTMLButtonElement).style.borderColor = "transparent";
+          }
+        }}
+      >
+        <div style={{
+          width:32, height:32, flexShrink:0,
+          background: active ? "rgba(59,130,246,0.15)" : "rgba(59,130,246,0.06)",
+          border:`1px solid ${active ? "rgba(59,130,246,0.3)" : "rgba(59,130,246,0.12)"}`,
+          borderRadius:3, display:"flex", alignItems:"center", justifyContent:"center",
+          fontFamily:"'Orbitron',monospace", fontSize:13,
+          color: active ? "#3b82f6" : "rgba(59,130,246,0.5)",
+        }}>
+          {icon}
+        </div>
+        <div style={{ flex:1, minWidth:0 }}>
+          <div style={{
+            fontFamily:"'Share Tech Mono',monospace", fontSize:11,
+            color: active ? "rgba(200,220,255,0.9)" : "rgba(200,220,255,0.5)",
+            lineHeight:1,
+          }}>
+            {label}
+          </div>
+        </div>
+        {active && (
+          <span style={{ width:4, height:4, borderRadius:"50%",
+            background:"#3b82f6", boxShadow:"0 0 6px #3b82f6", flexShrink:0 }}/>
+        )}
+        {badge}
+      </button>
+    );
+  }
 
   return (
     <>
@@ -29,39 +89,29 @@ export default function AppShell() {
         @keyframes scanline { 0%{top:-2px}100%{top:100%} }
       `}</style>
 
-      {/* ── BACKDROP ── only when open */}
       {open && (
-        <div
-          onClick={() => setOpen(false)}
-          style={{
-            position: "fixed", inset: 0, zIndex: 198,
-            background: "rgba(0,0,0,0.55)",
-            backdropFilter: "blur(3px)",
-            WebkitBackdropFilter: "blur(3px)",
-          }}
-        />
+        <div onClick={() => setOpen(false)} style={{
+          position:"fixed", inset:0, zIndex:198,
+          background:"rgba(0,0,0,0.55)",
+          backdropFilter:"blur(3px)", WebkitBackdropFilter:"blur(3px)",
+        }}/>
       )}
 
-      {/* ── DRAWER ── slides in from left, floats over content */}
       <div style={{
-        position:   "fixed",
-        top: 0, left: 0, bottom: 0,
-        width:      260,
-        zIndex:     199,
-        background: "linear-gradient(180deg,#070c16 0%,#080c14 100%)",
+        position:"fixed", top:0, left:0, bottom:0, width:260, zIndex:199,
+        background:"linear-gradient(180deg,#070c16 0%,#080c14 100%)",
         borderRight:"1px solid rgba(59,130,246,0.14)",
-        boxShadow:  open ? "12px 0 60px rgba(0,0,0,0.7)" : "none",
-        display:    "flex",
-        flexDirection: "column",
-        transform:  open ? "translateX(0)" : "translateX(-100%)",
-        transition: "transform 0.28s cubic-bezier(0.4,0,0.2,1)",
+        boxShadow: open ? "12px 0 60px rgba(0,0,0,0.7)" : "none",
+        display:"flex", flexDirection:"column",
+        transform: open ? "translateX(0)" : "translateX(-100%)",
+        transition:"transform 0.28s cubic-bezier(0.4,0,0.2,1)",
       }}>
 
-        {/* Drawer header */}
+        {/* Header */}
         <div style={{
-          padding: "15px 14px 13px",
-          borderBottom: "1px solid rgba(59,130,246,0.09)",
-          display: "flex", alignItems: "center", justifyContent: "space-between",
+          padding:"15px 14px 13px",
+          borderBottom:"1px solid rgba(59,130,246,0.09)",
+          display:"flex", alignItems:"center", justifyContent:"space-between",
         }}>
           <div style={{ display:"flex", alignItems:"center", gap:10 }}>
             <svg width="20" height="20" viewBox="0 0 28 28">
@@ -90,9 +140,9 @@ export default function AppShell() {
           }}>✕</button>
         </div>
 
-        {/* Nav items */}
+        {/* ── Main nav ── scrollable */}
         <nav style={{ flex:1, overflowY:"auto", padding:"6px 10px" }}>
-          {NAV_ITEMS.map((item) => (
+          {NAV_ITEMS.map(item => (
             <React.Fragment key={item.path}>
               {item.section && (
                 <div style={{ fontSize:7, color:"rgba(200,220,255,0.18)",
@@ -101,81 +151,49 @@ export default function AppShell() {
                   {item.section}
                 </div>
               )}
-              <button
-                onClick={() => go(item.path)}
-                style={{
-                  width:"100%", display:"flex", alignItems:"center", gap:12,
-                  padding:"9px 10px", background: isActive(item.path)
-                    ? "rgba(59,130,246,0.1)" : "none",
-                  border: `1px solid ${isActive(item.path)
-                    ? "rgba(59,130,246,0.22)" : "transparent"}`,
-                  borderRadius:3, cursor:"pointer", textAlign:"left",
-                  transition:"all 0.15s", marginBottom:1,
-                }}
-                onMouseEnter={e => {
-                  if (!isActive(item.path)) {
-                    (e.currentTarget as HTMLButtonElement).style.background = "rgba(59,130,246,0.07)";
-                    (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(59,130,246,0.14)";
-                  }
-                }}
-                onMouseLeave={e => {
-                  if (!isActive(item.path)) {
-                    (e.currentTarget as HTMLButtonElement).style.background = "none";
-                    (e.currentTarget as HTMLButtonElement).style.borderColor = "transparent";
-                  }
-                }}
-              >
-                {/* Icon box */}
-                <div style={{
-                  width:32, height:32, flexShrink:0,
-                  background: isActive(item.path)
-                    ? "rgba(59,130,246,0.15)" : "rgba(59,130,246,0.06)",
-                  border:`1px solid ${isActive(item.path)
-                    ? "rgba(59,130,246,0.3)" : "rgba(59,130,246,0.12)"}`,
-                  borderRadius:3, display:"flex", alignItems:"center",
-                  justifyContent:"center",
-                  fontFamily:"'Orbitron',monospace", fontSize:13,
-                  color: isActive(item.path) ? "#3b82f6" : "rgba(59,130,246,0.5)",
-                }}>
-                  {item.icon}
-                </div>
-
-                {/* Label */}
-                <div style={{ flex:1, minWidth:0 }}>
-                  <div style={{
-                    fontFamily:"'Share Tech Mono',monospace", fontSize:11,
-                    color: isActive(item.path)
-                      ? "rgba(200,220,255,0.9)" : "rgba(200,220,255,0.5)",
-                    lineHeight:1,
-                  }}>
-                    {item.label}
-                  </div>
-                </div>
-
-                {/* Active dot */}
-                {isActive(item.path) && (
-                  <span style={{ width:4, height:4, borderRadius:"50%",
-                    background:"#3b82f6", boxShadow:"0 0 6px #3b82f6",
-                    flexShrink:0 }}/>
-                )}
-
-                {/* NEW badge for PQC Readiness */}
-                {item.path === "/pqc-readiness" && !isActive(item.path) && (
-                  <span style={{
-                    fontSize:7, color:"#22c55e",
-                    border:"1px solid rgba(34,197,94,0.4)",
-                    borderRadius:2, padding:"1px 4px",
-                    fontFamily:"'Orbitron',monospace",
-                    letterSpacing:".08em", flexShrink:0,
-                  }}>NEW</span>
-                )}
-              </button>
+              <NavButton
+                path={item.path}
+                label={item.label}
+                icon={item.icon}
+                badge={
+                  item.path === "/pqc-readiness" && !isActive(item.path) ? (
+                    <span style={{
+                      fontSize:7, color:"#22c55e",
+                      border:"1px solid rgba(34,197,94,0.4)",
+                      borderRadius:2, padding:"1px 4px",
+                      fontFamily:"'Orbitron',monospace",
+                      letterSpacing:".08em", flexShrink:0,
+                    }}>NEW</span>
+                  ) : undefined
+                }
+              />
             </React.Fragment>
           ))}
         </nav>
 
-        {/* Footer */}
-        <div style={{ padding:"12px 14px", borderTop:"1px solid rgba(59,130,246,0.07)" }}>
+        {/* ── SETTINGS — pinned above footer, never scrolls away ── */}
+        <div style={{
+          padding:"4px 10px 2px",
+          borderTop:"1px solid rgba(59,130,246,0.07)",
+        }}>
+          <div style={{
+            fontSize:7, color:"rgba(200,220,255,0.15)",
+            letterSpacing:".2em", fontFamily:"'Orbitron',monospace",
+            padding:"7px 8px 4px",
+            display:"flex", alignItems:"center", gap:5,
+          }}>
+            <span style={{ fontSize:8, opacity:.5 }}>⚙</span>
+            SETTINGS
+          </div>
+          {SETTINGS_ITEMS.map(item => (
+            <NavButton key={item.path} path={item.path}
+              label={item.label} icon={item.icon} />
+          ))}
+        </div>
+
+        {/* ── Footer ── */}
+        <div style={{ padding:"10px 14px 12px",
+          borderTop:"1px solid rgba(59,130,246,0.07)" }}>
           <div style={{ display:"flex", alignItems:"center", gap:7, marginBottom:5 }}>
             <span style={{ position:"relative", display:"inline-flex", width:7, height:7 }}>
               <span style={{ position:"absolute", inset:0, borderRadius:"50%",
@@ -193,18 +211,15 @@ export default function AppShell() {
         </div>
       </div>
 
-      {/* ── MAIN — full width, no push ── */}
+      {/* ── MAIN ── */}
       <div style={{ minHeight:"100vh" }}>
-
-        {/* Hamburger button — floats top-left over everything */}
         <button
           onClick={() => setOpen(o => !o)}
           style={{
             position:"fixed", top:12, left:14, zIndex:197,
             background:"rgba(8,12,20,0.9)",
             border:"1px solid rgba(59,130,246,0.2)",
-            borderRadius:3, cursor:"pointer",
-            width:36, height:36,
+            borderRadius:3, cursor:"pointer", width:36, height:36,
             display:"flex", flexDirection:"column",
             alignItems:"center", justifyContent:"center", gap:5,
             backdropFilter:"blur(8px)",
@@ -224,8 +239,6 @@ export default function AppShell() {
             }}/>
           ))}
         </button>
-
-        {/* All page content renders here — untouched */}
         <Outlet />
       </div>
     </>
