@@ -493,43 +493,63 @@ export default function PQCReadinessPage() {
   });
 
   // ── Migration Progress Score ──────────────────────────────────────────────
-  // NOT an average of per-app cert scores (that's always ~10 for public sites).
-  // Instead: how far along is the portfolio in the PQC migration journey?
+  // Scores the BANK'S ACTUAL PQC PROGRAMME PROGRESS — not TLS hygiene.
+  // TLS 1.3 and no-broken-ciphers are table stakes that every public site has.
+  // Real milestones are things only a bank actively working on PQC would pass.
   //
-  // Five milestones, each worth 20pts:
-  //   1. TLS 1.3 deployed on all apps             (20pts)
-  //   2. No broken ciphers (DES/RC4/3DES/CBC)     (20pts)
-  //   3. No 1024-bit keys anywhere                (20pts)
-  //   4. AES-256-GCM enforced on all apps         (20pts)
-  //   5. At least one app running Kyber hybrid    (20pts — shows active programme)
+  // Five milestones × 20pts = 100:
+  //   1. All certs RSA-4096 or EC P-384      (20pts) — cert upgrade programme done
+  //   2. Zero wildcard certs in portfolio    (20pts) — cert discipline enforced
+  //   3. AES-256-GCM on 100% of apps        (20pts) — cipher policy enforced
+  //   4. TLS 1.2 completely eliminated       (20pts) — protocol policy enforced
+  //   5. At least one app running Kyber      (20pts) — active PQC deployment
   //
-  // This scores the BANK'S PROGRESS, not how good the public internet is.
-  // A bank that has done nothing scores 0-40. One actively deploying Kyber scores 80-100.
+  // A bank that has done nothing PQC-specific scores 0–20.
+  // A bank that has done the cert work scores 40–60.
+  // Full marks requires Kyber deployed.
   const n = withPQCScore.length || 1;
 
-  const tls13Pct    = withPQCScore.filter((a:any) => normaliseTLS(a.tls) === "1.3").length / n;
-  const nobrokenPct = withPQCScore.filter((a:any) => {
-    const bulk = a.analysis?.components?.bulkCipher ?? "";
-    return !bulk.includes("CBC") && bulk !== "DES-CBC" && bulk !== "RC4-128" && bulk !== "3DES-CBC";
-  }).length / n;
-  const no1024Pct   = withPQCScore.filter((a:any) => !a.keylen?.startsWith("1024")).length / n;
-  const aes256Pct   = withPQCScore.filter((a:any) => {
+  // Milestone 1: ALL certs are RSA-4096 or EC P-384
+  const allCertsStrong = withPQCScore.every((a: any) => {
+    const bits = parseInt(String(a.keylen ?? "0").match(/(\d+)/)?.[1] ?? "0", 10);
+    return bits >= 4096 || bits === 384;
+  });
+
+  // Milestone 2: ZERO wildcard certs
+  const noWildcards = withPQCScore.every((a: any) => !a.is_wildcard);
+
+  // Milestone 3: AES-256-GCM or ChaCha20 on ALL apps (no AES-128 anywhere)
+  const allAES256 = withPQCScore.every((a: any) => {
     const bulk = a.analysis?.components?.bulkCipher ?? "";
     return bulk === "AES-256-GCM" || bulk === "ChaCha20-Poly1305";
-  }).length / n;
-  const anyKyber    = withPQCScore.some((a:any) => a.pqcScore?.active) ? 1 : 0;
+  });
+
+  // Milestone 4: TLS 1.2 completely eliminated (100% TLS 1.3)
+  const allTLS13 = withPQCScore.every((a: any) => normaliseTLS(a.tls) === "1.3");
+
+  // Milestone 5: At least one app with Kyber/ML-KEM hybrid
+  const anyKyber = withPQCScore.some((a: any) => a.pqcScore?.active);
 
   const migrationScore = Math.round(
-    tls13Pct * 20 + nobrokenPct * 20 + no1024Pct * 20 + aes256Pct * 20 + anyKyber * 20
+    (allCertsStrong ? 20 : 0) +
+    (noWildcards    ? 20 : 0) +
+    (allAES256      ? 20 : 0) +
+    (allTLS13       ? 20 : 0) +
+    (anyKyber       ? 20 : 0)
   );
 
-  // Milestones for display
+  // Partial progress bars (% of apps passing each criterion)
+  const certStrongPct  = Math.round(withPQCScore.filter((a:any)=>{ const b=parseInt(String(a.keylen??"0").match(/(\d+)/)?.[1]??"0",10); return b>=4096||b===384; }).length/n*100);
+  const noWildPct      = Math.round(withPQCScore.filter((a:any)=>!a.is_wildcard).length/n*100);
+  const aes256Pct      = Math.round(withPQCScore.filter((a:any)=>{ const bulk=a.analysis?.components?.bulkCipher??""; return bulk==="AES-256-GCM"||bulk==="ChaCha20-Poly1305"; }).length/n*100);
+  const tls13Pct       = Math.round(withPQCScore.filter((a:any)=>normaliseTLS(a.tls)==="1.3").length/n*100);
+
   const milestones = [
-    { label:"TLS 1.3 deployed",      pct: Math.round(tls13Pct * 100),    done: tls13Pct >= 1   },
-    { label:"No broken ciphers",     pct: Math.round(nobrokenPct * 100),  done: nobrokenPct >= 1},
-    { label:"No 1024-bit keys",      pct: Math.round(no1024Pct * 100),    done: no1024Pct >= 1  },
-    { label:"AES-256-GCM enforced",  pct: Math.round(aes256Pct * 100),    done: aes256Pct >= 1  },
-    { label:"Kyber hybrid active",   pct: anyKyber * 100,                 done: anyKyber === 1  },
+    { label:"All certs RSA-4096 / EC P-384", pct: certStrongPct,  done: allCertsStrong },
+    { label:"Zero wildcard certificates",    pct: noWildPct,       done: noWildcards    },
+    { label:"AES-256-GCM on all apps",       pct: aes256Pct,       done: allAES256      },
+    { label:"TLS 1.2 fully eliminated",      pct: tls13Pct,        done: allTLS13       },
+    { label:"Kyber hybrid deployed",         pct: anyKyber?100:0,  done: anyKyber       },
   ];
 
   const weakApps = withPQCScore.filter((a:any)=>a.status==="weak"||a.status==="WEAK"||!a.pqc||a.keylen?.startsWith("1024"));
