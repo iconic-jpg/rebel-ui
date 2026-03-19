@@ -8,19 +8,17 @@ import {
   parseCipher, fullAnalysis,
   normaliseTLS,
   severityColor, severityVariant,
+  isECDHEGroup,
 } from "./cipherAnalysis.js";
 
 import type { CipherAnalysis, CipherFinding } from "./cipherAnalysis.js";
 
 const API = "https://r3bel-production.up.railway.app";
 
-// ── PQC field normaliser ──────────────────────────────────────────────────────
-// Backend scan_cryptography returns "post_quantum" but /cbom may map it to "pqc"
-// This helper reads whichever field is present, preferring pqcHybrid from analysis
 function isPQCReady(d: any, analysis: any): boolean {
-  if (analysis?.components?.pqcHybrid) return true;  // real hybrid detected by scanner
-  if (d.post_quantum === true)          return true;  // direct from scan_cryptography
-  if (d.pqc === true)                   return true;  // mapped field from /cbom
+  if (analysis?.components?.pqcHybrid) return true;
+  if (d.post_quantum === true)          return true;
+  if (d.pqc === true)                   return true;
   return false;
 }
 
@@ -74,6 +72,21 @@ function FindingBadge({ severity }: { severity: string }) {
       {severity}
     </span>
   );
+}
+
+// ── Single source of truth for ACTIVE / READY / ✗ ────────────────────────────
+function PQCBadge({ c, pqc }: { c: CipherAnalysis["components"]; pqc?: boolean }) {
+  if (c.pqcHybrid || pqc === true)
+    return <span style={{ fontSize:8, fontWeight:600, color:T.green,
+      border:`1px solid ${T.green}44`, borderRadius:2,
+      padding:"1px 5px", letterSpacing:".06em" }}>ACTIVE</span>;
+
+  if (isECDHEGroup(c.keyExchange))
+    return <span style={{ fontSize:8, fontWeight:600, color:T.yellow,
+      border:`1px solid ${T.yellow}44`, borderRadius:2,
+      padding:"1px 5px", letterSpacing:".06em" }}>READY</span>;
+
+  return <span style={{ color:T.red, fontSize:13 }}>✗</span>;
 }
 
 function CipherBreakdown({
@@ -176,20 +189,7 @@ function AppCard({ d, compact }: { d: any; compact: boolean }) {
             <span style={{ fontSize:11, color:T.blue,
               overflow:"hidden", textOverflow:"ellipsis",
               whiteSpace:"nowrap" as const }}>{d.app}</span>
-            {(() => {
-              if (c.pqcHybrid || d.pqc === true)
-                return <span style={{ fontSize:7, fontWeight:600, color:T.green,
-                  border:`1px solid ${T.green}44`, borderRadius:2,
-                  padding:"1px 4px", flexShrink:0 }}>PQC ACTIVE</span>;
-              const kx = c.keyExchange?.toLowerCase() ?? "";
-              const isECDHE = kx==="x25519"||kx==="p-256"||kx==="p-384"||
-                kx==="p-521"||kx==="x448"||kx.startsWith("secp")||kx==="ecdhe";
-              if (isECDHE)
-                return <span style={{ fontSize:7, fontWeight:600, color:T.yellow,
-                  border:`1px solid ${T.yellow}44`, borderRadius:2,
-                  padding:"1px 4px", flexShrink:0 }}>ECDHE READY</span>;
-              return null;
-            })()}
+            <PQCBadge c={c} pqc={d.pqc} />
           </div>
           <div style={{ display:"flex", gap:6, flexWrap:"wrap" as const }}>
             <Badge v={tlsNorm==="1.0"?"red":tlsNorm==="1.2"?"yellow":"green"}>
@@ -422,55 +422,33 @@ export default function CBOMPage() {
   return (
     <div style={S.page}>
 
-      {/* ── METRICS ── */}
-      <div style={{ display:"grid", gridTemplateColumns:metricCols,
-        gap: isMobile ? 8 : 9 }}>
-        <MetricCard label="TOTAL APPS"
-          value={stats.total_apps || displayData.length}
-          sub="Applications" color={T.blue} />
-        <MetricCard label="CRITICAL"
-          value={findingCounts.critical || 0}
-          sub="DORA findings" color={T.red} />
-        <MetricCard label="NO PFS"
-          value={noPFSCount}
-          sub="No fwd secrecy" color={T.orange} />
-        <MetricCard label="WEAK CIPHER"
-          value={stats.weak_crypto || brokenCount}
-          sub="Needs remediation" color={T.yellow} />
+      <div style={{ display:"grid", gridTemplateColumns:metricCols, gap: isMobile ? 8 : 9 }}>
+        <MetricCard label="TOTAL APPS"  value={stats.total_apps || displayData.length} sub="Applications"   color={T.blue}   />
+        <MetricCard label="CRITICAL"    value={findingCounts.critical || 0}             sub="DORA findings"  color={T.red}    />
+        <MetricCard label="NO PFS"      value={noPFSCount}                              sub="No fwd secrecy" color={T.orange} />
+        <MetricCard label="WEAK CIPHER" value={stats.weak_crypto || brokenCount}        sub="Needs remediation" color={T.yellow} />
         <div style={isMobile ? { gridColumn:"1/-1" } : {}}>
-          <MetricCard label="PQC READY"
-            value={stats.pqc_ready || 0}
-            sub="Post-quantum" color={T.green} />
+          <MetricCard label="PQC READY" value={stats.pqc_ready || 0}                   sub="Post-quantum"   color={T.green}  />
         </div>
       </div>
 
-      {/* ── FINDING SUMMARY ── */}
       <Panel>
         <PanelHeader left="DORA ART. 9.4 — LIVE FINDING SUMMARY" />
         <div style={{ padding:"10px 14px", display:"grid",
-          gridTemplateColumns: isMobile ? "1fr 1fr" : "repeat(4,1fr)",
-          gap:8 }}>
+          gridTemplateColumns: isMobile ? "1fr 1fr" : "repeat(4,1fr)", gap:8 }}>
           {(["critical","high","medium","low"] as const).map(sev => {
             const count = findingCounts[sev] || 0;
             const color = severityColor(sev);
-            const pct   = Math.min(100, Math.round(
-              count / Math.max(analysed.length, 1) * 100
-            ));
+            const pct   = Math.min(100, Math.round(count / Math.max(analysed.length, 1) * 100));
             return (
-              <div key={sev} style={{
-                background:"rgba(59,130,246,0.03)",
-                border:`1px solid ${color}22`,
-                borderRadius:3, padding:10,
-              }}>
-                <div style={{ display:"flex", justifyContent:"space-between",
-                  marginBottom:6 }}>
+              <div key={sev} style={{ background:"rgba(59,130,246,0.03)",
+                border:`1px solid ${color}22`, borderRadius:3, padding:10 }}>
+                <div style={{ display:"flex", justifyContent:"space-between", marginBottom:6 }}>
                   <span style={{ fontSize:9, color, letterSpacing:".12em",
                     textTransform:"uppercase" as const }}>{sev}</span>
-                  <span style={{ fontFamily:"'Orbitron',monospace",
-                    fontSize:14, color }}>{count}</span>
+                  <span style={{ fontFamily:"'Orbitron',monospace", fontSize:14, color }}>{count}</span>
                 </div>
-                <div style={{ height:3, background:"rgba(255,255,255,0.05)",
-                  borderRadius:2 }}>
+                <div style={{ height:3, background:"rgba(255,255,255,0.05)", borderRadius:2 }}>
                   <div style={{ height:"100%", width:`${pct}%`, background:color,
                     borderRadius:2, transition:"width 0.8s ease" }}/>
                 </div>
@@ -483,10 +461,7 @@ export default function CBOMPage() {
         </div>
       </Panel>
 
-      {/* ── CHARTS ── */}
-      <div style={{ display:"grid", gridTemplateColumns:chartCols,
-        gap: isMobile ? 8 : 10 }}>
-
+      <div style={{ display:"grid", gridTemplateColumns:chartCols, gap: isMobile ? 8 : 10 }}>
         <Panel>
           <PanelHeader left="KEY LENGTH DISTRIBUTION" />
           <div style={{ padding:14 }}>
@@ -505,8 +480,7 @@ export default function CBOMPage() {
 
         <Panel>
           <PanelHeader left="CIPHER USAGE" />
-          <div style={{ padding:14, display:"flex",
-            flexDirection:"column", gap:9 }}>
+          <div style={{ padding:14, display:"flex", flexDirection:"column", gap:9 }}>
             {cipherData.map(c => {
               const parsed  = parseCipher(c.name);
               const riskCol = !parsed.pfs ? T.red
@@ -516,13 +490,11 @@ export default function CBOMPage() {
                 <div key={c.name}>
                   <div style={{ display:"flex", justifyContent:"space-between",
                     marginBottom:3, gap:6 }}>
-                    <div style={{ display:"flex", alignItems:"center",
-                      gap:5, minWidth:0, flex:1 }}>
+                    <div style={{ display:"flex", alignItems:"center", gap:5, minWidth:0, flex:1 }}>
                       <span style={{ width:6, height:6, borderRadius:"50%",
                         background:riskCol, flexShrink:0 }}/>
-                      <span style={{ fontSize:9, color:T.text3,
-                        overflow:"hidden", textOverflow:"ellipsis",
-                        whiteSpace:"nowrap" as const }}>{c.name}</span>
+                      <span style={{ fontSize:9, color:T.text3, overflow:"hidden",
+                        textOverflow:"ellipsis", whiteSpace:"nowrap" as const }}>{c.name}</span>
                     </div>
                     <span style={{ fontSize:9, fontFamily:"'Orbitron',monospace",
                       color:c.color, flexShrink:0 }}>{c.count}</span>
@@ -534,7 +506,6 @@ export default function CBOMPage() {
           </div>
         </Panel>
 
-        {/* CA chart — spans both columns on tablet */}
         <div style={isTablet ? { gridColumn:"1/-1" } : {}}>
           <Panel>
             <PanelHeader left="TOP CERTIFICATE AUTHORITIES" />
@@ -543,33 +514,27 @@ export default function CBOMPage() {
               flexDirection: (isMobile||isTablet) ? "row" : "column",
               alignItems: (isMobile||isTablet) ? "center" : "stretch" }}>
               <canvas ref={caRef} width={160} height={160}
-                style={{
-                  display:"block",
+                style={{ display:"block",
                   margin: (isMobile||isTablet) ? "0" : "0 auto 10px",
                   flexShrink:0,
                   width:  (isMobile||isTablet) ? 110 : 160,
-                  height: (isMobile||isTablet) ? 110 : 160,
-                }} />
-              <div ref={caLegendRef} style={{ display:"flex",
-                flexDirection:"column", gap:5, flex:1 }} />
+                  height: (isMobile||isTablet) ? 110 : 160 }} />
+              <div ref={caLegendRef} style={{ display:"flex", flexDirection:"column", gap:5, flex:1 }} />
             </div>
           </Panel>
         </div>
       </div>
 
-      {/* ── INVENTORY TABLE ── */}
       <Panel>
         <PanelHeader
           left="APPLICATION CRYPTOGRAPHIC INVENTORY"
           right={
-            <button style={{ ...S.btn, fontSize: isMobile ? 9 : 11 }}
-              onClick={exportCSV}>
+            <button style={{ ...S.btn, fontSize: isMobile ? 9 : 11 }} onClick={exportCSV}>
               {isMobile ? "↓ CSV" : "↓ EXPORT FULL CSV"}
             </button>
           }
         />
 
-        {/* Mobile + tablet: expandable cards */}
         {!isDesktop && (
           <div style={{ maxHeight: isMobile ? 420 : 560, overflowY:"auto" }}>
             {analysed.map((d: any, i: number) => (
@@ -578,113 +543,75 @@ export default function CBOMPage() {
           </div>
         )}
 
-        {/* Desktop: full table */}
         {isDesktop && (
-          <>
-            <Table cols={[
-              "APPLICATION","KEY LEN","KEY EXCHANGE","BULK CIPHER",
-              "PFS","TLS VER","CA","OVERALL RISK","PQC",""
-            ]}>
-              {analysed.map((d: any, i: number) => {
-                const c       = d.analysis.components;
-                const risk    = d.analysis.overallRisk;
-                const isOpen  = expandedRow === i;
-                const tlsNorm = normaliseTLS(d.tls);
-                const keyCol  = d.keylen?.startsWith("1024") ? T.red
-                              : d.keylen?.startsWith("2048") ? T.yellow : T.green;
-                const bulkCol = c.bulkCipher.includes("DES") || c.bulkCipher === "RC4-128"
-                              ? T.red
-                              : c.bulkCipher.includes("CBC") ? T.orange : T.green;
-                return (
-                  <React.Fragment key={i}>
+          <Table cols={[
+            "APPLICATION","KEY LEN","KEY EXCHANGE","BULK CIPHER",
+            "PFS","TLS VER","CA","OVERALL RISK","PQC",""
+          ]}>
+            {analysed.map((d: any, i: number) => {
+              const c       = d.analysis.components;
+              const risk    = d.analysis.overallRisk;
+              const isOpen  = expandedRow === i;
+              const tlsNorm = normaliseTLS(d.tls);
+              const keyCol  = d.keylen?.startsWith("1024") ? T.red
+                            : d.keylen?.startsWith("2048") ? T.yellow : T.green;
+              const bulkCol = c.bulkCipher.includes("DES") || c.bulkCipher === "RC4-128"
+                            ? T.red : c.bulkCipher.includes("CBC") ? T.orange : T.green;
+              return (
+                <React.Fragment key={i}>
+                  <TR>
+                    <TD style={{ color:T.blue, fontSize:10 }}>{d.app}</TD>
+                    <TD style={{ fontSize:10, color:keyCol }}>{d.keylen}</TD>
+                    <TD style={{ fontSize:9, color: c.pfs ? T.cyan : T.red,
+                      fontFamily:"'Share Tech Mono',monospace" }}>
+                      {c.keyExchange}
+                      {c.kxSource === "backend" && (
+                        <span style={{ fontSize:7, color:T.text3, marginLeft:4 }}>•</span>
+                      )}
+                    </TD>
+                    <TD style={{ fontSize:9, color:bulkCol,
+                      fontFamily:"'Share Tech Mono',monospace",
+                      maxWidth:120, overflow:"hidden", textOverflow:"ellipsis",
+                      whiteSpace:"nowrap" as const }}>
+                      {c.bulkCipher}
+                    </TD>
+                    <TD style={{ textAlign:"center", fontSize:13 }}>
+                      {c.pfs ? <span style={{color:T.green}}>✓</span>
+                              : <span style={{color:T.red}}>✗</span>}
+                    </TD>
+                    <TD>
+                      <Badge v={tlsNorm==="1.0"?"red":tlsNorm==="1.1"?"orange":tlsNorm==="1.2"?"yellow":"green"}>
+                        TLS {tlsNorm}
+                      </Badge>
+                    </TD>
+                    <TD style={{ fontSize:9, color:T.text3 }}>{d.ca}</TD>
+                    <TD>
+                      <Badge v={severityVariant(risk) as any}>{risk.toUpperCase()}</Badge>
+                    </TD>
+                    <TD style={{ textAlign:"center" }}>
+                      <PQCBadge c={c} pqc={d.pqc} />
+                    </TD>
+                    <TD>
+                      <button onClick={() => setExpandedRow(isOpen ? null : i)}
+                        style={{ ...S.btn, fontSize:9, padding:"2px 7px" }}>
+                        {isOpen ? "▲" : "▼ details"}
+                      </button>
+                    </TD>
+                  </TR>
+                  {isOpen && (
                     <TR>
-                      <TD style={{ color:T.blue, fontSize:10 }}>{d.app}</TD>
-                      <TD style={{ fontSize:10, color:keyCol }}>{d.keylen}</TD>
-                      <TD style={{ fontSize:9, color: c.pfs ? T.cyan : T.red,
-                        fontFamily:"'Share Tech Mono',monospace" }}>
-                        {c.keyExchange}
-                        {c.kxSource === "backend" && (
-                          <span style={{ fontSize:7, color:T.text3, marginLeft:4 }}>•</span>
-                        )}
-                      </TD>
-                      <TD style={{ fontSize:9, color:bulkCol,
-                        fontFamily:"'Share Tech Mono',monospace",
-                        maxWidth:120, overflow:"hidden",
-                        textOverflow:"ellipsis",
-                        whiteSpace:"nowrap" as const }}>
-                        {c.bulkCipher}
-                      </TD>
-                      <TD style={{ textAlign:"center", fontSize:13 }}>
-                        {c.pfs
-                          ? <span style={{color:T.green}}>✓</span>
-                          : <span style={{color:T.red}}>✗</span>}
-                      </TD>
-                      <TD>
-                        <Badge v={tlsNorm==="1.0"?"red":tlsNorm==="1.1"?"orange":tlsNorm==="1.2"?"yellow":"green"}>
-                          TLS {tlsNorm}
-                        </Badge>
-                      </TD>
-                      <TD style={{ fontSize:9, color:T.text3 }}>{d.ca}</TD>
-                      <TD>
-                        <Badge v={severityVariant(risk) as any}>
-                          {risk.toUpperCase()}
-                        </Badge>
-                      </TD>
-                      <TD style={{ textAlign:"center" }}>
-                        {(() => {
-                          // ACTIVE — PQC hybrid already negotiated
-                          if (c.pqcHybrid || d.pqc === true)
-                            return <span style={{ fontSize:8, fontWeight:600,
-                              color:T.green, border:`1px solid ${T.green}44`,
-                              borderRadius:2, padding:"1px 5px",
-                              letterSpacing:".06em" }}>ACTIVE</span>;
-
-                          // READY — real ECDHE key exchange detected
-                          // Only X25519, P-256, P-384, secp* — genuine ephemeral EC
-                          const kx = c.keyExchange?.toLowerCase() ?? "";
-                          const isECDHE =
-                            kx === "x25519"     ||
-                            kx === "p-256"       ||
-                            kx === "p-384"       ||
-                            kx === "p-521"       ||
-                            kx === "x448"        ||
-                            kx.startsWith("secp")||
-                            kx === "ecdhe";
-                          if (isECDHE)
-                            return <span style={{ fontSize:8, fontWeight:600,
-                              color:T.yellow, border:`1px solid ${T.yellow}44`,
-                              borderRadius:2, padding:"1px 5px",
-                              letterSpacing:".06em" }}>READY</span>;
-
-                          // NOT READY — RSA, DHE, unknown, or TLS 1.3 without kxGroup
-                          return <span style={{color:T.red, fontSize:13}}>✗</span>;
-                        })()}
-                      </TD>
-                      <TD>
-                        <button
-                          onClick={() => setExpandedRow(isOpen ? null : i)}
-                          style={{ ...S.btn, fontSize:9, padding:"2px 7px" }}>
-                          {isOpen ? "▲" : "▼ details"}
-                        </button>
-                      </TD>
+                      <td colSpan={10} style={{ padding:"0 12px 12px" }}>
+                        <CipherBreakdown analysis={d.analysis} compact={false} />
+                      </td>
                     </TR>
-                    {isOpen && (
-                      <TR>
-                        <td colSpan={10} style={{ padding:"0 12px 12px" }}>
-                          <CipherBreakdown analysis={d.analysis} compact={false} />
-                        </td>
-                      </TR>
-                    )}
-                  </React.Fragment>
-                );
-              })}
-            </Table>
-          </>
+                  )}
+                </React.Fragment>
+              );
+            })}
+          </Table>
         )}
 
-        {/* Footer */}
-        <div style={{ padding:"8px 12px",
-          borderTop:`1px solid rgba(59,130,246,0.07)`,
+        <div style={{ padding:"8px 12px", borderTop:`1px solid rgba(59,130,246,0.07)`,
           display:"flex", justifyContent:"space-between",
           alignItems:"center", flexWrap:"wrap" as const, gap:8 }}>
           <span style={{ fontSize:10, color:T.text3 }}>
@@ -701,21 +628,14 @@ export default function CBOMPage() {
         </div>
       </Panel>
 
-      {/* ── ENCRYPTION PROTOCOLS ── */}
       <Panel>
         <PanelHeader left="ENCRYPTION PROTOCOLS" />
-        <div style={{ padding:14, display:"flex", gap:16,
-          alignItems:"center",
+        <div style={{ padding:14, display:"flex", gap:16, alignItems:"center",
           flexDirection: isMobile ? "column" : "row" }}>
           <canvas ref={protoRef} width={140} height={140}
-            style={{
-              width:    isMobile ? "100%" : 140,
-              height:   140,
-              maxWidth: 200,
-            }} />
-          <div ref={protoLegendRef} style={{ display:"flex",
-            flexDirection:"column", gap:9, flex:1,
-            width: isMobile ? "100%" : "auto" }} />
+            style={{ width: isMobile ? "100%" : 140, height:140, maxWidth:200 }} />
+          <div ref={protoLegendRef} style={{ display:"flex", flexDirection:"column", gap:9,
+            flex:1, width: isMobile ? "100%" : "auto" }} />
         </div>
       </Panel>
 
