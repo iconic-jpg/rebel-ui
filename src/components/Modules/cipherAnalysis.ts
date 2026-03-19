@@ -37,9 +37,9 @@ export interface CipherAnalysis {
 
 // ── TLS version normaliser ────────────────────────────────────────────────────
 // Handles: "TLSv1.3", "TLS1.3", "TLSv1", "TLS 1.2", "1.2", "1.3"
-export function normaliseTLS(raw: string): string {
-  if (!raw) return "";
-  return raw
+export function normaliseTLS(raw: any): string {
+  if (raw === null || raw === undefined) return "";
+  return String(raw)
     .replace(/^TLSv?/i, "")   // strip TLS / TLSv prefix
     .replace(/^v/i, "")        // strip any remaining v
     .trim();
@@ -88,10 +88,12 @@ function cleanKxGroup(kxGroup: string): string {
 
 // ── Cipher string parser ───────────────────────────────────────────────────────
 // kxGroup: optional — pass tls_info.key_exchange_group from backend
-export function parseCipher(cipher: string, kxGroup?: string | null): CipherComponents {
-  if (!cipher) return unknownComponents(cipher ?? "");
+export function parseCipher(cipher: any, kxGroup?: string | null): CipherComponents {
+  if (!cipher) return unknownComponents("");
+  const cipherStr = String(cipher);
+  if (!cipherStr.trim()) return unknownComponents("");
 
-  const c = cipher.trim().toUpperCase();
+  const c = cipherStr.trim().toUpperCase();
 
   // ── Always parse bulk cipher and MAC from the cipher string ──────────────
   // These are reliable from the string regardless of key exchange source
@@ -467,12 +469,12 @@ export function pqcImpact(components: CipherComponents, tlsNorm: string): string
 // FIX 2: normalises TLS version here so callers don't need to
 // FIX 1: accepts optional kxGroup from backend
 export function fullAnalysis(
-  cipher:    string,
-  tlsRaw:    string,
-  kxGroup?:  string | null
+  cipher:   any,
+  tlsRaw:   any,
+  kxGroup?: any
 ): CipherAnalysis {
-  const tlsNorm  = normaliseTLS(tlsRaw);
-  const components = parseCipher(cipher, kxGroup);
+  const tlsNorm    = normaliseTLS(tlsRaw);
+  const components = parseCipher(cipher, kxGroup ?? null);
   const findings   = analyseCipher(components, tlsNorm);
   return {
     components,
