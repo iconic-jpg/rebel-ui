@@ -1,0 +1,118 @@
+import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-runtime";
+import React, { useState } from "react";
+import { Outlet, useLocation, useNavigate } from "react-router-dom";
+const NAV_ITEMS = [
+    { path: "/", label: "Dashboard", icon: "⬡", section: "CORE" },
+    { path: "/inventory", label: "Asset Inventory", icon: "◈", section: "ASSET & PQC" },
+    { path: "/discovery", label: "Asset Discovery", icon: "◎", section: null },
+    { path: "/cbom", label: "CBOM", icon: "◉", section: null },
+    { path: "/pqc", label: "Posture of PQC", icon: "⬟", section: null },
+    { path: "/pqc-readiness", label: "PQC Readiness", icon: "◐", section: null },
+    { path: "/rating", label: "Cyber Rating", icon: "✦", section: "REPORTS" },
+    { path: "/reporting", label: "Reporting", icon: "▣", section: null },
+];
+export default function AppShell() {
+    const location = useLocation();
+    const navigate = useNavigate();
+    const [open, setOpen] = useState(false);
+    const isActive = (path) => path === "/" ? location.pathname === "/" : location.pathname.startsWith(path);
+    const go = (path) => { navigate(path); setOpen(false); };
+    return (_jsxs(_Fragment, { children: [_jsx("style", { children: `
+        @keyframes ping { 75%,100%{transform:scale(2.2);opacity:0} }
+        @keyframes scanline { 0%{top:-2px}100%{top:100%} }
+      ` }), open && (_jsx("div", { onClick: () => setOpen(false), style: {
+                    position: "fixed", inset: 0, zIndex: 198,
+                    background: "rgba(0,0,0,0.55)",
+                    backdropFilter: "blur(3px)",
+                    WebkitBackdropFilter: "blur(3px)",
+                } })), _jsxs("div", { style: {
+                    position: "fixed",
+                    top: 0, left: 0, bottom: 0,
+                    width: 260,
+                    zIndex: 199,
+                    background: "linear-gradient(180deg,#070c16 0%,#080c14 100%)",
+                    borderRight: "1px solid rgba(59,130,246,0.14)",
+                    boxShadow: open ? "12px 0 60px rgba(0,0,0,0.7)" : "none",
+                    display: "flex",
+                    flexDirection: "column",
+                    transform: open ? "translateX(0)" : "translateX(-100%)",
+                    transition: "transform 0.28s cubic-bezier(0.4,0,0.2,1)",
+                }, children: [_jsxs("div", { style: {
+                            padding: "15px 14px 13px",
+                            borderBottom: "1px solid rgba(59,130,246,0.09)",
+                            display: "flex", alignItems: "center", justifyContent: "space-between",
+                        }, children: [_jsxs("div", { style: { display: "flex", alignItems: "center", gap: 10 }, children: [_jsxs("svg", { width: "20", height: "20", viewBox: "0 0 28 28", children: [_jsx("polygon", { points: "14,2 26,8 26,20 14,26 2,20 2,8", fill: "none", stroke: "#3b82f6", strokeWidth: "1.5", style: { filter: "drop-shadow(0 0 4px #3b82f6)" } }), _jsx("polygon", { points: "14,7 21,11 21,17 14,21 7,17 7,11", fill: "rgba(59,130,246,0.1)", stroke: "rgba(59,130,246,0.3)", strokeWidth: "1" }), _jsx("circle", { cx: "14", cy: "14", r: "3", fill: "#3b82f6", style: { filter: "drop-shadow(0 0 5px #3b82f6)" } })] }), _jsxs("div", { children: [_jsx("div", { style: { fontFamily: "'Orbitron',monospace", fontWeight: 900,
+                                                    fontSize: 14, color: "#fff", letterSpacing: ".22em" }, children: "REBEL" }), _jsx("div", { style: { fontSize: 7, color: "rgba(200,220,255,0.2)",
+                                                    letterSpacing: ".14em", fontFamily: "'Orbitron',monospace", marginTop: 1 }, children: "THREAT INTELLIGENCE" })] })] }), _jsx("button", { onClick: () => setOpen(false), style: {
+                                    background: "rgba(59,130,246,0.06)", border: "1px solid rgba(59,130,246,0.15)",
+                                    borderRadius: 2, color: "rgba(200,220,255,0.35)", cursor: "pointer",
+                                    width: 26, height: 26, display: "flex", alignItems: "center",
+                                    justifyContent: "center", fontSize: 13, flexShrink: 0,
+                                }, children: "\u2715" })] }), _jsx("nav", { style: { flex: 1, overflowY: "auto", padding: "6px 10px" }, children: NAV_ITEMS.map((item) => (_jsxs(React.Fragment, { children: [item.section && (_jsx("div", { style: { fontSize: 7, color: "rgba(200,220,255,0.18)",
+                                        letterSpacing: ".2em", fontFamily: "'Orbitron',monospace",
+                                        padding: "10px 8px 5px" }, children: item.section })), _jsxs("button", { onClick: () => go(item.path), style: {
+                                        width: "100%", display: "flex", alignItems: "center", gap: 12,
+                                        padding: "9px 10px", background: isActive(item.path)
+                                            ? "rgba(59,130,246,0.1)" : "none",
+                                        border: `1px solid ${isActive(item.path)
+                                            ? "rgba(59,130,246,0.22)" : "transparent"}`,
+                                        borderRadius: 3, cursor: "pointer", textAlign: "left",
+                                        transition: "all 0.15s", marginBottom: 1,
+                                    }, onMouseEnter: e => {
+                                        if (!isActive(item.path)) {
+                                            e.currentTarget.style.background = "rgba(59,130,246,0.07)";
+                                            e.currentTarget.style.borderColor = "rgba(59,130,246,0.14)";
+                                        }
+                                    }, onMouseLeave: e => {
+                                        if (!isActive(item.path)) {
+                                            e.currentTarget.style.background = "none";
+                                            e.currentTarget.style.borderColor = "transparent";
+                                        }
+                                    }, children: [_jsx("div", { style: {
+                                                width: 32, height: 32, flexShrink: 0,
+                                                background: isActive(item.path)
+                                                    ? "rgba(59,130,246,0.15)" : "rgba(59,130,246,0.06)",
+                                                border: `1px solid ${isActive(item.path)
+                                                    ? "rgba(59,130,246,0.3)" : "rgba(59,130,246,0.12)"}`,
+                                                borderRadius: 3, display: "flex", alignItems: "center",
+                                                justifyContent: "center",
+                                                fontFamily: "'Orbitron',monospace", fontSize: 13,
+                                                color: isActive(item.path) ? "#3b82f6" : "rgba(59,130,246,0.5)",
+                                            }, children: item.icon }), _jsx("div", { style: { flex: 1, minWidth: 0 }, children: _jsx("div", { style: {
+                                                    fontFamily: "'Share Tech Mono',monospace", fontSize: 11,
+                                                    color: isActive(item.path)
+                                                        ? "rgba(200,220,255,0.9)" : "rgba(200,220,255,0.5)",
+                                                    lineHeight: 1,
+                                                }, children: item.label }) }), isActive(item.path) && (_jsx("span", { style: { width: 4, height: 4, borderRadius: "50%",
+                                                background: "#3b82f6", boxShadow: "0 0 6px #3b82f6",
+                                                flexShrink: 0 } })), item.path === "/pqc-readiness" && !isActive(item.path) && (_jsx("span", { style: {
+                                                fontSize: 7, color: "#22c55e",
+                                                border: "1px solid rgba(34,197,94,0.4)",
+                                                borderRadius: 2, padding: "1px 4px",
+                                                fontFamily: "'Orbitron',monospace",
+                                                letterSpacing: ".08em", flexShrink: 0,
+                                            }, children: "NEW" }))] })] }, item.path))) }), _jsxs("div", { style: { padding: "12px 14px", borderTop: "1px solid rgba(59,130,246,0.07)" }, children: [_jsxs("div", { style: { display: "flex", alignItems: "center", gap: 7, marginBottom: 5 }, children: [_jsxs("span", { style: { position: "relative", display: "inline-flex", width: 7, height: 7 }, children: [_jsx("span", { style: { position: "absolute", inset: 0, borderRadius: "50%",
+                                                    background: "#22c55e", opacity: .5, animation: "ping 1.4s ease infinite" } }), _jsx("span", { style: { width: 7, height: 7, borderRadius: "50%",
+                                                    background: "#22c55e", boxShadow: "0 0 4px #22c55e", display: "block" } })] }), _jsx("span", { style: { fontSize: 7.5, fontFamily: "'Orbitron',monospace",
+                                            color: "#22c55e", letterSpacing: ".12em" }, children: "LIVE \u00B7 CONNECTED" })] }), _jsx("div", { style: { fontSize: 7.5, color: "rgba(200,220,255,0.14)",
+                                    fontFamily: "'Share Tech Mono',monospace" }, children: "r3bel-production.up.railway.app" })] })] }), _jsxs("div", { style: { minHeight: "100vh" }, children: [_jsx("button", { onClick: () => setOpen(o => !o), style: {
+                            position: "fixed", top: 12, left: 14, zIndex: 197,
+                            background: "rgba(8,12,20,0.9)",
+                            border: "1px solid rgba(59,130,246,0.2)",
+                            borderRadius: 3, cursor: "pointer",
+                            width: 36, height: 36,
+                            display: "flex", flexDirection: "column",
+                            alignItems: "center", justifyContent: "center", gap: 5,
+                            backdropFilter: "blur(8px)",
+                        }, children: [0, 1, 2].map(i => (_jsx("span", { style: {
+                                display: "block", width: 14, height: 1.5, borderRadius: 2,
+                                background: open ? "#3b82f6" : "rgba(200,220,255,0.5)",
+                                transform: open
+                                    ? i === 0 ? "translateY(6.5px) rotate(45deg)"
+                                        : i === 2 ? "translateY(-6.5px) rotate(-45deg)"
+                                            : "scaleX(0)"
+                                    : "none",
+                                opacity: open && i === 1 ? 0 : 1,
+                                transition: "all 0.22s cubic-bezier(0.4,0,0.2,1)",
+                            } }, i))) }), _jsx(Outlet, {})] })] }));
+}
