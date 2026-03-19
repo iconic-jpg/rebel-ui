@@ -10,9 +10,10 @@ import {
   severityColor, severityVariant,
   isECDHEGroup,
   isPQCReadyGroup,
+  pqcReadinessScore,
 } from "./cipherAnalysis.js";
 
-import type { CipherAnalysis, CipherFinding } from "./cipherAnalysis.js";
+import type { CipherAnalysis, CipherFinding, PQCScoreBreakdown } from "./cipherAnalysis.js";
 
 const API = "https://r3bel-production.up.railway.app";
 
@@ -75,28 +76,108 @@ function FindingBadge({ severity }: { severity: string }) {
   );
 }
 
-// ── Single source of truth for ACTIVE / READY / ✗ ────────────────────────────
-// ACTIVE  → Kyber/ML-KEM hybrid confirmed
-// READY   → TLS 1.3 + modern named group (X25519, P-256/384/521, X448)
-// ✗       → everything else: TLS 1.2 ECDHE, DHE, RSA, unknown
-function PQCBadge({ c, pqc, tls }: {
-  c:    CipherAnalysis["components"];
-  pqc?: boolean;
-  tls?: string;
-}) {
-  if (c.pqcHybrid || pqc === true)
-    return <span style={{ fontSize:8, fontWeight:600, color:T.green,
-      border:`1px solid ${T.green}44`, borderRadius:2,
-      padding:"1px 5px", letterSpacing:".06em" }}>ACTIVE</span>;
+// ── PQC Score Badge — compact table/card cell ─────────────────────────────────
+function PQCScoreBadge({ score }: { score: PQCScoreBreakdown }) {
+  return (
+    <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:2 }}>
+      {/* label */}
+      <span style={{
+        fontSize: 7, fontWeight: 700, letterSpacing: ".07em",
+        color: score.color,
+        border: `1px solid ${score.color}44`,
+        borderRadius: 2, padding: "1px 5px",
+      }}>
+        {score.active ? "ACTIVE" : score.label}
+      </span>
+      {/* score bar */}
+      {!score.active && (
+        <div style={{ width: 48, height: 3, background: "rgba(255,255,255,0.07)", borderRadius: 2 }}>
+          <div style={{
+            height: "100%", borderRadius: 2,
+            width: `${score.score}%`,
+            background: score.color,
+            transition: "width 0.6s ease",
+          }}/>
+        </div>
+      )}
+      {/* numeric */}
+      {!score.active && (
+        <span style={{ fontSize: 7, color: score.color, fontFamily: "'Orbitron',monospace" }}>
+          {score.score}/100
+        </span>
+      )}
+    </div>
+  );
+}
 
-  if (isPQCReadyGroup(c.keyExchange, tls ?? ""))
-    return <span style={{ fontSize:8, fontWeight:600, color:T.yellow,
-      border:`1px solid ${T.yellow}44`, borderRadius:2,
-      padding:"1px 5px", letterSpacing:".06em" }}>READY</span>;
+// ── PQC Score Detail — expanded row breakdown ─────────────────────────────────
+function PQCScoreDetail({ score }: { score: PQCScoreBreakdown }) {
+  const rows = Object.values(score.criteria);
+  return (
+    <div style={{
+      background: "rgba(8,12,20,0.97)",
+      border: `1px solid ${score.color}33`,
+      borderRadius: 4, padding: 10, marginTop: 6,
+    }}>
+      <div style={{ display:"flex", justifyContent:"space-between",
+        alignItems:"center", marginBottom: 8 }}>
+        <span style={{ fontSize: 8, color: score.color, letterSpacing: ".12em",
+          fontWeight: 700 }}>PQC MIGRATION READINESS</span>
+        <span style={{ fontFamily:"'Orbitron',monospace", fontSize: 14,
+          color: score.color }}>{score.active ? "ACTIVE" : `${score.score}/100`}</span>
+      </div>
 
-  return <span style={{ fontSize:8, fontWeight:600, color:T.red,
-    border:`1px solid ${T.red}44`, borderRadius:2,
-    padding:"1px 5px", letterSpacing:".06em" }}>NOT PQC</span>;
+      {/* progress bar */}
+      {!score.active && (
+        <div style={{ height: 4, background: "rgba(255,255,255,0.06)",
+          borderRadius: 2, marginBottom: 10 }}>
+          <div style={{
+            height: "100%", borderRadius: 2,
+            width: `${score.score}%`, background: score.color,
+            transition: "width 0.8s ease",
+            boxShadow: `0 0 6px ${score.color}66`,
+          }}/>
+        </div>
+      )}
+
+      {/* criteria rows */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+        {rows.map(c => (
+          <div key={c.label} style={{ display:"flex", alignItems:"center", gap: 8 }}>
+            <span style={{
+              fontSize: 9, width: 12, textAlign: "center",
+              color: c.pass ? "#22c55e" : c.pts > 0 ? "#eab308" : "#ef4444",
+            }}>
+              {c.pass ? "✓" : c.pts > 0 ? "~" : "✗"}
+            </span>
+            <span style={{ fontSize: 8, color: "#94a3b8", flex: 1 }}>{c.label}</span>
+            <span style={{
+              fontSize: 8, fontFamily: "'Orbitron',monospace",
+              color: c.pass ? "#22c55e" : c.pts > 0 ? "#eab308" : "#64748b",
+            }}>
+              {c.pts}/{c.max}
+            </span>
+          </div>
+        ))}
+      </div>
+
+      {!score.active && score.score < 100 && (
+        <div style={{ marginTop: 8, padding: "5px 8px",
+          background: "rgba(59,130,246,0.05)",
+          border: "1px solid rgba(59,130,246,0.15)", borderRadius: 3 }}>
+          <span style={{ fontSize: 7, color: "#64748b" }}>
+            {score.score === 0
+              ? "Cannot begin PQC migration — fix TLS version and cipher suite first."
+              : score.score < 55
+              ? "Significant gaps. Upgrade TLS version and key exchange before planning Kyber deployment."
+              : score.score < 100
+              ? "Foundation mostly ready. Address remaining gaps then deploy X25519+Kyber768 hybrid."
+              : "Classical foundation complete. Deploy CRYSTALS-Kyber (FIPS 203) hybrid to go ACTIVE."}
+          </span>
+        </div>
+      )}
+    </div>
+  );
 }
 
 function CipherBreakdown({
@@ -188,6 +269,7 @@ function AppCard({ d, compact }: { d: any; compact: boolean }) {
   const risk    = d.analysis.overallRisk;
   const c       = d.analysis.components;
   const tlsNorm = normaliseTLS(d.tls);
+  const pqcScore = pqcReadinessScore(c, d.tls, d.keylen);
 
   return (
     <div style={{ borderBottom:"1px solid rgba(59,130,246,0.05)" }}>
@@ -199,7 +281,7 @@ function AppCard({ d, compact }: { d: any; compact: boolean }) {
             <span style={{ fontSize:11, color:T.blue,
               overflow:"hidden", textOverflow:"ellipsis",
               whiteSpace:"nowrap" as const }}>{d.app}</span>
-            <PQCBadge c={c} pqc={d.pqc} tls={d.tls} />
+            <PQCScoreBadge score={pqcScore} />
           </div>
           <div style={{ display:"flex", gap:6, flexWrap:"wrap" as const }}>
             <Badge v={tlsNorm==="1.0"?"red":tlsNorm==="1.2"?"yellow":"green"}>
@@ -235,6 +317,7 @@ function AppCard({ d, compact }: { d: any; compact: boolean }) {
       </div>
       {open && (
         <div style={{ padding:"0 14px 12px" }}>
+          <PQCScoreDetail score={pqcScore} />
           <CipherBreakdown analysis={d.analysis} compact={compact} />
         </div>
       )}
@@ -563,6 +646,7 @@ export default function CBOMPage() {
               const risk    = d.analysis.overallRisk;
               const isOpen  = expandedRow === i;
               const tlsNorm = normaliseTLS(d.tls);
+              const pqcScore = pqcReadinessScore(c, d.tls, d.keylen);
               const keyCol  = d.keylen?.startsWith("1024") ? T.red
                             : d.keylen?.startsWith("2048") ? T.yellow : T.green;
               const bulkCol = c.bulkCipher.includes("DES") || c.bulkCipher === "RC4-128"
@@ -599,7 +683,7 @@ export default function CBOMPage() {
                       <Badge v={severityVariant(risk) as any}>{risk.toUpperCase()}</Badge>
                     </TD>
                     <TD style={{ textAlign:"center" }}>
-                      <PQCBadge c={c} pqc={d.pqc} tls={d.tls} />
+                      <PQCScoreBadge score={pqcScore} />
                     </TD>
                     <TD>
                       <button onClick={() => setExpandedRow(isOpen ? null : i)}
@@ -611,6 +695,7 @@ export default function CBOMPage() {
                   {isOpen && (
                     <TR>
                       <td colSpan={10} style={{ padding:"0 12px 12px" }}>
+                        <PQCScoreDetail score={pqcScore} />
                         <CipherBreakdown analysis={d.analysis} compact={false} />
                       </td>
                     </TR>

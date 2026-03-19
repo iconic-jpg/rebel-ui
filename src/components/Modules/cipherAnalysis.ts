@@ -539,6 +539,113 @@ export function fullAnalysis(
   };
 }
 
+// ── PQC Readiness Score ───────────────────────────────────────────────────────
+// Replaces the three-state ACTIVE/READY/NOT PQC badge with a numeric score.
+// Max 100 points. Each criterion is independently scored so the breakdown
+// tells the bank exactly what to fix and in what order.
+//
+// ACTIVE (deployed Kyber) is a separate boolean — score still runs 0-100
+// underneath to show how good the classical foundation is.
+
+export interface PQCScoreBreakdown {
+  score:       number;          // 0–100
+  label:       string;          // "ACTIVE" | "MIGRATION READY" | "PARTIAL" | "NOT READY"
+  color:       string;          // hex
+  active:      boolean;         // true if Kyber/ML-KEM hybrid deployed
+  criteria: {
+    tls13:     { pass: boolean; pts: number; max: number; label: string };
+    kxGroup:   { pass: boolean; pts: number; max: number; label: string };
+    bulkCipher:{ pass: boolean; pts: number; max: number; label: string };
+    certKey:   { pass: boolean; pts: number; max: number; label: string };
+    noCBC:     { pass: boolean; pts: number; max: number; label: string };
+  };
+}
+
+export function pqcReadinessScore(
+  components: CipherComponents,
+  tlsRaw:     any,
+  keylenRaw:  any,   // e.g. "2048-bit" or 2048 — raw from backend
+): PQCScoreBreakdown {
+  const tls    = normaliseTLS(tlsRaw);
+  const kx     = (components.keyExchange ?? "").toLowerCase();
+  const bulk   = components.bulkCipher ?? "";
+  const active = components.pqcHybrid;
+
+  // ── Parse key size from keylen string or number ───────────────────────────
+  let keyBits = 0;
+  if (typeof keylenRaw === "number") {
+    keyBits = keylenRaw;
+  } else {
+    const m = String(keylenRaw ?? "").match(/(\d+)/);
+    if (m) keyBits = parseInt(m[1], 10);
+  }
+
+  // ── Criteria ──────────────────────────────────────────────────────────────
+  // 1. TLS 1.3 (30pts) — biggest gate. TLS 1.2 cannot support PQC hybrid KX.
+  const tls13Pass = tls === "1.3";
+
+  // 2. Modern named group (25pts) — X25519/P-256/P-384/P-521 only.
+  //    DHE, bare ECDHE, secp* raw, or TLS 1.3 without confirmed group = fail.
+  const kxPass =
+    kx === "x25519" || kx === "p-256" || kx === "p-384" ||
+    kx === "p-521"  || kx === "x448";
+
+  // 3. Strong bulk cipher (20pts) — AES-256-GCM or ChaCha20-Poly1305.
+  //    AES-128-GCM is 64-bit PQ security (Grover) — partial credit (10pts).
+  const bulkStrong  = bulk === "AES-256-GCM" || bulk === "ChaCha20-Poly1305";
+  const bulkPartial = bulk === "AES-128-GCM";
+  const bulkPts     = bulkStrong ? 20 : bulkPartial ? 10 : 0;
+
+  // 4. Cert key size (15pts) — ≥4096 RSA or ≥384 ECDSA for post-quantum margin.
+  //    2048 RSA / 256 ECDSA = partial (7pts). Smaller = 0.
+  //    Note: cert key does NOT protect the session — this scores migration-readiness
+  //    of the overall config, not quantum safety of the cert itself.
+  const certStrong  = keyBits >= 4096;
+  const certPartial = keyBits >= 2048;
+  const certPts     = certStrong ? 15 : certPartial ? 7 : 0;
+
+  // 5. No CBC (10pts) — CBC mode suites must be disabled before PQC migration.
+  const noCBCPass = !bulk.includes("CBC");
+
+  // ── Totals ────────────────────────────────────────────────────────────────
+  const score = Math.min(100,
+    (tls13Pass ? 30 : 0) +
+    (kxPass    ? 25 : 0) +
+    bulkPts              +
+    certPts              +
+    (noCBCPass ? 10 : 0)
+  );
+
+  // ── Label + colour ────────────────────────────────────────────────────────
+  const label =
+    active         ? "ACTIVE"           :   // Kyber deployed
+    score === 100  ? "MIGRATION READY"  :   // perfect classical foundation
+    score >= 70    ? "PARTIAL"          :   // most boxes ticked
+    score >= 40    ? "NEEDS WORK"       :   // some progress
+                     "NOT READY";           // blocked
+
+  const color =
+    active        ? "#22c55e" :   // green
+    score === 100 ? "#3b82f6" :   // blue — ready to flip to Kyber
+    score >= 70   ? "#eab308" :   // yellow
+    score >= 40   ? "#f97316" :   // orange
+                    "#ef4444";    // red
+
+  return {
+    score,
+    label,
+    color,
+    active,
+    criteria: {
+      tls13:     { pass: tls13Pass,   pts: tls13Pass ? 30 : 0,  max: 30, label: "TLS 1.3"              },
+      kxGroup:   { pass: kxPass,      pts: kxPass    ? 25 : 0,  max: 25, label: "Modern KX group"      },
+      bulkCipher:{ pass: bulkStrong,  pts: bulkPts,             max: 20, label: "AES-256-GCM / ChaCha" },
+      certKey:   { pass: certStrong,  pts: certPts,             max: 15, label: "Cert key ≥4096-bit"   },
+      noCBC:     { pass: noCBCPass,   pts: noCBCPass ? 10 : 0,  max: 10, label: "No CBC mode"          },
+    },
+  };
+}
+
 // ── Colour helpers ────────────────────────────────────────────────────────────
 // re-exported so CBOMPage can import without reaching into internals
 export { normaliseTLS };
