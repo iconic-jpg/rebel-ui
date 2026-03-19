@@ -50,11 +50,11 @@ export function parseCipher(cipher: string): CipherComponents {
                : c.includes("AES_128_CCM")       ? "AES-128-CCM"   : "unknown";
 
     return {
-      keyExchange:    "ECDHE (TLS 1.3)",
+      keyExchange:    "TLS 1.3",   // protocol mandates ephemeral KX — no single named method
       authentication: "Certificate",
       bulkCipher:     bulk,
       mac:            sha,
-      pfs:            true,
+      pfs:            true,        // TLS 1.3 always provides PFS
       raw:            cipher,
     };
   }
@@ -296,22 +296,45 @@ export function analyseCipher(
   }
 
   // ── 6. Post-quantum vulnerability ─────────────────────────────────────────
-  // ECDHE with secp256r1 or above has ~128-bit classical security
-  // but is completely broken by Shor's algorithm on a quantum computer.
-  // RSA key exchange is broken even faster.
-  const isQuantumVulnerable =
-    kx.includes("ECDHE") || kx.includes("RSA") ||
-    kx.includes("DHE")   || kx.includes("ECDH");
+  // TLS 1.3: key exchange is secure today, broken by future quantum computers.
+  //   - AES-256-GCM: low PQC risk (128-bit PQ security from bulk cipher)
+  //   - AES-128-GCM: medium PQC risk (only 64-bit PQ security from Grover)
+  // TLS 1.2 with ECDHE/DHE: medium — same future quantum threat + older protocol
+  // TLS 1.2 with RSA key exchange: high — no PFS + quantum breaks RSA faster
 
-  if (isQuantumVulnerable) {
+  const isTLS13  = kx === "TLS 1.3";
+  const isRSAkx  = !pfs && (kx === "RSA" || kx === "unknown");
+  const isDHEkx  = kx === "ECDHE" || kx === "DHE";
+
+  if (isRSAkx) {
+    // Already caught by NO-PFS-001 above — skip duplicate PQC entry
+  } else if (isTLS13) {
+    // TLS 1.3: PQC is a future concern only, severity depends on bulk cipher
+    const pqcSev = bulk === "AES-256-GCM" || bulk === "ChaCha20-Poly1305"
+      ? "low" as const : "medium" as const;
+    findings.push({
+      severity:    pqcSev,
+      code:        "PQC-001",
+      title:       "Post-quantum migration required",
+      description: `TLS 1.3 key exchange will be broken by Shor's algorithm on a quantum computer. ` +
+                   `Bulk cipher ${bulk} provides ` +
+                   (pqcSev === "low"
+                     ? "128-bit post-quantum security via Grover's algorithm — adequate until migration."
+                     : "only 64-bit post-quantum security against Grover's algorithm — migration urgent.") +
+                   " NIST estimates quantum threat horizon: 2030–2035.",
+      doraArticle: "DORA Art. 9.2 — ICT Risk Assessment · NIST FIPS 203/204",
+      remediation: "Implement CRYSTALS-Kyber (FIPS 203) as a hybrid with current key exchange. " +
+                   "Begin transition per NIST IR 8413. Priority: " +
+                   (pqcSev === "low" ? "plan by 2027." : "plan by 2025."),
+    });
+  } else if (isDHEkx) {
     findings.push({
       severity:    "medium",
       code:        "PQC-001",
-      title:       "Quantum-vulnerable key exchange",
-      description: `${kx} key exchange is broken by Shor's algorithm running on a sufficiently ` +
-                   "large quantum computer. NIST estimates cryptographically relevant quantum " +
-                   "computers could exist by 2030–2035. 'Harvest now, decrypt later' attacks " +
-                   "mean encrypted traffic recorded today is at risk.",
+      title:       "Post-quantum migration required",
+      description: `${kx} key exchange is broken by Shor's algorithm on a quantum computer. ` +
+                   "'Harvest now, decrypt later' attacks mean traffic recorded today is at risk. " +
+                   "NIST estimates quantum threat horizon: 2030–2035.",
       doraArticle: "DORA Art. 9.2 — ICT Risk Assessment · NIST FIPS 203/204",
       remediation: "Implement CRYSTALS-Kyber (FIPS 203) for key encapsulation as a hybrid with ECDHE. " +
                    "Begin transition per NIST IR 8413 migration guidance.",
@@ -364,16 +387,19 @@ export function pqcImpact(components: CipherComponents): string {
   const { keyExchange: kx, bulkCipher: bulk } = components;
 
   if (bulk === "DES-CBC" || bulk === "RC4-128" || bulk === "NULL")
-    return "Already broken classically. Quantum computers add no additional threat.";
+    return "Already broken classically. Quantum adds no additional threat.";
 
   if (!components.pfs)
     return "RSA key exchange broken by Shor's algorithm. All recorded sessions at risk.";
 
-  if (kx.includes("ECDHE"))
-    return "ECDHE broken by Shor's algorithm. Bulk cipher survives if AES-256 used (64-bit PQ security with AES-128).";
+  if (kx === "TLS 1.3") {
+    if (bulk === "AES-256-GCM" || bulk === "ChaCha20-Poly1305")
+      return "Key exchange broken by Shor's algorithm (future). AES-256 bulk cipher provides 128-bit PQ security — low near-term risk.";
+    return "Key exchange broken by Shor's algorithm (future). AES-128 bulk cipher provides only 64-bit PQ security via Grover's — medium risk.";
+  }
 
-  if (kx.includes("DHE"))
-    return "DHE broken by Shor's algorithm. Requires replacement with CRYSTALS-Kyber.";
+  if (kx === "ECDHE" || kx === "DHE")
+    return "Key exchange broken by Shor's algorithm. Migrate to CRYSTALS-Kyber (FIPS 203) hybrid.";
 
   return "Key exchange broken by quantum computers. Migrate to NIST FIPS 203 (Kyber).";
 }
