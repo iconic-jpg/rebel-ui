@@ -5,6 +5,7 @@ import Login from "./components/Auth/Login.js";
 import Signup from "./components/Auth/Signup.js";
 import AppShell from "./components/Shell/AppShell.js";
 import AssetInventoryPage from "./components/Modules/AssetInventory.js";
+import AssetRegistryPage from "./components/Modules/AssetRegistryPage.js";
 import AssetDiscoveryPage from "./components/Modules/AssetDiscovery.js";
 import CBOMPage from "./components/Modules/CBOM.js";
 import PQCPosturePage from "./components/Modules/PQCPosture.js";
