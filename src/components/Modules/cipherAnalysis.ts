@@ -664,9 +664,6 @@ export function pqcReadinessScore(
 }
 
 // ── Colour helpers ────────────────────────────────────────────────────────────
-// re-exported so CBOMPage can import without reaching into internals
-export { normaliseTLS };
-
 export function severityColor(s: string): string {
   return s === "critical" ? "#ef4444"
        : s === "high"     ? "#f97316"
