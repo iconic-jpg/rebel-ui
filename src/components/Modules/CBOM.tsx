@@ -8,7 +8,7 @@ import {
   overallRisk, pqcImpact,
   severityColor, severityVariant,
   type CipherAnalysis,
-} from "./cipherAnalysis.ts";
+} from "./cipherAnalysis.js";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
