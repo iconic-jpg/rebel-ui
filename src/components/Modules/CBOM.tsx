@@ -14,6 +14,16 @@ import type { CipherAnalysis, CipherFinding } from "./cipherAnalysis.js";
 
 const API = "https://r3bel-production.up.railway.app";
 
+// ── PQC field normaliser ──────────────────────────────────────────────────────
+// Backend scan_cryptography returns "post_quantum" but /cbom may map it to "pqc"
+// This helper reads whichever field is present, preferring pqcHybrid from analysis
+function isPQCReady(d: any, analysis: any): boolean {
+  if (analysis?.components?.pqcHybrid) return true;  // real hybrid detected by scanner
+  if (d.post_quantum === true)          return true;  // direct from scan_cryptography
+  if (d.pqc === true)                   return true;  // mapped field from /cbom
+  return false;
+}
+
 const DEFAULT_CIPHERS = [
   { name:"TLS_AES_256_GCM_SHA384",               count:29, color:T.green  },
   { name:"TLS_AES_128_GCM_SHA256",               count:15, color:T.yellow },
@@ -166,11 +176,20 @@ function AppCard({ d, compact }: { d: any; compact: boolean }) {
             <span style={{ fontSize:11, color:T.blue,
               overflow:"hidden", textOverflow:"ellipsis",
               whiteSpace:"nowrap" as const }}>{d.app}</span>
-            {c.pqcHybrid && (
-              <span style={{ fontSize:7, fontWeight:600, color:T.green,
-                border:`1px solid ${T.green}44`, borderRadius:2,
-                padding:"1px 4px", flexShrink:0 }}>PQC</span>
-            )}
+            {(() => {
+              if (c.pqcHybrid || d.pqc === true)
+                return <span style={{ fontSize:7, fontWeight:600, color:T.green,
+                  border:`1px solid ${T.green}44`, borderRadius:2,
+                  padding:"1px 4px", flexShrink:0 }}>PQC ACTIVE</span>;
+              const kx = c.keyExchange?.toLowerCase() ?? "";
+              const isECDHE = kx==="x25519"||kx==="p-256"||kx==="p-384"||
+                kx==="p-521"||kx==="x448"||kx.startsWith("secp")||kx==="ecdhe";
+              if (isECDHE)
+                return <span style={{ fontSize:7, fontWeight:600, color:T.yellow,
+                  border:`1px solid ${T.yellow}44`, borderRadius:2,
+                  padding:"1px 4px", flexShrink:0 }}>ECDHE READY</span>;
+              return null;
+            })()}
           </div>
           <div style={{ display:"flex", gap:6, flexWrap:"wrap" as const }}>
             <Badge v={tlsNorm==="1.0"?"red":tlsNorm==="1.2"?"yellow":"green"}>
@@ -384,7 +403,7 @@ export default function CBOMPage() {
           normaliseTLS(d.tls), d.ca,
           d.analysis.overallRisk.toUpperCase(),
           findings || "Compliant",
-          d.pqc ? "Yes" : "No",
+          isPQCReady(d, d.analysis) ? "Yes" : "No",
           d.analysis.pqcImpact,
         ];
       })
@@ -612,14 +631,34 @@ export default function CBOMPage() {
                         </Badge>
                       </TD>
                       <TD style={{ textAlign:"center" }}>
-                        {c.pqcHybrid
-                          ? <span style={{ fontSize:8, fontWeight:600,
+                        {(() => {
+                          // ACTIVE — PQC hybrid already negotiated
+                          if (c.pqcHybrid || d.pqc === true)
+                            return <span style={{ fontSize:8, fontWeight:600,
                               color:T.green, border:`1px solid ${T.green}44`,
                               borderRadius:2, padding:"1px 5px",
-                              letterSpacing:".06em" }}>ACTIVE</span>
-                          : d.pqc
-                            ? <span style={{color:T.green, fontSize:13}}>✓</span>
-                            : <span style={{color:T.red,   fontSize:13}}>✗</span>}
+                              letterSpacing:".06em" }}>ACTIVE</span>;
+
+                          // READY — real ECDHE key exchange detected
+                          // Only X25519, P-256, P-384, secp* — genuine ephemeral EC
+                          const kx = c.keyExchange?.toLowerCase() ?? "";
+                          const isECDHE =
+                            kx === "x25519"     ||
+                            kx === "p-256"       ||
+                            kx === "p-384"       ||
+                            kx === "p-521"       ||
+                            kx === "x448"        ||
+                            kx.startsWith("secp")||
+                            kx === "ecdhe";
+                          if (isECDHE)
+                            return <span style={{ fontSize:8, fontWeight:600,
+                              color:T.yellow, border:`1px solid ${T.yellow}44`,
+                              borderRadius:2, padding:"1px 5px",
+                              letterSpacing:".06em" }}>READY</span>;
+
+                          // NOT READY — RSA, DHE, unknown, or TLS 1.3 without kxGroup
+                          return <span style={{color:T.red, fontSize:13}}>✗</span>;
+                        })()}
                       </TD>
                       <TD>
                         <button
