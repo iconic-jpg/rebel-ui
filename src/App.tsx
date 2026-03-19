@@ -31,7 +31,7 @@ export default function App() {
           <Route path="pqc-readiness" element={<PQCReadinessPage />} />
           <Route path="rating"      element={<CyberRatingPage />} />
           <Route path="reporting"   element={<ReportingPage />} />
-          <Route path="settings/assets" element={<AssetInventoryPage />} />
+          <Route path="settings/assets" element={<AssetRegistryPage />} />
 
         </Route>
       </Routes>
