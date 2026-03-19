@@ -11,14 +11,14 @@
 //         keyExchange rendered as "256 •" in the table and ECDHE/PQC logic never fired.
 // ── TLS version normaliser ────────────────────────────────────────────────────
 // Handles: "TLSv1.3", "TLS1.3", "TLSv1", "TLS 1.2", "1.2", "1.3"
+// Exported once here — do NOT re-export at the bottom of this file.
 export function normaliseTLS(raw) {
     if (raw === null || raw === undefined)
         return "";
     return String(raw)
-        .replace(/^TLSv?/i, "") // strip TLS / TLSv prefix
-        .replace(/^v/i, "") // strip any remaining v
+        .replace(/^TLSv?/i, "")
+        .replace(/^v/i, "")
         .trim();
-    // result: "1.3", "1.2", "1.1", "1.0"
 }
 // ── PQC group detector ────────────────────────────────────────────────────────
 function isPQCGroup(kxGroup) {
@@ -58,23 +58,17 @@ function cleanKxGroup(kxGroup) {
     return map[g] ?? g;
 }
 // ── FIX 4: Guard — reject kxGroup values that are purely numeric ──────────────
-// Python's ssl module sometimes returns the key size (e.g. 256) as cipher()[2]
-// instead of a group name. A numeric string is NOT a named group; treating it
-// as one causes keyExchange to display as "256" and breaks all ECDHE/PQC logic.
 function isValidKxGroup(kxGroup) {
     if (kxGroup === null || kxGroup === undefined)
         return false;
     const s = String(kxGroup).trim();
     if (!s || s === "None" || s === "null" || s === "")
         return false;
-    // Reject pure integers / pure floats (e.g. "256", "128", "4096", "2048.0")
     if (/^\d+(\.\d+)?$/.test(s))
         return false;
     return true;
 }
 // ── ECDHE group detector ──────────────────────────────────────────────────────
-// Returns true for any key exchange value that provides ephemeral ECDH —
-// whether it came from the backend (X25519, P-256 …) or parsed (ECDHE).
 export function isECDHEGroup(kx) {
     const k = (kx ?? "").toLowerCase();
     return (k === "x25519" ||
@@ -87,9 +81,20 @@ export function isECDHEGroup(kx) {
         k === "ffdhe-4096" ||
         k.startsWith("secp") ||
         k === "ecdhe" ||
-        // PQC hybrids are also ECDHE-based
         k.includes("x25519+") ||
         k.includes("p-256+"));
+}
+// ── Strict PQC-READY detector ─────────────────────────────────────────────────
+export function isPQCReadyGroup(kx, tlsVersion) {
+    const tls = normaliseTLS(tlsVersion);
+    if (tls !== "1.3")
+        return false;
+    const k = (kx ?? "").toLowerCase();
+    return (k === "x25519" ||
+        k === "p-256" ||
+        k === "p-384" ||
+        k === "p-521" ||
+        k === "x448");
 }
 // ── Cipher string parser ───────────────────────────────────────────────────────
 export function parseCipher(cipher, kxGroup) {
@@ -143,10 +148,9 @@ export function parseCipher(cipher, kxGroup) {
         mac = "MD5";
     else if (c.includes("NULL"))
         mac = "NULL";
-    // TLS 1.3 uses HKDF, not a traditional MAC
     if (c.startsWith("TLS_") && !c.includes("WITH"))
         mac = "HKDF";
-    // ── FIX 1 + FIX 4: Use real kxGroup from backend only if it is a valid name ─
+    // ── FIX 1 + FIX 4: Use real kxGroup from backend only if valid ────────────
     if (isValidKxGroup(kxGroup)) {
         const cleanGroup = cleanKxGroup(kxGroup);
         const isHybridPQ = isPQCGroup(String(kxGroup));
@@ -163,7 +167,7 @@ export function parseCipher(cipher, kxGroup) {
         };
     }
     // ── Fallback: parse key exchange from cipher string ───────────────────────
-    // TLS 1.3 IANA format (TLS_AES_256_GCM_SHA384 etc.)
+    // TLS 1.3 IANA format
     if (c.startsWith("TLS_") && !c.includes("WITH")) {
         return {
             keyExchange: "TLS 1.3",
@@ -176,7 +180,7 @@ export function parseCipher(cipher, kxGroup) {
             kxSource: "parsed",
         };
     }
-    // TLS 1.2 IANA format (TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384)
+    // TLS 1.2 IANA format
     if (c.includes("_WITH_")) {
         const prefix = c.split("_WITH_")[0];
         const kx = prefix.includes("ECDHE") ? "ECDHE"
@@ -197,7 +201,7 @@ export function parseCipher(cipher, kxGroup) {
             pqcHybrid: false, raw: cipher, kxSource: "parsed",
         };
     }
-    // OpenSSL shorthand (ECDHE-RSA-AES256-GCM-SHA384)
+    // OpenSSL shorthand
     const kx = c.startsWith("ECDHE") ? "ECDHE"
         : c.startsWith("DHE") ? "DHE"
             : c.startsWith("ECDH") ? "ECDH"
@@ -226,7 +230,6 @@ function unknownComponents(raw) {
 export function analyseCipher(components, tlsNormalised) {
     const findings = [];
     const { keyExchange: kx, bulkCipher: bulk, mac, pfs, pqcHybrid } = components;
-    // ── PQC hybrid active ─────────────────────────────────────────────────────
     if (pqcHybrid) {
         findings.push({
             severity: "ok",
@@ -239,7 +242,6 @@ export function analyseCipher(components, tlsNormalised) {
             remediation: "No action required. Ensure hybrid KX is enforced for all clients.",
         });
     }
-    // ── 1. No Perfect Forward Secrecy ────────────────────────────────────────
     if (!pfs && tlsNormalised !== "1.3") {
         findings.push({
             severity: "high",
@@ -253,7 +255,6 @@ export function analyseCipher(components, tlsNormalised) {
                 "Enforce TLS 1.3 which mandates PFS.",
         });
     }
-    // ── 2. Broken bulk ciphers ────────────────────────────────────────────────
     if (bulk === "DES-CBC" || bulk === "NULL") {
         findings.push({
             severity: "critical",
@@ -287,7 +288,6 @@ export function analyseCipher(components, tlsNormalised) {
             remediation: "Disable 3DES cipher suites. Migrate to AES-256-GCM.",
         });
     }
-    // ── 3. CBC mode ───────────────────────────────────────────────────────────
     if (bulk?.includes("CBC") && bulk !== "DES-CBC" && bulk !== "3DES-CBC") {
         findings.push({
             severity: "medium",
@@ -300,7 +300,6 @@ export function analyseCipher(components, tlsNormalised) {
             remediation: "Migrate to AES-256-GCM. Disable all CBC-mode cipher suites.",
         });
     }
-    // ── 4. Weak MAC ───────────────────────────────────────────────────────────
     if (mac === "SHA-1") {
         findings.push({
             severity: "medium",
@@ -324,7 +323,6 @@ export function analyseCipher(components, tlsNormalised) {
             remediation: "Immediately disable all MD5 cipher suites.",
         });
     }
-    // ── 5. TLS version ────────────────────────────────────────────────────────
     if (tlsNormalised === "1.0") {
         findings.push({
             severity: "critical",
@@ -358,13 +356,11 @@ export function analyseCipher(components, tlsNormalised) {
             remediation: "Enable TLS 1.3. Plan TLS 1.3-only migration by 2026.",
         });
     }
-    // ── 6. PQC finding — only if not already running hybrid ──────────────────
     if (!pqcHybrid) {
         const isTLS13 = tlsNormalised === "1.3";
-        const isRSAkx = !pfs;
         const isDHEkx = pfs && !isTLS13;
-        if (isRSAkx) {
-            // Already covered by NO-PFS-001
+        if (!pfs) {
+            // NO-PFS-001 already covers this path
         }
         else if (isTLS13) {
             const pqcSev = (bulk === "AES-256-GCM" || bulk === "ChaCha20-Poly1305")
@@ -396,7 +392,6 @@ export function analyseCipher(components, tlsNormalised) {
             });
         }
     }
-    // ── 7. AES-128 margin ─────────────────────────────────────────────────────
     if (bulk === "AES-128-GCM") {
         findings.push({
             severity: "low",
@@ -408,7 +403,6 @@ export function analyseCipher(components, tlsNormalised) {
             remediation: "Prefer TLS_AES_256_GCM_SHA384 for financial and sensitive data.",
         });
     }
-    // ── Clean bill of health ──────────────────────────────────────────────────
     if (findings.length === 0) {
         findings.push({
             severity: "ok",
@@ -459,6 +453,59 @@ export function fullAnalysis(cipher, tlsRaw, kxGroup) {
         findings,
         overallRisk: overallRisk(findings),
         pqcImpact: pqcImpact(components, tlsNorm),
+    };
+}
+export function pqcReadinessScore(components, tlsRaw, keylenRaw) {
+    const tls = normaliseTLS(tlsRaw);
+    const kx = (components.keyExchange ?? "").toLowerCase();
+    const bulk = components.bulkCipher ?? "";
+    const active = components.pqcHybrid;
+    let keyBits = 0;
+    if (typeof keylenRaw === "number") {
+        keyBits = keylenRaw;
+    }
+    else {
+        const m = String(keylenRaw ?? "").match(/(\d+)/);
+        if (m)
+            keyBits = parseInt(m[1], 10);
+    }
+    const tls13Pass = tls === "1.3";
+    const kxPass = kx === "x25519" || kx === "p-256" || kx === "p-384" ||
+        kx === "p-521" || kx === "x448";
+    const bulkStrong = bulk === "AES-256-GCM" || bulk === "ChaCha20-Poly1305";
+    const bulkPartial = bulk === "AES-128-GCM";
+    const bulkPts = bulkStrong ? 20 : bulkPartial ? 10 : 0;
+    const certStrong = keyBits >= 4096;
+    const certPartial = keyBits >= 2048;
+    const certPts = certStrong ? 15 : certPartial ? 7 : 0;
+    const noCBCPass = !bulk.includes("CBC");
+    const score = Math.min(100, (tls13Pass ? 30 : 0) +
+        (kxPass ? 25 : 0) +
+        bulkPts +
+        certPts +
+        (noCBCPass ? 10 : 0));
+    const label = active ? "ACTIVE" :
+        score === 100 ? "MIGRATION READY" :
+            score >= 70 ? "PARTIAL" :
+                score >= 40 ? "NEEDS WORK" :
+                    "NOT READY";
+    const color = active ? "#22c55e" :
+        score === 100 ? "#3b82f6" :
+            score >= 70 ? "#eab308" :
+                score >= 40 ? "#f97316" :
+                    "#ef4444";
+    return {
+        score,
+        label,
+        color,
+        active,
+        criteria: {
+            tls13: { pass: tls13Pass, pts: tls13Pass ? 30 : 0, max: 30, label: "TLS 1.3" },
+            kxGroup: { pass: kxPass, pts: kxPass ? 25 : 0, max: 25, label: "Modern KX group" },
+            bulkCipher: { pass: bulkStrong, pts: bulkPts, max: 20, label: "AES-256-GCM / ChaCha" },
+            certKey: { pass: certStrong, pts: certPts, max: 15, label: "Cert key ≥4096-bit" },
+            noCBC: { pass: noCBCPass, pts: noCBCPass ? 10 : 0, max: 10, label: "No CBC mode" },
+        },
     };
 }
 // ── Colour helpers ────────────────────────────────────────────────────────────

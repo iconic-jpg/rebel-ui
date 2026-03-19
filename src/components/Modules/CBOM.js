@@ -1,18 +1,15 @@
-import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-runtime";
+import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
 import React, { useState, useEffect, useRef } from "react";
 import { T, S, Panel, PanelHeader, MetricCard, Badge, ProgBar, Table, TR, TD, MOCK_CBOM, } from "./shared.js";
-import { parseCipher, fullAnalysis, normaliseTLS, severityColor, severityVariant, } from "./cipherAnalysis.js";
+import { parseCipher, fullAnalysis, normaliseTLS, severityColor, severityVariant, pqcReadinessScore, } from "./cipherAnalysis.js";
 const API = "https://r3bel-production.up.railway.app";
-// ── PQC field normaliser ──────────────────────────────────────────────────────
-// Backend scan_cryptography returns "post_quantum" but /cbom may map it to "pqc"
-// This helper reads whichever field is present, preferring pqcHybrid from analysis
 function isPQCReady(d, analysis) {
     if (analysis?.components?.pqcHybrid)
-        return true; // real hybrid detected by scanner
+        return true;
     if (d.post_quantum === true)
-        return true; // direct from scan_cryptography
+        return true;
     if (d.pqc === true)
-        return true; // mapped field from /cbom
+        return true;
     return false;
 }
 const DEFAULT_CIPHERS = [
@@ -60,6 +57,52 @@ function FindingBadge({ severity }) {
             textTransform: "uppercase", flexShrink: 0,
         }, children: severity }));
 }
+// ── PQC Score Badge — compact table/card cell ─────────────────────────────────
+function PQCScoreBadge({ score }) {
+    return (_jsxs("div", { style: { display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }, children: [_jsx("span", { style: {
+                    fontSize: 7, fontWeight: 700, letterSpacing: ".07em",
+                    color: score.color,
+                    border: `1px solid ${score.color}44`,
+                    borderRadius: 2, padding: "1px 5px",
+                }, children: score.active ? "ACTIVE" : score.label }), !score.active && (_jsx("div", { style: { width: 48, height: 3, background: "rgba(255,255,255,0.07)", borderRadius: 2 }, children: _jsx("div", { style: {
+                        height: "100%", borderRadius: 2,
+                        width: `${score.score}%`,
+                        background: score.color,
+                        transition: "width 0.6s ease",
+                    } }) })), !score.active && (_jsxs("span", { style: { fontSize: 7, color: score.color, fontFamily: "'Orbitron',monospace" }, children: [score.score, "/100"] }))] }));
+}
+// ── PQC Score Detail — expanded row breakdown ─────────────────────────────────
+function PQCScoreDetail({ score }) {
+    const rows = Object.values(score.criteria);
+    return (_jsxs("div", { style: {
+            background: "rgba(8,12,20,0.97)",
+            border: `1px solid ${score.color}33`,
+            borderRadius: 4, padding: 10, marginTop: 6,
+        }, children: [_jsxs("div", { style: { display: "flex", justifyContent: "space-between",
+                    alignItems: "center", marginBottom: 8 }, children: [_jsx("span", { style: { fontSize: 8, color: score.color, letterSpacing: ".12em",
+                            fontWeight: 700 }, children: "PQC MIGRATION READINESS" }), _jsx("span", { style: { fontFamily: "'Orbitron',monospace", fontSize: 14,
+                            color: score.color }, children: score.active ? "ACTIVE" : `${score.score}/100` })] }), !score.active && (_jsx("div", { style: { height: 4, background: "rgba(255,255,255,0.06)",
+                    borderRadius: 2, marginBottom: 10 }, children: _jsx("div", { style: {
+                        height: "100%", borderRadius: 2,
+                        width: `${score.score}%`, background: score.color,
+                        transition: "width 0.8s ease",
+                        boxShadow: `0 0 6px ${score.color}66`,
+                    } }) })), _jsx("div", { style: { display: "flex", flexDirection: "column", gap: 5 }, children: rows.map(c => (_jsxs("div", { style: { display: "flex", alignItems: "center", gap: 8 }, children: [_jsx("span", { style: {
+                                fontSize: 9, width: 12, textAlign: "center",
+                                color: c.pass ? "#22c55e" : c.pts > 0 ? "#eab308" : "#ef4444",
+                            }, children: c.pass ? "✓" : c.pts > 0 ? "~" : "✗" }), _jsx("span", { style: { fontSize: 8, color: "#94a3b8", flex: 1 }, children: c.label }), _jsxs("span", { style: {
+                                fontSize: 8, fontFamily: "'Orbitron',monospace",
+                                color: c.pass ? "#22c55e" : c.pts > 0 ? "#eab308" : "#64748b",
+                            }, children: [c.pts, "/", c.max] })] }, c.label))) }), !score.active && score.score < 100 && (_jsx("div", { style: { marginTop: 8, padding: "5px 8px",
+                    background: "rgba(59,130,246,0.05)",
+                    border: "1px solid rgba(59,130,246,0.15)", borderRadius: 3 }, children: _jsx("span", { style: { fontSize: 7, color: "#64748b" }, children: score.score === 0
+                        ? "Cannot begin PQC migration — fix TLS version and cipher suite first."
+                        : score.score < 55
+                            ? "Significant gaps. Upgrade TLS version and key exchange before planning Kyber deployment."
+                            : score.score < 100
+                                ? "Foundation mostly ready. Address remaining gaps then deploy X25519+Kyber768 hybrid."
+                                : "Classical foundation complete. Deploy CRYSTALS-Kyber (FIPS 203) hybrid to go ACTIVE." }) }))] }));
+}
 function CipherBreakdown({ analysis, compact = false, }) {
     const { components: c, findings, pqcImpact: pqc } = analysis;
     return (_jsxs("div", { style: {
@@ -105,23 +148,11 @@ function AppCard({ d, compact }) {
     const risk = d.analysis.overallRisk;
     const c = d.analysis.components;
     const tlsNorm = normaliseTLS(d.tls);
+    const pqcScore = pqcReadinessScore(c, d.tls, d.keylen);
     return (_jsxs("div", { style: { borderBottom: "1px solid rgba(59,130,246,0.05)" }, children: [_jsxs("div", { onClick: () => setOpen(o => !o), style: { padding: "10px 14px", cursor: "pointer",
                     display: "flex", justifyContent: "space-between", alignItems: "center" }, children: [_jsxs("div", { style: { minWidth: 0, flex: 1 }, children: [_jsxs("div", { style: { display: "flex", alignItems: "center", gap: 6, marginBottom: 3 }, children: [_jsx("span", { style: { fontSize: 11, color: T.blue,
                                             overflow: "hidden", textOverflow: "ellipsis",
-                                            whiteSpace: "nowrap" }, children: d.app }), (() => {
-                                        if (c.pqcHybrid || d.pqc === true)
-                                            return _jsx("span", { style: { fontSize: 7, fontWeight: 600, color: T.green,
-                                                    border: `1px solid ${T.green}44`, borderRadius: 2,
-                                                    padding: "1px 4px", flexShrink: 0 }, children: "PQC ACTIVE" });
-                                        const kx = c.keyExchange?.toLowerCase() ?? "";
-                                        const isECDHE = kx === "x25519" || kx === "p-256" || kx === "p-384" ||
-                                            kx === "p-521" || kx === "x448" || kx.startsWith("secp") || kx === "ecdhe";
-                                        if (isECDHE)
-                                            return _jsx("span", { style: { fontSize: 7, fontWeight: 600, color: T.yellow,
-                                                    border: `1px solid ${T.yellow}44`, borderRadius: 2,
-                                                    padding: "1px 4px", flexShrink: 0 }, children: "ECDHE READY" });
-                                        return null;
-                                    })()] }), _jsxs("div", { style: { display: "flex", gap: 6, flexWrap: "wrap" }, children: [_jsxs(Badge, { v: tlsNorm === "1.0" ? "red" : tlsNorm === "1.2" ? "yellow" : "green", children: ["TLS ", tlsNorm] }), _jsx("span", { style: { fontSize: 9,
+                                            whiteSpace: "nowrap" }, children: d.app }), _jsx(PQCScoreBadge, { score: pqcScore })] }), _jsxs("div", { style: { display: "flex", gap: 6, flexWrap: "wrap" }, children: [_jsxs(Badge, { v: tlsNorm === "1.0" ? "red" : tlsNorm === "1.2" ? "yellow" : "green", children: ["TLS ", tlsNorm] }), _jsx("span", { style: { fontSize: 9,
                                             color: d.keylen?.startsWith("1024") ? T.red
                                                 : d.keylen?.startsWith("2048") ? T.yellow : T.green }, children: d.keylen }), _jsx("span", { style: { fontSize: 9, color: c.pfs ? T.green : T.red }, children: c.pfs ? "PFS ✓" : "PFS ✗" })] }), _jsxs("div", { style: { fontSize: 8, color: T.text3, marginTop: 4,
                                     overflow: "hidden", textOverflow: "ellipsis",
@@ -130,7 +161,7 @@ function AppCard({ d, compact }) {
                                             color: c.bulkCipher.includes("DES") || c.bulkCipher === "RC4-128"
                                                 ? T.red : c.bulkCipher.includes("CBC") ? T.orange : T.text2,
                                             fontFamily: "'Share Tech Mono',monospace",
-                                        }, children: c.bulkCipher }), " · ", d.ca] })] }), _jsxs("div", { style: { display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }, children: [_jsx(FindingBadge, { severity: risk }), _jsx("span", { style: { fontSize: 10, color: T.text3 }, children: open ? "▲" : "▼" })] })] }), open && (_jsx("div", { style: { padding: "0 14px 12px" }, children: _jsx(CipherBreakdown, { analysis: d.analysis, compact: compact }) }))] }));
+                                        }, children: c.bulkCipher }), " · ", d.ca] })] }), _jsxs("div", { style: { display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }, children: [_jsx(FindingBadge, { severity: risk }), _jsx("span", { style: { fontSize: 10, color: T.text3 }, children: open ? "▲" : "▼" })] })] }), open && (_jsxs("div", { style: { padding: "0 14px 12px" }, children: [_jsx(PQCScoreDetail, { score: pqcScore }), _jsx(CipherBreakdown, { analysis: d.analysis, compact: compact })] }))] }));
 }
 export default function CBOMPage() {
     const klRef = useRef(null);
@@ -306,104 +337,56 @@ export default function CBOMPage() {
     const maxCipher = Math.max(...cipherData.map(c => c.count), 1);
     const metricCols = isMobile ? "1fr 1fr" : isTablet ? "repeat(3,1fr)" : "repeat(5,1fr)";
     const chartCols = isMobile ? "1fr" : isTablet ? "1fr 1fr" : "repeat(3,1fr)";
-    return (_jsxs("div", { style: S.page, children: [_jsxs("div", { style: { display: "grid", gridTemplateColumns: metricCols,
-                    gap: isMobile ? 8 : 9 }, children: [_jsx(MetricCard, { label: "TOTAL APPS", value: stats.total_apps || displayData.length, sub: "Applications", color: T.blue }), _jsx(MetricCard, { label: "CRITICAL", value: findingCounts.critical || 0, sub: "DORA findings", color: T.red }), _jsx(MetricCard, { label: "NO PFS", value: noPFSCount, sub: "No fwd secrecy", color: T.orange }), _jsx(MetricCard, { label: "WEAK CIPHER", value: stats.weak_crypto || brokenCount, sub: "Needs remediation", color: T.yellow }), _jsx("div", { style: isMobile ? { gridColumn: "1/-1" } : {}, children: _jsx(MetricCard, { label: "PQC READY", value: stats.pqc_ready || 0, sub: "Post-quantum", color: T.green }) })] }), _jsxs(Panel, { children: [_jsx(PanelHeader, { left: "DORA ART. 9.4 \u2014 LIVE FINDING SUMMARY" }), _jsx("div", { style: { padding: "10px 14px", display: "grid",
-                            gridTemplateColumns: isMobile ? "1fr 1fr" : "repeat(4,1fr)",
-                            gap: 8 }, children: ["critical", "high", "medium", "low"].map(sev => {
+    return (_jsxs("div", { style: S.page, children: [_jsxs("div", { style: { display: "grid", gridTemplateColumns: metricCols, gap: isMobile ? 8 : 9 }, children: [_jsx(MetricCard, { label: "TOTAL APPS", value: stats.total_apps || displayData.length, sub: "Applications", color: T.blue }), _jsx(MetricCard, { label: "CRITICAL", value: findingCounts.critical || 0, sub: "DORA findings", color: T.red }), _jsx(MetricCard, { label: "NO PFS", value: noPFSCount, sub: "No fwd secrecy", color: T.orange }), _jsx(MetricCard, { label: "WEAK CIPHER", value: stats.weak_crypto || brokenCount, sub: "Needs remediation", color: T.yellow }), _jsx("div", { style: isMobile ? { gridColumn: "1/-1" } : {}, children: _jsx(MetricCard, { label: "PQC READY", value: stats.pqc_ready || 0, sub: "Post-quantum", color: T.green }) })] }), _jsxs(Panel, { children: [_jsx(PanelHeader, { left: "DORA ART. 9.4 \u2014 LIVE FINDING SUMMARY" }), _jsx("div", { style: { padding: "10px 14px", display: "grid",
+                            gridTemplateColumns: isMobile ? "1fr 1fr" : "repeat(4,1fr)", gap: 8 }, children: ["critical", "high", "medium", "low"].map(sev => {
                             const count = findingCounts[sev] || 0;
                             const color = severityColor(sev);
                             const pct = Math.min(100, Math.round(count / Math.max(analysed.length, 1) * 100));
-                            return (_jsxs("div", { style: {
-                                    background: "rgba(59,130,246,0.03)",
-                                    border: `1px solid ${color}22`,
-                                    borderRadius: 3, padding: 10,
-                                }, children: [_jsxs("div", { style: { display: "flex", justifyContent: "space-between",
-                                            marginBottom: 6 }, children: [_jsx("span", { style: { fontSize: 9, color, letterSpacing: ".12em",
-                                                    textTransform: "uppercase" }, children: sev }), _jsx("span", { style: { fontFamily: "'Orbitron',monospace",
-                                                    fontSize: 14, color }, children: count })] }), _jsx("div", { style: { height: 3, background: "rgba(255,255,255,0.05)",
-                                            borderRadius: 2 }, children: _jsx("div", { style: { height: "100%", width: `${pct}%`, background: color,
+                            return (_jsxs("div", { style: { background: "rgba(59,130,246,0.03)",
+                                    border: `1px solid ${color}22`, borderRadius: 3, padding: 10 }, children: [_jsxs("div", { style: { display: "flex", justifyContent: "space-between", marginBottom: 6 }, children: [_jsx("span", { style: { fontSize: 9, color, letterSpacing: ".12em",
+                                                    textTransform: "uppercase" }, children: sev }), _jsx("span", { style: { fontFamily: "'Orbitron',monospace", fontSize: 14, color }, children: count })] }), _jsx("div", { style: { height: 3, background: "rgba(255,255,255,0.05)", borderRadius: 2 }, children: _jsx("div", { style: { height: "100%", width: `${pct}%`, background: color,
                                                 borderRadius: 2, transition: "width 0.8s ease" } }) }), _jsxs("div", { style: { fontSize: 7, color: T.text3, marginTop: 4 }, children: ["findings across ", analysed.length, " apps"] })] }, sev));
-                        }) })] }), _jsxs("div", { style: { display: "grid", gridTemplateColumns: chartCols,
-                    gap: isMobile ? 8 : 10 }, children: [_jsxs(Panel, { children: [_jsx(PanelHeader, { left: "KEY LENGTH DISTRIBUTION" }), _jsxs("div", { style: { padding: 14 }, children: [_jsx("canvas", { ref: klRef, style: { width: "100%", height: 160 } }), _jsx("div", { style: { display: "flex", justifyContent: "space-around", marginTop: 8 }, children: [["4096", T.green], ["3072", T.blue], ["2048", T.cyan],
+                        }) })] }), _jsxs("div", { style: { display: "grid", gridTemplateColumns: chartCols, gap: isMobile ? 8 : 10 }, children: [_jsxs(Panel, { children: [_jsx(PanelHeader, { left: "KEY LENGTH DISTRIBUTION" }), _jsxs("div", { style: { padding: 14 }, children: [_jsx("canvas", { ref: klRef, style: { width: "100%", height: 160 } }), _jsx("div", { style: { display: "flex", justifyContent: "space-around", marginTop: 8 }, children: [["4096", T.green], ["3072", T.blue], ["2048", T.cyan],
                                             ["1024", T.yellow], ["other", T.red]].map(([lbl, clr]) => (_jsx("div", { style: { textAlign: "center" }, children: _jsx("div", { style: { fontSize: 10, color: clr,
-                                                    fontFamily: "'Orbitron',monospace" }, children: lbl }) }, lbl))) })] })] }), _jsxs(Panel, { children: [_jsx(PanelHeader, { left: "CIPHER USAGE" }), _jsx("div", { style: { padding: 14, display: "flex",
-                                    flexDirection: "column", gap: 9 }, children: cipherData.map(c => {
+                                                    fontFamily: "'Orbitron',monospace" }, children: lbl }) }, lbl))) })] })] }), _jsxs(Panel, { children: [_jsx(PanelHeader, { left: "CIPHER USAGE" }), _jsx("div", { style: { padding: 14, display: "flex", flexDirection: "column", gap: 9 }, children: cipherData.map(c => {
                                     const parsed = parseCipher(c.name);
                                     const riskCol = !parsed.pfs ? T.red
                                         : parsed.bulkCipher.includes("DES") || parsed.bulkCipher === "RC4-128" ? T.red
                                             : parsed.bulkCipher.includes("CBC") ? T.orange : T.green;
                                     return (_jsxs("div", { children: [_jsxs("div", { style: { display: "flex", justifyContent: "space-between",
-                                                    marginBottom: 3, gap: 6 }, children: [_jsxs("div", { style: { display: "flex", alignItems: "center",
-                                                            gap: 5, minWidth: 0, flex: 1 }, children: [_jsx("span", { style: { width: 6, height: 6, borderRadius: "50%",
-                                                                    background: riskCol, flexShrink: 0 } }), _jsx("span", { style: { fontSize: 9, color: T.text3,
-                                                                    overflow: "hidden", textOverflow: "ellipsis",
-                                                                    whiteSpace: "nowrap" }, children: c.name })] }), _jsx("span", { style: { fontSize: 9, fontFamily: "'Orbitron',monospace",
+                                                    marginBottom: 3, gap: 6 }, children: [_jsxs("div", { style: { display: "flex", alignItems: "center", gap: 5, minWidth: 0, flex: 1 }, children: [_jsx("span", { style: { width: 6, height: 6, borderRadius: "50%",
+                                                                    background: riskCol, flexShrink: 0 } }), _jsx("span", { style: { fontSize: 9, color: T.text3, overflow: "hidden",
+                                                                    textOverflow: "ellipsis", whiteSpace: "nowrap" }, children: c.name })] }), _jsx("span", { style: { fontSize: 9, fontFamily: "'Orbitron',monospace",
                                                             color: c.color, flexShrink: 0 }, children: c.count })] }), _jsx(ProgBar, { pct: Math.round(c.count / maxCipher * 100), color: riskCol })] }, c.name));
                                 }) })] }), _jsx("div", { style: isTablet ? { gridColumn: "1/-1" } : {}, children: _jsxs(Panel, { children: [_jsx(PanelHeader, { left: "TOP CERTIFICATE AUTHORITIES" }), _jsxs("div", { style: { padding: 14, display: "flex",
                                         gap: (isMobile || isTablet) ? 16 : 0,
                                         flexDirection: (isMobile || isTablet) ? "row" : "column",
-                                        alignItems: (isMobile || isTablet) ? "center" : "stretch" }, children: [_jsx("canvas", { ref: caRef, width: 160, height: 160, style: {
-                                                display: "block",
+                                        alignItems: (isMobile || isTablet) ? "center" : "stretch" }, children: [_jsx("canvas", { ref: caRef, width: 160, height: 160, style: { display: "block",
                                                 margin: (isMobile || isTablet) ? "0" : "0 auto 10px",
                                                 flexShrink: 0,
                                                 width: (isMobile || isTablet) ? 110 : 160,
-                                                height: (isMobile || isTablet) ? 110 : 160,
-                                            } }), _jsx("div", { ref: caLegendRef, style: { display: "flex",
-                                                flexDirection: "column", gap: 5, flex: 1 } })] })] }) })] }), _jsxs(Panel, { children: [_jsx(PanelHeader, { left: "APPLICATION CRYPTOGRAPHIC INVENTORY", right: _jsx("button", { style: { ...S.btn, fontSize: isMobile ? 9 : 11 }, onClick: exportCSV, children: isMobile ? "↓ CSV" : "↓ EXPORT FULL CSV" }) }), !isDesktop && (_jsx("div", { style: { maxHeight: isMobile ? 420 : 560, overflowY: "auto" }, children: analysed.map((d, i) => (_jsx(AppCard, { d: d, compact: isMobile }, i))) })), isDesktop && (_jsx(_Fragment, { children: _jsx(Table, { cols: [
-                                "APPLICATION", "KEY LEN", "KEY EXCHANGE", "BULK CIPHER",
-                                "PFS", "TLS VER", "CA", "OVERALL RISK", "PQC", ""
-                            ], children: analysed.map((d, i) => {
-                                const c = d.analysis.components;
-                                const risk = d.analysis.overallRisk;
-                                const isOpen = expandedRow === i;
-                                const tlsNorm = normaliseTLS(d.tls);
-                                const keyCol = d.keylen?.startsWith("1024") ? T.red
-                                    : d.keylen?.startsWith("2048") ? T.yellow : T.green;
-                                const bulkCol = c.bulkCipher.includes("DES") || c.bulkCipher === "RC4-128"
-                                    ? T.red
-                                    : c.bulkCipher.includes("CBC") ? T.orange : T.green;
-                                return (_jsxs(React.Fragment, { children: [_jsxs(TR, { children: [_jsx(TD, { style: { color: T.blue, fontSize: 10 }, children: d.app }), _jsx(TD, { style: { fontSize: 10, color: keyCol }, children: d.keylen }), _jsxs(TD, { style: { fontSize: 9, color: c.pfs ? T.cyan : T.red,
-                                                        fontFamily: "'Share Tech Mono',monospace" }, children: [c.keyExchange, c.kxSource === "backend" && (_jsx("span", { style: { fontSize: 7, color: T.text3, marginLeft: 4 }, children: "\u2022" }))] }), _jsx(TD, { style: { fontSize: 9, color: bulkCol,
-                                                        fontFamily: "'Share Tech Mono',monospace",
-                                                        maxWidth: 120, overflow: "hidden",
-                                                        textOverflow: "ellipsis",
-                                                        whiteSpace: "nowrap" }, children: c.bulkCipher }), _jsx(TD, { style: { textAlign: "center", fontSize: 13 }, children: c.pfs
-                                                        ? _jsx("span", { style: { color: T.green }, children: "\u2713" })
-                                                        : _jsx("span", { style: { color: T.red }, children: "\u2717" }) }), _jsx(TD, { children: _jsxs(Badge, { v: tlsNorm === "1.0" ? "red" : tlsNorm === "1.1" ? "orange" : tlsNorm === "1.2" ? "yellow" : "green", children: ["TLS ", tlsNorm] }) }), _jsx(TD, { style: { fontSize: 9, color: T.text3 }, children: d.ca }), _jsx(TD, { children: _jsx(Badge, { v: severityVariant(risk), children: risk.toUpperCase() }) }), _jsx(TD, { style: { textAlign: "center" }, children: (() => {
-                                                        // ACTIVE — PQC hybrid already negotiated
-                                                        if (c.pqcHybrid || d.pqc === true)
-                                                            return _jsx("span", { style: { fontSize: 8, fontWeight: 600,
-                                                                    color: T.green, border: `1px solid ${T.green}44`,
-                                                                    borderRadius: 2, padding: "1px 5px",
-                                                                    letterSpacing: ".06em" }, children: "ACTIVE" });
-                                                        // READY — real ECDHE key exchange detected
-                                                        // Only X25519, P-256, P-384, secp* — genuine ephemeral EC
-                                                        const kx = c.keyExchange?.toLowerCase() ?? "";
-                                                        const isECDHE = kx === "x25519" ||
-                                                            kx === "p-256" ||
-                                                            kx === "p-384" ||
-                                                            kx === "p-521" ||
-                                                            kx === "x448" ||
-                                                            kx.startsWith("secp") ||
-                                                            kx === "ecdhe";
-                                                        if (isECDHE)
-                                                            return _jsx("span", { style: { fontSize: 8, fontWeight: 600,
-                                                                    color: T.yellow, border: `1px solid ${T.yellow}44`,
-                                                                    borderRadius: 2, padding: "1px 5px",
-                                                                    letterSpacing: ".06em" }, children: "READY" });
-                                                        // NOT READY — RSA, DHE, unknown, or TLS 1.3 without kxGroup
-                                                        return _jsx("span", { style: { color: T.red, fontSize: 13 }, children: "\u2717" });
-                                                    })() }), _jsx(TD, { children: _jsx("button", { onClick: () => setExpandedRow(isOpen ? null : i), style: { ...S.btn, fontSize: 9, padding: "2px 7px" }, children: isOpen ? "▲" : "▼ details" }) })] }), isOpen && (_jsx(TR, { children: _jsx("td", { colSpan: 10, style: { padding: "0 12px 12px" }, children: _jsx(CipherBreakdown, { analysis: d.analysis, compact: false }) }) }))] }, i));
-                            }) }) })), _jsxs("div", { style: { padding: "8px 12px",
-                            borderTop: `1px solid rgba(59,130,246,0.07)`,
+                                                height: (isMobile || isTablet) ? 110 : 160 } }), _jsx("div", { ref: caLegendRef, style: { display: "flex", flexDirection: "column", gap: 5, flex: 1 } })] })] }) })] }), _jsxs(Panel, { children: [_jsx(PanelHeader, { left: "APPLICATION CRYPTOGRAPHIC INVENTORY", right: _jsx("button", { style: { ...S.btn, fontSize: isMobile ? 9 : 11 }, onClick: exportCSV, children: isMobile ? "↓ CSV" : "↓ EXPORT FULL CSV" }) }), !isDesktop && (_jsx("div", { style: { maxHeight: isMobile ? 420 : 560, overflowY: "auto" }, children: analysed.map((d, i) => (_jsx(AppCard, { d: d, compact: isMobile }, i))) })), isDesktop && (_jsx(Table, { cols: [
+                            "APPLICATION", "KEY LEN", "KEY EXCHANGE", "BULK CIPHER",
+                            "PFS", "TLS VER", "CA", "OVERALL RISK", "PQC", ""
+                        ], children: analysed.map((d, i) => {
+                            const c = d.analysis.components;
+                            const risk = d.analysis.overallRisk;
+                            const isOpen = expandedRow === i;
+                            const tlsNorm = normaliseTLS(d.tls);
+                            const pqcScore = pqcReadinessScore(c, d.tls, d.keylen);
+                            const keyCol = d.keylen?.startsWith("1024") ? T.red
+                                : d.keylen?.startsWith("2048") ? T.yellow : T.green;
+                            const bulkCol = c.bulkCipher.includes("DES") || c.bulkCipher === "RC4-128"
+                                ? T.red : c.bulkCipher.includes("CBC") ? T.orange : T.green;
+                            return (_jsxs(React.Fragment, { children: [_jsxs(TR, { children: [_jsx(TD, { style: { color: T.blue, fontSize: 10 }, children: d.app }), _jsx(TD, { style: { fontSize: 10, color: keyCol }, children: d.keylen }), _jsxs(TD, { style: { fontSize: 9, color: c.pfs ? T.cyan : T.red,
+                                                    fontFamily: "'Share Tech Mono',monospace" }, children: [c.keyExchange, c.kxSource === "backend" && (_jsx("span", { style: { fontSize: 7, color: T.text3, marginLeft: 4 }, children: "\u2022" }))] }), _jsx(TD, { style: { fontSize: 9, color: bulkCol,
+                                                    fontFamily: "'Share Tech Mono',monospace",
+                                                    maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis",
+                                                    whiteSpace: "nowrap" }, children: c.bulkCipher }), _jsx(TD, { style: { textAlign: "center", fontSize: 13 }, children: c.pfs ? _jsx("span", { style: { color: T.green }, children: "\u2713" })
+                                                    : _jsx("span", { style: { color: T.red }, children: "\u2717" }) }), _jsx(TD, { children: _jsxs(Badge, { v: tlsNorm === "1.0" ? "red" : tlsNorm === "1.1" ? "orange" : tlsNorm === "1.2" ? "yellow" : "green", children: ["TLS ", tlsNorm] }) }), _jsx(TD, { style: { fontSize: 9, color: T.text3 }, children: d.ca }), _jsx(TD, { children: _jsx(Badge, { v: severityVariant(risk), children: risk.toUpperCase() }) }), _jsx(TD, { style: { textAlign: "center" }, children: _jsx(PQCScoreBadge, { score: pqcScore }) }), _jsx(TD, { children: _jsx("button", { onClick: () => setExpandedRow(isOpen ? null : i), style: { ...S.btn, fontSize: 9, padding: "2px 7px" }, children: isOpen ? "▲" : "▼ details" }) })] }), isOpen && (_jsx(TR, { children: _jsxs("td", { colSpan: 10, style: { padding: "0 12px 12px" }, children: [_jsx(PQCScoreDetail, { score: pqcScore }), _jsx(CipherBreakdown, { analysis: d.analysis, compact: false })] }) }))] }, i));
+                        }) })), _jsxs("div", { style: { padding: "8px 12px", borderTop: `1px solid rgba(59,130,246,0.07)`,
                             display: "flex", justifyContent: "space-between",
-                            alignItems: "center", flexWrap: "wrap", gap: 8 }, children: [_jsxs("span", { style: { fontSize: 10, color: T.text3 }, children: [_jsx("b", { style: { color: T.text2 }, children: analysed.length }), " apps \u00B7", _jsxs("b", { style: { color: T.red }, children: [" ", findingCounts.critical] }), " critical \u00B7", _jsxs("b", { style: { color: T.orange }, children: [" ", findingCounts.high] }), " high \u00B7", _jsxs("b", { style: { color: T.red }, children: [" ", noPFSCount] }), " without PFS"] }), !isMobile && (_jsx("span", { style: { fontSize: 9, color: T.text3 }, children: isDesktop ? "Click ▼ details to expand" : "Tap row to expand" }))] })] }), _jsxs(Panel, { children: [_jsx(PanelHeader, { left: "ENCRYPTION PROTOCOLS" }), _jsxs("div", { style: { padding: 14, display: "flex", gap: 16,
-                            alignItems: "center",
-                            flexDirection: isMobile ? "column" : "row" }, children: [_jsx("canvas", { ref: protoRef, width: 140, height: 140, style: {
-                                    width: isMobile ? "100%" : 140,
-                                    height: 140,
-                                    maxWidth: 200,
-                                } }), _jsx("div", { ref: protoLegendRef, style: { display: "flex",
-                                    flexDirection: "column", gap: 9, flex: 1,
-                                    width: isMobile ? "100%" : "auto" } })] })] })] }));
+                            alignItems: "center", flexWrap: "wrap", gap: 8 }, children: [_jsxs("span", { style: { fontSize: 10, color: T.text3 }, children: [_jsx("b", { style: { color: T.text2 }, children: analysed.length }), " apps \u00B7", _jsxs("b", { style: { color: T.red }, children: [" ", findingCounts.critical] }), " critical \u00B7", _jsxs("b", { style: { color: T.orange }, children: [" ", findingCounts.high] }), " high \u00B7", _jsxs("b", { style: { color: T.red }, children: [" ", noPFSCount] }), " without PFS"] }), !isMobile && (_jsx("span", { style: { fontSize: 9, color: T.text3 }, children: isDesktop ? "Click ▼ details to expand" : "Tap row to expand" }))] })] }), _jsxs(Panel, { children: [_jsx(PanelHeader, { left: "ENCRYPTION PROTOCOLS" }), _jsxs("div", { style: { padding: 14, display: "flex", gap: 16, alignItems: "center",
+                            flexDirection: isMobile ? "column" : "row" }, children: [_jsx("canvas", { ref: protoRef, width: 140, height: 140, style: { width: isMobile ? "100%" : 140, height: 140, maxWidth: 200 } }), _jsx("div", { ref: protoLegendRef, style: { display: "flex", flexDirection: "column", gap: 9,
+                                    flex: 1, width: isMobile ? "100%" : "auto" } })] })] })] }));
 }
