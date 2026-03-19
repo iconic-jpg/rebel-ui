@@ -127,7 +127,6 @@ function PQCScoreDetail({ score }: { score: PQCScoreBreakdown }) {
           color: score.color }}>{score.active ? "ACTIVE" : `${score.score}/100`}</span>
       </div>
 
-      {/* progress bar */}
       {!score.active && (
         <div style={{ height: 4, background: "rgba(255,255,255,0.06)",
           borderRadius: 2, marginBottom: 10 }}>
@@ -140,39 +139,47 @@ function PQCScoreDetail({ score }: { score: PQCScoreBreakdown }) {
         </div>
       )}
 
-      {/* criteria rows */}
-      <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
         {rows.map(c => (
-          <div key={c.label} style={{ display:"flex", alignItems:"center", gap: 8 }}>
+          <div key={c.label} style={{
+            display:"flex", alignItems:"flex-start", gap: 8,
+            borderLeft: `2px solid ${c.pass ? "#22c55e" : c.pts > 0 ? "#eab308" : "#ef444433"}`,
+            paddingLeft: 7,
+          }}>
             <span style={{
-              fontSize: 9, width: 12, textAlign: "center",
+              fontSize: 10, width: 12, flexShrink: 0, marginTop: 1,
               color: c.pass ? "#22c55e" : c.pts > 0 ? "#eab308" : "#ef4444",
             }}>
               {c.pass ? "✓" : c.pts > 0 ? "~" : "✗"}
             </span>
-            <span style={{ fontSize: 8, color: "#94a3b8", flex: 1 }}>{c.label}</span>
-            <span style={{
-              fontSize: 8, fontFamily: "'Orbitron',monospace",
-              color: c.pass ? "#22c55e" : c.pts > 0 ? "#eab308" : "#64748b",
-            }}>
-              {c.pts}/{c.max}
-            </span>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ display:"flex", justifyContent:"space-between", marginBottom: 1 }}>
+                <span style={{ fontSize: 8, color: "#94a3b8", fontWeight: 600 }}>{c.label}</span>
+                <span style={{
+                  fontSize: 8, fontFamily: "'Orbitron',monospace", flexShrink: 0, marginLeft: 8,
+                  color: c.pass ? "#22c55e" : c.pts > 0 ? "#eab308" : "#475569",
+                }}>
+                  {c.pts}/{c.max}
+                </span>
+              </div>
+              <div style={{ fontSize: 7, color: "#475569" }}>{(c as any).detail}</div>
+            </div>
           </div>
         ))}
       </div>
 
-      {!score.active && score.score < 100 && (
+      {!score.active && (
         <div style={{ marginTop: 8, padding: "5px 8px",
           background: "rgba(59,130,246,0.05)",
-          border: "1px solid rgba(59,130,246,0.15)", borderRadius: 3 }}>
+          border: "1px solid rgba(59,130,246,0.12)", borderRadius: 3 }}>
           <span style={{ fontSize: 7, color: "#64748b" }}>
-            {score.score === 0
-              ? "Cannot begin PQC migration — fix TLS version and cipher suite first."
-              : score.score < 55
-              ? "Significant gaps. Upgrade TLS version and key exchange before planning Kyber deployment."
-              : score.score < 100
-              ? "Foundation mostly ready. Address remaining gaps then deploy X25519+Kyber768 hybrid."
-              : "Classical foundation complete. Deploy CRYSTALS-Kyber (FIPS 203) hybrid to go ACTIVE."}
+            {score.score >= 100
+              ? "Classical foundation complete. Deploy CRYSTALS-Kyber (FIPS 203) hybrid to go ACTIVE."
+              : score.score >= 70
+              ? "Address remaining gaps then deploy X25519+Kyber768 hybrid per NIST FIPS 203."
+              : score.score >= 40
+              ? "Significant gaps. Upgrade cert key size and enforce AES-256 before planning Kyber deployment."
+              : "Not migration-ready. Fix TLS version, cipher suite, and certificate first."}
           </span>
         </div>
       )}
@@ -269,7 +276,7 @@ function AppCard({ d, compact }: { d: any; compact: boolean }) {
   const risk    = d.analysis.overallRisk;
   const c       = d.analysis.components;
   const tlsNorm = normaliseTLS(d.tls);
-  const pqcScore = pqcReadinessScore(c, d.tls, d.keylen);
+  const pqcScore = pqcReadinessScore(c, d.tls, d.keylen, d.is_wildcard ?? false);
 
   return (
     <div style={{ borderBottom:"1px solid rgba(59,130,246,0.05)" }}>
@@ -646,7 +653,7 @@ export default function CBOMPage() {
               const risk    = d.analysis.overallRisk;
               const isOpen  = expandedRow === i;
               const tlsNorm = normaliseTLS(d.tls);
-              const pqcScore = pqcReadinessScore(c, d.tls, d.keylen);
+              const pqcScore = pqcReadinessScore(c, d.tls, d.keylen, d.is_wildcard ?? false);
               const keyCol  = d.keylen?.startsWith("1024") ? T.red
                             : d.keylen?.startsWith("2048") ? T.yellow : T.green;
               const bulkCol = c.bulkCipher.includes("DES") || c.bulkCipher === "RC4-128"

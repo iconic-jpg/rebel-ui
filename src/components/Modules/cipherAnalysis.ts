@@ -12,14 +12,14 @@
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 export interface CipherComponents {
-  keyExchange:    string;
-  authentication: string;
-  bulkCipher:     string;
-  mac:            string;
-  pfs:            boolean;
-  pqcHybrid:      boolean;
-  raw:            string;
-  kxSource:       "backend" | "parsed";
+  keyExchange:    string;   // X25519, P-256, RSA, DHE, TLS 1.3, etc.
+  authentication: string;   // RSA, ECDSA, Certificate, anon
+  bulkCipher:     string;   // AES-256-GCM, AES-128-GCM, RC4, DES, 3DES
+  mac:            string;   // SHA-384, SHA-256, SHA-1, MD5, HKDF
+  pfs:            boolean;  // Perfect Forward Secrecy
+  pqcHybrid:      boolean;  // True if X25519Kyber768 or similar hybrid detected
+  raw:            string;   // original cipher string
+  kxSource:       "backend" | "parsed";  // whether kx came from real negotiation or string parsing
 }
 
 export interface CipherFinding {
@@ -40,13 +40,13 @@ export interface CipherAnalysis {
 
 // ── TLS version normaliser ────────────────────────────────────────────────────
 // Handles: "TLSv1.3", "TLS1.3", "TLSv1", "TLS 1.2", "1.2", "1.3"
-// Exported once here — do NOT re-export at the bottom of this file.
 export function normaliseTLS(raw: any): string {
   if (raw === null || raw === undefined) return "";
   return String(raw)
-    .replace(/^TLSv?/i, "")
-    .replace(/^v/i, "")
+    .replace(/^TLSv?/i, "")   // strip TLS / TLSv prefix
+    .replace(/^v/i, "")        // strip any remaining v
     .trim();
+  // result: "1.3", "1.2", "1.1", "1.0"
 }
 
 // ── PQC group detector ────────────────────────────────────────────────────────
@@ -54,11 +54,11 @@ function isPQCGroup(kxGroup: any): boolean {
   if (!kxGroup) return false;
   const g = String(kxGroup).toLowerCase();
   return (
-    g.includes("kyber")       ||
-    g.includes("mlkem")       ||
-    g.includes("hybrid")      ||
-    g.includes("x25519kyber") ||
-    g.includes("p256kyber")   ||
+    g.includes("kyber")        ||
+    g.includes("mlkem")        ||
+    g.includes("hybrid")       ||
+    g.includes("x25519kyber")  ||
+    g.includes("p256kyber")    ||
     g.includes("pq")
   );
 }
@@ -70,18 +70,18 @@ function cleanKxGroup(kxGroup: any): string {
   if (!g || g === "None" || g === "null") return "";
 
   const map: Record<string, string> = {
-    "X25519":                       "X25519",
-    "x25519":                       "X25519",
-    "secp256r1":                    "P-256",
-    "prime256v1":                   "P-256",
-    "secp384r1":                    "P-384",
-    "secp521r1":                    "P-521",
-    "X448":                         "X448",
-    "x448":                         "X448",
-    "ffdhe2048":                    "FFDHE-2048",
-    "ffdhe3072":                    "FFDHE-3072",
-    "ffdhe4096":                    "FFDHE-4096",
-    "X25519Kyber768":               "X25519+Kyber768",
+    "X25519":          "X25519",
+    "x25519":          "X25519",
+    "secp256r1":       "P-256",
+    "prime256v1":      "P-256",
+    "secp384r1":       "P-384",
+    "secp521r1":       "P-521",
+    "X448":            "X448",
+    "x448":            "X448",
+    "ffdhe2048":       "FFDHE-2048",
+    "ffdhe3072":       "FFDHE-3072",
+    "ffdhe4096":       "FFDHE-4096",
+    "X25519Kyber768":  "X25519+Kyber768",
     "x25519kyber768draft00":        "X25519+Kyber768",
     "SecP256r1Kyber768Draft00":     "P-256+Kyber768",
   };
@@ -90,45 +90,60 @@ function cleanKxGroup(kxGroup: any): string {
 }
 
 // ── FIX 4: Guard — reject kxGroup values that are purely numeric ──────────────
+// Python's ssl module sometimes returns the key size (e.g. 256) as cipher()[2]
+// instead of a group name. A numeric string is NOT a named group; treating it
+// as one causes keyExchange to display as "256" and breaks all ECDHE/PQC logic.
 function isValidKxGroup(kxGroup: any): boolean {
   if (kxGroup === null || kxGroup === undefined) return false;
   const s = String(kxGroup).trim();
   if (!s || s === "None" || s === "null" || s === "") return false;
+  // Reject pure integers / pure floats (e.g. "256", "128", "4096", "2048.0")
   if (/^\d+(\.\d+)?$/.test(s)) return false;
   return true;
 }
 
 // ── ECDHE group detector ──────────────────────────────────────────────────────
+// Broad check — any ephemeral group. Used internally only.
 export function isECDHEGroup(kx: string): boolean {
   const k = (kx ?? "").toLowerCase();
   return (
-    k === "x25519"      ||
-    k === "p-256"       ||
-    k === "p-384"       ||
-    k === "p-521"       ||
-    k === "x448"        ||
-    k === "ffdhe-2048"  ||
-    k === "ffdhe-3072"  ||
-    k === "ffdhe-4096"  ||
+    k === "x25519"       ||
+    k === "p-256"        ||
+    k === "p-384"        ||
+    k === "p-521"        ||
+    k === "x448"         ||
+    k === "ffdhe-2048"   ||
+    k === "ffdhe-3072"   ||
+    k === "ffdhe-4096"   ||
     k.startsWith("secp") ||
-    k === "ecdhe"       ||
+    k === "ecdhe"        ||
     k.includes("x25519+") ||
     k.includes("p-256+")
   );
 }
 
 // ── Strict PQC-READY detector ─────────────────────────────────────────────────
+// READY means the server is genuinely PQC-migration-ready:
+//   - Must be TLS 1.3 (TLS 1.2 ECDHE is NOT ready — CBC suites, no HKDF, etc.)
+//   - Must use a modern named group: X25519, P-256, P-384, P-521, X448
+//   - DHE (ffdhe*), generic "ECDHE" string, or unknown = NOT ready
+//   - Anything TLS 1.2 or below = NOT ready regardless of group
+//
+// This is stricter than isECDHEGroup() which is used for PFS detection only.
 export function isPQCReadyGroup(kx: string, tlsVersion: string): boolean {
   const tls = normaliseTLS(tlsVersion);
-  if (tls !== "1.3") return false;
+  if (tls !== "1.3") return false;   // TLS 1.2 ECDHE is not PQC-ready
 
   const k = (kx ?? "").toLowerCase();
   return (
-    k === "x25519" ||
-    k === "p-256"  ||
-    k === "p-384"  ||
-    k === "p-521"  ||
+    k === "x25519"  ||
+    k === "p-256"   ||
+    k === "p-384"   ||
+    k === "p-521"   ||
     k === "x448"
+    // ffdhe-* excluded: DHE groups are not the PQC migration path
+    // bare "ecdhe" excluded: too vague, could be TLS 1.2 fallback
+    // secp* raw names excluded: only accept cleaned names from cleanKxGroup
   );
 }
 
@@ -153,7 +168,7 @@ export function parseCipher(cipher: any, kxGroup?: string | null): CipherCompone
            (c.includes("AES256") && !c.includes("GCM") && !c.includes("CCM"))) bulk = "AES-256-CBC";
   else if (c.includes("AES_128_CBC")  || c.includes("AES128-CBC") ||
            (c.includes("AES128") && !c.includes("GCM") && !c.includes("CCM"))) bulk = "AES-128-CBC";
-  else if (c.includes("3DES_EDE_CBC") || c.includes("3DES"))        bulk = "3DES-CBC";
+  else if (c.includes("3DES_EDE_CBC") || c.includes("3DES"))       bulk = "3DES-CBC";
   else if (c.includes("DES_CBC")      || (c.includes("DES") && !c.includes("3DES"))) bulk = "DES-CBC";
   else if (c.includes("RC4_128")      || c.includes("RC4-128"))     bulk = "RC4-128";
   else if (c.includes("RC4_40"))                                     bulk = "RC4-40";
@@ -168,9 +183,10 @@ export function parseCipher(cipher: any, kxGroup?: string | null): CipherCompone
   else if (c.includes("MD5"))                            mac = "MD5";
   else if (c.includes("NULL"))                           mac = "NULL";
 
+  // TLS 1.3 uses HKDF, not a traditional MAC
   if (c.startsWith("TLS_") && !c.includes("WITH")) mac = "HKDF";
 
-  // ── FIX 1 + FIX 4: Use real kxGroup from backend only if valid ────────────
+  // ── FIX 1 + FIX 4: Use real kxGroup from backend only if it is a valid name ─
   if (isValidKxGroup(kxGroup)) {
     const cleanGroup = cleanKxGroup(kxGroup!);
     const isHybridPQ = isPQCGroup(String(kxGroup));
@@ -190,7 +206,7 @@ export function parseCipher(cipher: any, kxGroup?: string | null): CipherCompone
 
   // ── Fallback: parse key exchange from cipher string ───────────────────────
 
-  // TLS 1.3 IANA format
+  // TLS 1.3 IANA format (TLS_AES_256_GCM_SHA384 etc.)
   if (c.startsWith("TLS_") && !c.includes("WITH")) {
     return {
       keyExchange:    "TLS 1.3",
@@ -204,7 +220,7 @@ export function parseCipher(cipher: any, kxGroup?: string | null): CipherCompone
     };
   }
 
-  // TLS 1.2 IANA format
+  // TLS 1.2 IANA format (TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384)
   if (c.includes("_WITH_")) {
     const prefix = c.split("_WITH_")[0];
 
@@ -214,12 +230,12 @@ export function parseCipher(cipher: any, kxGroup?: string | null): CipherCompone
                : prefix.includes("DH")    ? "DH"
                : prefix.includes("RSA")   ? "RSA"
                : prefix.includes("PSK")   ? "PSK"
-               : prefix.includes("SRP")   ? "SRP" : "RSA";
+               : prefix.includes("SRP")   ? "SRP"   : "RSA";
 
     const auth = prefix.includes("ECDSA") ? "ECDSA"
                : prefix.includes("RSA")   ? "RSA"
                : prefix.includes("DSS")   ? "DSS"
-               : prefix.includes("anon")  ? "anon" : "RSA";
+               : prefix.includes("anon")  ? "anon"  : "RSA";
 
     const pfs = kx === "ECDHE" || kx === "DHE";
 
@@ -230,18 +246,18 @@ export function parseCipher(cipher: any, kxGroup?: string | null): CipherCompone
     };
   }
 
-  // OpenSSL shorthand
+  // OpenSSL shorthand (ECDHE-RSA-AES256-GCM-SHA384)
   const kx   = c.startsWith("ECDHE")  ? "ECDHE"
              : c.startsWith("DHE")    ? "DHE"
              : c.startsWith("ECDH")   ? "ECDH"
              : c.startsWith("AECDH")  ? "anon-ECDH"
              : c.startsWith("ADH")    ? "anon-DH"
              : c.startsWith("DH")     ? "DH"
-             : c.startsWith("RSA")    ? "RSA" : "RSA";
+             : c.startsWith("RSA")    ? "RSA"     : "RSA";
 
   const auth = c.includes("ECDSA") ? "ECDSA"
              : c.includes("RSA")   ? "RSA"
-             : c.includes("DSS")   ? "DSS" : "RSA";
+             : c.includes("DSS")   ? "DSS"    : "RSA";
 
   const pfs = kx === "ECDHE" || kx === "DHE";
 
@@ -263,11 +279,12 @@ function unknownComponents(raw: string): CipherComponents {
 // ── Finding generator ─────────────────────────────────────────────────────────
 export function analyseCipher(
   components: CipherComponents,
-  tlsNormalised: string,
+  tlsNormalised: string
 ): CipherFinding[] {
   const findings: CipherFinding[] = [];
   const { keyExchange: kx, bulkCipher: bulk, mac, pfs, pqcHybrid } = components;
 
+  // ── PQC hybrid active ─────────────────────────────────────────────────────
   if (pqcHybrid) {
     findings.push({
       severity:    "ok",
@@ -281,6 +298,7 @@ export function analyseCipher(
     });
   }
 
+  // ── 1. No Perfect Forward Secrecy ────────────────────────────────────────
   if (!pfs && tlsNormalised !== "1.3") {
     findings.push({
       severity:    "high",
@@ -295,6 +313,7 @@ export function analyseCipher(
     });
   }
 
+  // ── 2. Broken bulk ciphers ────────────────────────────────────────────────
   if (bulk === "DES-CBC" || bulk === "NULL") {
     findings.push({
       severity:    "critical",
@@ -331,6 +350,7 @@ export function analyseCipher(
     });
   }
 
+  // ── 3. CBC mode ───────────────────────────────────────────────────────────
   if (bulk?.includes("CBC") && bulk !== "DES-CBC" && bulk !== "3DES-CBC") {
     findings.push({
       severity:    "medium",
@@ -344,6 +364,7 @@ export function analyseCipher(
     });
   }
 
+  // ── 4. Weak MAC ───────────────────────────────────────────────────────────
   if (mac === "SHA-1") {
     findings.push({
       severity:    "medium",
@@ -369,6 +390,7 @@ export function analyseCipher(
     });
   }
 
+  // ── 5. TLS version ────────────────────────────────────────────────────────
   if (tlsNormalised === "1.0") {
     findings.push({
       severity:    "critical",
@@ -401,12 +423,14 @@ export function analyseCipher(
     });
   }
 
+  // ── 6. PQC finding — only if not already running hybrid ──────────────────
   if (!pqcHybrid) {
     const isTLS13 = tlsNormalised === "1.3";
+    const isRSAkx = !pfs;
     const isDHEkx = pfs && !isTLS13;
 
-    if (!pfs) {
-      // NO-PFS-001 already covers this path
+    if (isRSAkx) {
+      // Already covered by NO-PFS-001
     } else if (isTLS13) {
       const pqcSev = (bulk === "AES-256-GCM" || bulk === "ChaCha20-Poly1305")
         ? "low" as const : "medium" as const;
@@ -437,6 +461,7 @@ export function analyseCipher(
     }
   }
 
+  // ── 7. AES-128 margin ─────────────────────────────────────────────────────
   if (bulk === "AES-128-GCM") {
     findings.push({
       severity:    "low",
@@ -449,6 +474,7 @@ export function analyseCipher(
     });
   }
 
+  // ── Clean bill of health ──────────────────────────────────────────────────
   if (findings.length === 0) {
     findings.push({
       severity:    "ok",
@@ -465,7 +491,7 @@ export function analyseCipher(
 
 // ── Overall risk ──────────────────────────────────────────────────────────────
 export function overallRisk(
-  findings: CipherFinding[],
+  findings: CipherFinding[]
 ): "critical" | "high" | "medium" | "low" | "ok" {
   if (findings.some(f => f.severity === "critical")) return "critical";
   if (findings.some(f => f.severity === "high"))     return "high";
@@ -500,7 +526,7 @@ export function pqcImpact(components: CipherComponents, tlsNorm: string): string
 export function fullAnalysis(
   cipher:   any,
   tlsRaw:   any,
-  kxGroup?: any,
+  kxGroup?: any
 ): CipherAnalysis {
   const tlsNorm    = normaliseTLS(tlsRaw);
   const components = parseCipher(cipher, kxGroup ?? null);
@@ -514,65 +540,107 @@ export function fullAnalysis(
 }
 
 // ── PQC Readiness Score ───────────────────────────────────────────────────────
+// Replaces the three-state ACTIVE/READY/NOT PQC badge with a numeric score.
+// Max 100 points. Each criterion is independently scored so the breakdown
+// tells the bank exactly what to fix and in what order.
+//
+// ACTIVE (deployed Kyber) is a separate boolean — score still runs 0-100
+// underneath to show how good the classical foundation is.
+
+// ── PQC Readiness Score ───────────────────────────────────────────────────────
+// Scoring model designed for BANK infrastructure assessment.
+// Public websites (Google, Cloudflare, CDNs) will score LOW by design —
+// they pass basic TLS hygiene but fail the hardened-infrastructure criteria
+// that matter for PQC migration readiness in a regulated environment.
+//
+// Max 100 points across 6 criteria. Each criterion is independently scored.
+// ACTIVE (Kyber deployed) is a separate boolean — score still runs 0-100
+// to show foundation quality even after going ACTIVE.
+
 export interface PQCScoreBreakdown {
-  score:    number;
-  label:    string;
-  color:    string;
-  active:   boolean;
+  score:   number;   // 0–100
+  label:   string;   // "ACTIVE" | "MIGRATION READY" | "PARTIAL" | "NEEDS WORK" | "NOT READY"
+  color:   string;   // hex
+  active:  boolean;  // true = Kyber/ML-KEM hybrid deployed
   criteria: {
-    tls13:      { pass: boolean; pts: number; max: number; label: string };
-    kxGroup:    { pass: boolean; pts: number; max: number; label: string };
-    bulkCipher: { pass: boolean; pts: number; max: number; label: string };
-    certKey:    { pass: boolean; pts: number; max: number; label: string };
-    noCBC:      { pass: boolean; pts: number; max: number; label: string };
+    tls13Only:    { pass: boolean; pts: number; max: number; label: string; detail: string };
+    strongKX:     { pass: boolean; pts: number; max: number; label: string; detail: string };
+    aes256Only:   { pass: boolean; pts: number; max: number; label: string; detail: string };
+    certKey4096:  { pass: boolean; pts: number; max: number; label: string; detail: string };
+    noWildcard:   { pass: boolean; pts: number; max: number; label: string; detail: string };
+    noCBC:        { pass: boolean; pts: number; max: number; label: string; detail: string };
   };
 }
 
 export function pqcReadinessScore(
   components: CipherComponents,
   tlsRaw:     any,
-  keylenRaw:  any,
+  keylenRaw:  any,      // "2048-bit" | "4096-bit" | number
+  isWildcard?: boolean, // from backend is_wildcard field
 ): PQCScoreBreakdown {
   const tls    = normaliseTLS(tlsRaw);
   const kx     = (components.keyExchange ?? "").toLowerCase();
   const bulk   = components.bulkCipher ?? "";
   const active = components.pqcHybrid;
 
+  // Parse key size
   let keyBits = 0;
-  if (typeof keylenRaw === "number") {
-    keyBits = keylenRaw;
-  } else {
+  if (typeof keylenRaw === "number") keyBits = keylenRaw;
+  else {
     const m = String(keylenRaw ?? "").match(/(\d+)/);
     if (m) keyBits = parseInt(m[1], 10);
   }
 
+  // ── Criterion 1 — TLS 1.3 ONLY (25pts) ───────────────────────────────────
+  // Must be TLS 1.3. TLS 1.2 support means fallback is possible — not strict.
+  // We can only observe what was negotiated, not what's disabled server-side.
+  // TLS 1.3 negotiated = 25pts. TLS 1.2 = 0.
   const tls13Pass = tls === "1.3";
-  const kxPass    = kx === "x25519" || kx === "p-256" || kx === "p-384" ||
-                    kx === "p-521"  || kx === "x448";
 
-  const bulkStrong  = bulk === "AES-256-GCM" || bulk === "ChaCha20-Poly1305";
-  const bulkPartial = bulk === "AES-128-GCM";
-  const bulkPts     = bulkStrong ? 20 : bulkPartial ? 10 : 0;
+  // ── Criterion 2 — Modern named KX group (20pts) ───────────────────────────
+  // X25519 or P-384 only. P-256 is acceptable but X25519 preferred.
+  // P-521, X448, DHE = 0. Generic "ECDHE" string (TLS 1.2 parsed) = 0.
+  const kxStrong  = kx === "x25519" || kx === "p-384";
+  const kxPartial = kx === "p-256" || kx === "p-521";
+  const kxPts     = kxStrong ? 20 : kxPartial ? 10 : 0;
+  const kxPass    = kxStrong;
 
-  const certStrong  = keyBits >= 4096;
-  const certPartial = keyBits >= 2048;
-  const certPts     = certStrong ? 15 : certPartial ? 7 : 0;
+  // ── Criterion 3 — AES-256-GCM or ChaCha20 only (20pts) ───────────────────
+  // AES-128-GCM = 0. Banks must enforce 256-bit symmetric crypto.
+  // No partial credit — 128-bit symmetric is a policy failure for a bank.
+  const aes256Pass = bulk === "AES-256-GCM" || bulk === "ChaCha20-Poly1305";
+  const aes256Pts  = aes256Pass ? 20 : 0;
 
+  // ── Criterion 4 — Cert key ≥ 4096-bit RSA or ≥ 384-bit ECDSA (20pts) ────
+  // 2048-bit RSA = 5pts partial. <2048 = 0.
+  // Most public CDN certs are 2048-bit RSA — banks should use 4096 or EC P-384.
+  const cert4096   = keyBits >= 4096;
+  const certEC384  = keyBits >= 384 && keyBits < 512;  // EC P-384 cert
+  const cert2048   = keyBits >= 2048 && !cert4096 && !certEC384;
+  const certPts    = cert4096 || certEC384 ? 20 : cert2048 ? 5 : 0;
+  const certPass   = cert4096 || certEC384;
+
+  // ── Criterion 5 — No wildcard certificate (10pts) ────────────────────────
+  // CDNs and public sites use wildcards. Bank internal services should not.
+  const noWildPass = !isWildcard;
+  const noWildPts  = noWildPass ? 10 : 0;
+
+  // ── Criterion 6 — No CBC mode (5pts) ─────────────────────────────────────
+  // Minor hygiene check. Should be a given but included for completeness.
   const noCBCPass = !bulk.includes("CBC");
+  const noCBCPts  = noCBCPass ? 5 : 0;
 
+  // ── Total ─────────────────────────────────────────────────────────────────
   const score = Math.min(100,
-    (tls13Pass ? 30 : 0) +
-    (kxPass    ? 25 : 0) +
-    bulkPts              +
-    certPts              +
-    (noCBCPass ? 10 : 0),
+    (tls13Pass ? 25 : 0) + kxPts + aes256Pts + certPts + noWildPts + noCBCPts
   );
 
+  // ── Label + colour ────────────────────────────────────────────────────────
   const label =
-    active        ? "ACTIVE"          :
-    score === 100 ? "MIGRATION READY" :
-    score >= 70   ? "PARTIAL"         :
-    score >= 40   ? "NEEDS WORK"      :
+    active        ? "ACTIVE"           :
+    score === 100 ? "MIGRATION READY"  :
+    score >= 70   ? "PARTIAL"          :
+    score >= 40   ? "NEEDS WORK"       :
                     "NOT READY";
 
   const color =
@@ -583,33 +651,34 @@ export function pqcReadinessScore(
                     "#ef4444";
 
   return {
-    score,
-    label,
-    color,
-    active,
+    score, label, color, active,
     criteria: {
-      tls13:      { pass: tls13Pass,  pts: tls13Pass ? 30 : 0, max: 30, label: "TLS 1.3"              },
-      kxGroup:    { pass: kxPass,     pts: kxPass    ? 25 : 0, max: 25, label: "Modern KX group"      },
-      bulkCipher: { pass: bulkStrong, pts: bulkPts,            max: 20, label: "AES-256-GCM / ChaCha" },
-      certKey:    { pass: certStrong, pts: certPts,            max: 15, label: "Cert key ≥4096-bit"   },
-      noCBC:      { pass: noCBCPass,  pts: noCBCPass ? 10 : 0, max: 10, label: "No CBC mode"          },
+      tls13Only:   { pass: tls13Pass,  pts: tls13Pass ? 25 : 0, max: 25, label: "TLS 1.3 negotiated",        detail: tls13Pass  ? `TLS ${tls} confirmed`                : `TLS ${tls || "unknown"} — must be 1.3`           },
+      strongKX:    { pass: kxPass,     pts: kxPts,              max: 20, label: "X25519 or P-384 KX",        detail: kxStrong   ? `${components.keyExchange} confirmed`  : kxPartial ? `${components.keyExchange} — prefer X25519` : `${components.keyExchange || "unknown"} — not suitable` },
+      aes256Only:  { pass: aes256Pass, pts: aes256Pts,          max: 20, label: "AES-256-GCM / ChaCha20",    detail: aes256Pass ? `${bulk} — compliant`                  : `${bulk || "unknown"} — banks must enforce 256-bit`   },
+      certKey4096: { pass: certPass,   pts: certPts,            max: 20, label: "Cert key ≥4096-bit RSA",    detail: cert4096   ? `${keyBits}-bit — compliant`            : certEC384 ? `EC P-384 — compliant`                   : `${keyBits || "?"}–bit — upgrade to 4096-bit RSA or EC P-384` },
+      noWildcard:  { pass: noWildPass, pts: noWildPts,          max: 10, label: "No wildcard certificate",   detail: noWildPass ? "Dedicated cert — compliant"            : "Wildcard cert — not acceptable for bank services"    },
+      noCBC:       { pass: noCBCPass,  pts: noCBCPts,           max:  5, label: "No CBC mode",               detail: noCBCPass  ? "No CBC — compliant"                    : `${bulk} — disable CBC cipher suites`                 },
     },
   };
 }
 
 // ── Colour helpers ────────────────────────────────────────────────────────────
+// re-exported so CBOMPage can import without reaching into internals
+export { normaliseTLS };
+
 export function severityColor(s: string): string {
   return s === "critical" ? "#ef4444"
        : s === "high"     ? "#f97316"
        : s === "medium"   ? "#eab308"
        : s === "low"      ? "#3b82f6"
-       :                    "#22c55e";
+       : "#22c55e";
 }
 
-export function severityVariant(s: string): "red" | "orange" | "yellow" | "green" | "gray" {
+export function severityVariant(s: string): "red"|"orange"|"yellow"|"green"|"gray" {
   return s === "critical" ? "red"
        : s === "high"     ? "orange"
        : s === "medium"   ? "yellow"
        : s === "low"      ? "green"
-       :                    "gray";
+       : "gray";
 }
