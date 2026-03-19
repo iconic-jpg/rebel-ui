@@ -75,6 +75,7 @@ function exportAuditPDF(
   totalDays: number, calDays: number, totalCost: number,
   teamSize: number, devRate: number, dateStr: string,
   clientName: string, clientDomain: string,
+  milestoneData: { label:string; done:boolean; pct:number }[],
 ) {
   const now       = new Date();
   const timestamp = now.toLocaleString("en-US",{year:"numeric",month:"long",day:"numeric",hour:"2-digit",minute:"2-digit",timeZoneName:"short"});
@@ -96,28 +97,19 @@ function exportAuditPDF(
     <text x="${gcx}" y="${gcy+13}" text-anchor="middle" font-family="Arial" font-size="7" fill="#6b7280" letter-spacing="1">${scoreLabel}</text>
   </svg>`;
 
-  // Score distribution
-  const activeCount  = enriched.filter(a=>a.pqcScore?.active).length;
-  const readyCount   = enriched.filter(a=>!a.pqcScore?.active&&a.pqcScore?.score===100).length;
-  const partialCount = enriched.filter(a=>!a.pqcScore?.active&&a.pqcScore?.score>=70&&a.pqcScore?.score<100).length;
-  const needsCount   = enriched.filter(a=>!a.pqcScore?.active&&a.pqcScore?.score>=40&&a.pqcScore?.score<70).length;
-  const notReadyCount= enriched.filter(a=>!a.pqcScore?.active&&(a.pqcScore?.score??0)<40).length;
-
-  const scoreDist = [
-    {label:"ACTIVE (Kyber deployed)",    count:activeCount,   color:"#16a34a"},
-    {label:"MIGRATION READY (100/100)",  count:readyCount,    color:"#3b82f6"},
-    {label:"PARTIAL (70–99/100)",        count:partialCount,  color:"#eab308"},
-    {label:"NEEDS WORK (40–69/100)",     count:needsCount,    color:"#f97316"},
-    {label:"NOT READY (<40/100)",        count:notReadyCount, color:"#ef4444"},
-  ].map(b=>{
-    const p=enriched.length?Math.round(b.count/enriched.length*100):0;
-    return `<div style="margin-bottom:7px;">
-      <div style="display:flex;justify-content:space-between;margin-bottom:3px;">
-        <span style="font-size:9px;color:#374151;">${b.label}</span>
-        <span style="font-size:9px;color:${b.color};font-weight:700;">${b.count}</span>
+  // Score distribution — milestone pass/fail for PDF
+  const scoreDist = milestoneData.map(m => {
+    const color = m.done ? "#16a34a" : m.pct > 50 ? "#eab308" : "#ef4444";
+    return `<div style="margin-bottom:9px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;">
+        <span style="display:flex;align-items:center;gap:6px;font-size:9px;color:#374151;">
+          <span style="font-size:10px;color:${m.done?"#16a34a":"#ef4444"};">${m.done?"✓":"✗"}</span>
+          ${m.label}
+        </span>
+        <span style="font-size:9px;color:${color};font-weight:700;">${m.pct}%</span>
       </div>
-      <div style="height:4px;background:#f3f4f6;border-radius:3px;">
-        <div style="height:100%;width:${p}%;background:${b.color};border-radius:3px;"></div>
+      <div style="height:5px;background:#f3f4f6;border-radius:3px;">
+        <div style="height:100%;width:${m.pct}%;background:${color};border-radius:3px;"></div>
       </div>
     </div>`;
   }).join("");
@@ -285,11 +277,11 @@ function exportAuditPDF(
       <div class="card" style="display:flex;flex-direction:column;align-items:center;padding:22px;">
         ${gaugeSVG}
         <div style="margin-top:12px;width:100%;">
-          <div style="font-size:9px;color:#374151;font-weight:600;text-align:center;margin-bottom:8px;">${total} Applications Assessed · Average PQC Score</div>
+          <div style="font-size:9px;color:#374151;font-weight:600;text-align:center;margin-bottom:8px;">${total} Applications Assessed · PQC Migration Progress</div>
           <div style="font-size:8px;color:#6b7280;line-height:1.6;background:#f9fafb;border-radius:4px;padding:8px;border:1px solid #e5e7eb;">
-            Score = average per-app readiness (0–100).<br/>
-            <b>Cert RSA-4096/EC P-384 = 70pts</b> · No wildcard = 20pts · AES-256 = 8pts · KX = 2pts.<br/>
-            Public CDNs score ≤10/100. Hardened bank infra scores 90–100/100.
+            Score = 5 milestones × 20pts each.<br/>
+            All certs RSA-4096/EC P-384 · Zero wildcards · AES-256 everywhere · TLS 1.2 eliminated · Kyber deployed.<br/>
+            A bank that has done no PQC work scores 0–20. Full Kyber deployment = 100.
           </div>
         </div>
       </div>
@@ -309,7 +301,7 @@ function exportAuditPDF(
 
   <!-- SCORE DISTRIBUTION -->
   <div class="section">
-    <h2>PQC Score Distribution</h2>
+    <h2>PQC Migration Progress — 5 Milestones</h2>
     <div class="grid2">
       <div class="card">${scoreDist}</div>
       <div class="card">
@@ -756,7 +748,7 @@ export default function PQCReadinessPage() {
           <div style={{display:"flex",gap:6}}>
             <button style={{...S.btn,fontSize:isMobile?9:11}} onClick={exportCSV}>↓ CSV</button>
             <button style={{...S.btn,fontSize:isMobile?9:11,background:"rgba(59,130,246,0.12)",borderColor:"rgba(59,130,246,0.35)"}}
-              onClick={()=>exportAuditPDF(enriched,migrationScore,pqcReady,total,totalDays,calDays,totalCost,teamSize,devRate,dateStr,clientName,activeDomain)}>
+              onClick={()=>exportAuditPDF(enriched,migrationScore,pqcReady,total,totalDays,calDays,totalCost,teamSize,devRate,dateStr,clientName,activeDomain,milestones)}>
               {isMobile?"⬡ PDF":"⬡ AUDIT PDF"}
             </button>
           </div>

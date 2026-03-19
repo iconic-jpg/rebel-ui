@@ -87,21 +87,25 @@ function PQCScoreDetail({ score }) {
                         width: `${score.score}%`, background: score.color,
                         transition: "width 0.8s ease",
                         boxShadow: `0 0 6px ${score.color}66`,
-                    } }) })), _jsx("div", { style: { display: "flex", flexDirection: "column", gap: 5 }, children: rows.map(c => (_jsxs("div", { style: { display: "flex", alignItems: "center", gap: 8 }, children: [_jsx("span", { style: {
-                                fontSize: 9, width: 12, textAlign: "center",
+                    } }) })), _jsx("div", { style: { display: "flex", flexDirection: "column", gap: 6 }, children: rows.map(c => (_jsxs("div", { style: {
+                        display: "flex", alignItems: "flex-start", gap: 8,
+                        borderLeft: `2px solid ${c.pass ? "#22c55e" : c.pts > 0 ? "#eab308" : "#ef444433"}`,
+                        paddingLeft: 7,
+                    }, children: [_jsx("span", { style: {
+                                fontSize: 10, width: 12, flexShrink: 0, marginTop: 1,
                                 color: c.pass ? "#22c55e" : c.pts > 0 ? "#eab308" : "#ef4444",
-                            }, children: c.pass ? "✓" : c.pts > 0 ? "~" : "✗" }), _jsx("span", { style: { fontSize: 8, color: "#94a3b8", flex: 1 }, children: c.label }), _jsxs("span", { style: {
-                                fontSize: 8, fontFamily: "'Orbitron',monospace",
-                                color: c.pass ? "#22c55e" : c.pts > 0 ? "#eab308" : "#64748b",
-                            }, children: [c.pts, "/", c.max] })] }, c.label))) }), !score.active && score.score < 100 && (_jsx("div", { style: { marginTop: 8, padding: "5px 8px",
+                            }, children: c.pass ? "✓" : c.pts > 0 ? "~" : "✗" }), _jsxs("div", { style: { flex: 1, minWidth: 0 }, children: [_jsxs("div", { style: { display: "flex", justifyContent: "space-between", marginBottom: 1 }, children: [_jsx("span", { style: { fontSize: 8, color: "#94a3b8", fontWeight: 600 }, children: c.label }), _jsxs("span", { style: {
+                                                fontSize: 8, fontFamily: "'Orbitron',monospace", flexShrink: 0, marginLeft: 8,
+                                                color: c.pass ? "#22c55e" : c.pts > 0 ? "#eab308" : "#475569",
+                                            }, children: [c.pts, "/", c.max] })] }), _jsx("div", { style: { fontSize: 7, color: "#475569" }, children: c.detail })] })] }, c.label))) }), !score.active && (_jsx("div", { style: { marginTop: 8, padding: "5px 8px",
                     background: "rgba(59,130,246,0.05)",
-                    border: "1px solid rgba(59,130,246,0.15)", borderRadius: 3 }, children: _jsx("span", { style: { fontSize: 7, color: "#64748b" }, children: score.score === 0
-                        ? "Cannot begin PQC migration — fix TLS version and cipher suite first."
-                        : score.score < 55
-                            ? "Significant gaps. Upgrade TLS version and key exchange before planning Kyber deployment."
-                            : score.score < 100
-                                ? "Foundation mostly ready. Address remaining gaps then deploy X25519+Kyber768 hybrid."
-                                : "Classical foundation complete. Deploy CRYSTALS-Kyber (FIPS 203) hybrid to go ACTIVE." }) }))] }));
+                    border: "1px solid rgba(59,130,246,0.12)", borderRadius: 3 }, children: _jsx("span", { style: { fontSize: 7, color: "#64748b" }, children: score.score >= 100
+                        ? "Classical foundation complete. Deploy CRYSTALS-Kyber (FIPS 203) hybrid to go ACTIVE."
+                        : score.score >= 70
+                            ? "Address remaining gaps then deploy X25519+Kyber768 hybrid per NIST FIPS 203."
+                            : score.score >= 40
+                                ? "Significant gaps. Upgrade cert key size and enforce AES-256 before planning Kyber deployment."
+                                : "Not migration-ready. Fix TLS version, cipher suite, and certificate first." }) }))] }));
 }
 function CipherBreakdown({ analysis, compact = false, }) {
     const { components: c, findings, pqcImpact: pqc } = analysis;
@@ -148,7 +152,7 @@ function AppCard({ d, compact }) {
     const risk = d.analysis.overallRisk;
     const c = d.analysis.components;
     const tlsNorm = normaliseTLS(d.tls);
-    const pqcScore = pqcReadinessScore(c, d.tls, d.keylen);
+    const pqcScore = pqcReadinessScore(c, d.tls, d.keylen, d.is_wildcard ?? false);
     return (_jsxs("div", { style: { borderBottom: "1px solid rgba(59,130,246,0.05)" }, children: [_jsxs("div", { onClick: () => setOpen(o => !o), style: { padding: "10px 14px", cursor: "pointer",
                     display: "flex", justifyContent: "space-between", alignItems: "center" }, children: [_jsxs("div", { style: { minWidth: 0, flex: 1 }, children: [_jsxs("div", { style: { display: "flex", alignItems: "center", gap: 6, marginBottom: 3 }, children: [_jsx("span", { style: { fontSize: 11, color: T.blue,
                                             overflow: "hidden", textOverflow: "ellipsis",
@@ -373,7 +377,7 @@ export default function CBOMPage() {
                             const risk = d.analysis.overallRisk;
                             const isOpen = expandedRow === i;
                             const tlsNorm = normaliseTLS(d.tls);
-                            const pqcScore = pqcReadinessScore(c, d.tls, d.keylen);
+                            const pqcScore = pqcReadinessScore(c, d.tls, d.keylen, d.is_wildcard ?? false);
                             const keyCol = d.keylen?.startsWith("1024") ? T.red
                                 : d.keylen?.startsWith("2048") ? T.yellow : T.green;
                             const bulkCol = c.bulkCipher.includes("DES") || c.bulkCipher === "RC4-128"
