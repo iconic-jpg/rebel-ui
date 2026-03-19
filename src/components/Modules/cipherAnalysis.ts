@@ -48,8 +48,9 @@ export function normaliseTLS(raw: any): string {
 
 // ── PQC group detector ────────────────────────────────────────────────────────
 // Matches known post-quantum and hybrid key exchange group names
-function isPQCGroup(kxGroup: string): boolean {
-  const g = kxGroup.toLowerCase();
+function isPQCGroup(kxGroup: any): boolean {
+  if (!kxGroup) return false;
+  const g = String(kxGroup).toLowerCase();
   return (
     g.includes("kyber")   ||
     g.includes("mlkem")   ||
@@ -62,8 +63,9 @@ function isPQCGroup(kxGroup: string): boolean {
 
 // ── Named group cleaner ───────────────────────────────────────────────────────
 // Maps raw SSL group names to clean display names
-function cleanKxGroup(kxGroup: string): string {
-  const g = kxGroup.trim();
+function cleanKxGroup(kxGroup: any): string {
+  if (kxGroup === null || kxGroup === undefined) return "";
+  const g = String(kxGroup).trim();
   if (!g || g === "None" || g === "null") return "";
 
   const map: Record<string, string> = {
@@ -128,9 +130,9 @@ export function parseCipher(cipher: any, kxGroup?: string | null): CipherCompone
   if (c.startsWith("TLS_") && !c.includes("WITH")) mac = "HKDF";
 
   // ── FIX 1: Use real kxGroup from backend if provided ─────────────────────
-  if (kxGroup && kxGroup !== "None" && kxGroup !== "null" && kxGroup.trim() !== "") {
+  if (kxGroup && kxGroup !== "None" && kxGroup !== "null" && String(kxGroup).trim() !== "") {
     const cleanGroup = cleanKxGroup(kxGroup);
-    const isHybridPQ = isPQCGroup(kxGroup);
+    const isHybridPQ = isPQCGroup(String(kxGroup));
 
     return {
       keyExchange:    cleanGroup,
