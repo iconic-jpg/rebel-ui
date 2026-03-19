@@ -591,49 +591,42 @@ export function pqcReadinessScore(
     if (m) keyBits = parseInt(m[1], 10);
   }
 
-  // ── Criterion 1 — TLS 1.3 ONLY (25pts) ───────────────────────────────────
-  // Must be TLS 1.3. TLS 1.2 support means fallback is possible — not strict.
-  // We can only observe what was negotiated, not what's disabled server-side.
-  // TLS 1.3 negotiated = 25pts. TLS 1.2 = 0.
+  // ── Criterion 1 — Cert key: RSA-4096 or EC P-384 (60pts) ────────────────
+  // This is the PRIMARY differentiator. Public CDNs use 256-bit ECDSA or
+  // 2048-bit RSA. A bank must use RSA-4096 or EC P-384. Without this,
+  // the site cannot score above 15 regardless of TLS config.
+  const certRSA4096  = keyBits >= 4096;
+  const certECP384   = keyBits === 384;
+  const certRSA2048  = keyBits >= 2048 && keyBits < 4096 && keyBits !== 384;
+  const certPts      = certRSA4096 || certECP384 ? 60 : certRSA2048 ? 5 : 0;
+  const certPass     = certRSA4096 || certECP384;
+
+  // ── Criterion 2 — No wildcard certificate (15pts) ────────────────────────
+  // CDNs always use wildcards. Bank services must use dedicated certs.
+  const noWildPass = !isWildcard;
+  const noWildPts  = noWildPass ? 15 : 0;
+
+  // ── Criterion 3 — AES-256-GCM or ChaCha20 (10pts) ───────────────────────
+  const aes256Pass = bulk === "AES-256-GCM" || bulk === "ChaCha20-Poly1305";
+  const aes256Pts  = aes256Pass ? 10 : 0;
+
+  // ── Criterion 4 — TLS 1.3 negotiated (10pts) ─────────────────────────────
   const tls13Pass = tls === "1.3";
 
-  // ── Criterion 2 — Modern named KX group (20pts) ───────────────────────────
-  // X25519 or P-384 only. P-256 is acceptable but X25519 preferred.
-  // P-521, X448, DHE = 0. Generic "ECDHE" string (TLS 1.2 parsed) = 0.
+  // ── Criterion 5 — X25519 or P-384 KX (5pts) ──────────────────────────────
   const kxStrong  = kx === "x25519" || kx === "p-384";
   const kxPartial = kx === "p-256" || kx === "p-521";
-  const kxPts     = kxStrong ? 20 : kxPartial ? 10 : 0;
+  const kxPts     = kxStrong ? 5 : kxPartial ? 2 : 0;
   const kxPass    = kxStrong;
 
-  // ── Criterion 3 — AES-256-GCM or ChaCha20 only (20pts) ───────────────────
-  // AES-128-GCM = 0. Banks must enforce 256-bit symmetric crypto.
-  // No partial credit — 128-bit symmetric is a policy failure for a bank.
-  const aes256Pass = bulk === "AES-256-GCM" || bulk === "ChaCha20-Poly1305";
-  const aes256Pts  = aes256Pass ? 20 : 0;
-
-  // ── Criterion 4 — Cert key ≥ 4096-bit RSA or ≥ 384-bit ECDSA (20pts) ────
-  // 2048-bit RSA = 5pts partial. <2048 = 0.
-  // Most public CDN certs are 2048-bit RSA — banks should use 4096 or EC P-384.
-  const cert4096   = keyBits >= 4096;
-  const certEC384  = keyBits >= 384 && keyBits < 512;  // EC P-384 cert
-  const cert2048   = keyBits >= 2048 && !cert4096 && !certEC384;
-  const certPts    = cert4096 || certEC384 ? 20 : cert2048 ? 5 : 0;
-  const certPass   = cert4096 || certEC384;
-
-  // ── Criterion 5 — No wildcard certificate (10pts) ────────────────────────
-  // CDNs and public sites use wildcards. Bank internal services should not.
-  const noWildPass = !isWildcard;
-  const noWildPts  = noWildPass ? 10 : 0;
-
-  // ── Criterion 6 — No CBC mode (5pts) ─────────────────────────────────────
-  // Minor hygiene check. Should be a given but included for completeness.
+  // ── Criterion 6 — No CBC mode (0pts — hygiene only, shown for info) ───────
   const noCBCPass = !bulk.includes("CBC");
-  const noCBCPts  = noCBCPass ? 5 : 0;
+  const noCBCPts  = 0;  // doesn't contribute to score, shown as ✓/✗ info only
 
   // ── Total ─────────────────────────────────────────────────────────────────
-  const score = Math.min(100,
-    (tls13Pass ? 25 : 0) + kxPts + aes256Pts + certPts + noWildPts + noCBCPts
-  );
+  // Public CDN with 256-bit cert + wildcard:  0 + 0 + 10 + 10 + 5 = 15 max
+  // Bank asset with 4096-bit cert, no wild:  60 + 15 + 10 + 10 + 5 = 100
+  const score = Math.min(100, certPts + noWildPts + aes256Pts + (tls13Pass ? 10 : 0) + kxPts + noCBCPts);
 
   // ── Label + colour ────────────────────────────────────────────────────────
   const label =
@@ -653,12 +646,12 @@ export function pqcReadinessScore(
   return {
     score, label, color, active,
     criteria: {
-      tls13Only:   { pass: tls13Pass,  pts: tls13Pass ? 25 : 0, max: 25, label: "TLS 1.3 negotiated",        detail: tls13Pass  ? `TLS ${tls} confirmed`                : `TLS ${tls || "unknown"} — must be 1.3`           },
-      strongKX:    { pass: kxPass,     pts: kxPts,              max: 20, label: "X25519 or P-384 KX",        detail: kxStrong   ? `${components.keyExchange} confirmed`  : kxPartial ? `${components.keyExchange} — prefer X25519` : `${components.keyExchange || "unknown"} — not suitable` },
-      aes256Only:  { pass: aes256Pass, pts: aes256Pts,          max: 20, label: "AES-256-GCM / ChaCha20",    detail: aes256Pass ? `${bulk} — compliant`                  : `${bulk || "unknown"} — banks must enforce 256-bit`   },
-      certKey4096: { pass: certPass,   pts: certPts,            max: 20, label: "Cert key ≥4096-bit RSA",    detail: cert4096   ? `${keyBits}-bit — compliant`            : certEC384 ? `EC P-384 — compliant`                   : `${keyBits || "?"}–bit — upgrade to 4096-bit RSA or EC P-384` },
-      noWildcard:  { pass: noWildPass, pts: noWildPts,          max: 10, label: "No wildcard certificate",   detail: noWildPass ? "Dedicated cert — compliant"            : "Wildcard cert — not acceptable for bank services"    },
-      noCBC:       { pass: noCBCPass,  pts: noCBCPts,           max:  5, label: "No CBC mode",               detail: noCBCPass  ? "No CBC — compliant"                    : `${bulk} — disable CBC cipher suites`                 },
+      certKey4096: { pass: certPass,   pts: certPts,            max: 60, label: "Cert: RSA-4096 or EC P-384", detail: certPass    ? `${keyBits}-bit — compliant`                                                        : certRSA2048 ? `${keyBits}-bit RSA — upgrade to RSA-4096 or EC P-384 (+55pts)` : `${keyBits || "?"}–bit — not acceptable for bank infrastructure`   },
+      noWildcard:  { pass: noWildPass, pts: noWildPts,          max: 15, label: "No wildcard certificate",    detail: noWildPass  ? "Dedicated cert — compliant"                                                        : "Wildcard cert — bank services must use dedicated certificates"                                                                            },
+      aes256Only:  { pass: aes256Pass, pts: aes256Pts,          max: 10, label: "AES-256-GCM / ChaCha20",    detail: aes256Pass  ? `${bulk} — compliant`                                                                : `${bulk || "unknown"} — banks must enforce 256-bit symmetric`                                                                              },
+      tls13Only:   { pass: tls13Pass,  pts: tls13Pass ? 10 : 0, max: 10, label: "TLS 1.3 negotiated",        detail: tls13Pass   ? `TLS ${tls} confirmed`                                                               : `TLS ${tls || "unknown"} — must be 1.3`                                                                                                    },
+      strongKX:    { pass: kxPass,     pts: kxPts,              max:  5, label: "X25519 or P-384 KX",        detail: kxStrong    ? `${components.keyExchange} — compliant`                                              : kxPartial ? `${components.keyExchange} — prefer X25519/P-384` : `${components.keyExchange || "unknown"} — not PQC-migration path`         },
+      noCBC:       { pass: noCBCPass,  pts: noCBCPts,           max:  0, label: "No CBC mode (hygiene)",     detail: noCBCPass   ? "No CBC — compliant"                                                                 : `${bulk} — disable CBC cipher suites immediately`                                                                                          },
     },
   };
 }
