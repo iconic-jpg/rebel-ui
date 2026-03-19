@@ -8,7 +8,7 @@ import {
   parseCipher, fullAnalysis,
   normaliseTLS,
   severityColor, severityVariant,
-} from "./cipherAnalysis";
+} from "./cipherAnalysis.js";
 
 import type { CipherAnalysis, CipherFinding } from "./cipherAnalysis";
 
