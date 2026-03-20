@@ -92,7 +92,7 @@ function exportAuditPDF(
   const pt = (a: number) => ({ x: +(cx + r * Math.cos(a)).toFixed(3), y: +(cy + r * Math.sin(a)).toFixed(3) });
   const tS = pt(Math.PI), tE = pt(0);
   const vE = pt(Math.PI - Math.PI * pct);
-  const laf = pct > 0.5 ? 1 : 0;
+  const laf = pct > 0.5 ? 0 : 1;
   const gaugeSVG = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
     <path d="M ${tS.x} ${tS.y} A ${r} ${r} 0 1 1 ${tE.x} ${tE.y}" fill="none" stroke="#e5e7eb" stroke-width="${sw}" stroke-linecap="round"/>
     <path d="M ${tS.x} ${tS.y} A ${r} ${r} 0 ${laf} 1 ${vE.x} ${vE.y}" fill="none" stroke="${scoreColor}" stroke-width="${sw}" stroke-linecap="round"/>
