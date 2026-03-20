@@ -86,20 +86,22 @@ function exportAuditPDF(
   const displayName = clientName.trim()||(clientDomain?normaliseDomain(clientDomain):"All Assets");
 
 
-  // Gauge SVG — clean semicircle, left=0%, right=100%
-  const pct = Math.min(0.999, Math.max(0.001, migrationScore / 100));
-  const W = 200, H = 116, cx = 100, cy = 104, r = 72, sw = 13;
-  const pt = (a: number) => ({ x: +(cx + r * Math.cos(a)).toFixed(3), y: +(cy + r * Math.sin(a)).toFixed(3) });
-  const tS = pt(Math.PI), tE = pt(0);
-  const vE = pt(Math.PI - Math.PI * pct);
+const pct = Math.min(0.999, Math.max(0.001, migrationScore / 100));
+  const W = 200, H = 120, cx = 100, cy = 105, r = 72, sw = 13;
+  // track: left end to right end, clockwise OVER the top (large-arc=1, sweep=1)
+  const x0 = cx - r, x1 = cx + r, y0 = cy;
+  // value end point: starts at left, sweeps clockwise by pct*180°
+  const vAngle = Math.PI - Math.PI * pct;  // 0%=left(π), 100%=right(0)
+  const vx = +(cx + r * Math.cos(vAngle)).toFixed(3);
+  const vy = +(cy + r * Math.sin(vAngle)).toFixed(3);
   const laf = pct > 0.5 ? 1 : 0;
   const gaugeSVG = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
-    <path d="M ${tS.x} ${tS.y} A ${r} ${r} 0 1 1 ${tE.x} ${tE.y}" fill="none" stroke="#e5e7eb" stroke-width="${sw}" stroke-linecap="round"/>
-    <path d="M ${tS.x} ${tS.y} A ${r} ${r} 0 ${laf} 0 ${vE.x} ${vE.y}" fill="none" stroke="${scoreColor}" stroke-width="${sw}" stroke-linecap="round"/>
-    <text x="${cx}" y="${cy - 10}" text-anchor="middle" font-family="Arial" font-size="30" font-weight="900" fill="${scoreColor}">${migrationScore}</text>
-    <text x="${cx}" y="${cy + 10}" text-anchor="middle" font-family="Arial" font-size="8" fill="#6b7280" letter-spacing="2">${scoreLabel}</text>
-    <text x="22" y="${cy + 2}" text-anchor="middle" font-family="Arial" font-size="8" fill="#9ca3af">0</text>
-    <text x="${W - 22}" y="${cy + 2}" text-anchor="middle" font-family="Arial" font-size="8" fill="#9ca3af">100</text>
+    <path d="M ${x0} ${y0} A ${r} ${r} 0 1 1 ${x1} ${y0}" fill="none" stroke="#e5e7eb" stroke-width="${sw}" stroke-linecap="round"/>
+    <path d="M ${x0} ${y0} A ${r} ${r} 0 ${laf} 1 ${vx} ${vy}" fill="none" stroke="${scoreColor}" stroke-width="${sw}" stroke-linecap="round"/>
+    <text x="${cx}" y="${cy - 8}" text-anchor="middle" font-family="Arial" font-size="30" font-weight="900" fill="${scoreColor}">${migrationScore}</text>
+    <text x="${cx}" y="${cy + 11}" text-anchor="middle" font-family="Arial" font-size="8" fill="#6b7280" letter-spacing="2">${scoreLabel}</text>
+    <text x="20" y="${cy + 2}" text-anchor="middle" font-family="Arial" font-size="8" fill="#9ca3af">0</text>
+    <text x="${W-20}" y="${cy + 2}" text-anchor="middle" font-family="Arial" font-size="8" fill="#9ca3af">100</text>
   </svg>`;
 
   // Score distribution — milestone pass/fail for PDF
