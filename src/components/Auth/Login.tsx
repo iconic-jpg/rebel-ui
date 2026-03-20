@@ -96,16 +96,16 @@ declare global {
 }
 
 export default function Login() {
-  const navigate                        = useNavigate();
-  const [email, setEmail]               = useState<string>("");
-  const [password, setPassword]         = useState<string>("");
-  const [error, setError]               = useState<string>("");
-  const [loading, setLoading]           = useState<boolean>(false);
+  const navigate                          = useNavigate();
+  const [email, setEmail]                 = useState<string>("");
+  const [password, setPassword]           = useState<string>("");
+  const [error, setError]                 = useState<string>("");
+  const [loading, setLoading]             = useState<boolean>(false);
   const [googleLoading, setGoogleLoading] = useState<boolean>(false);
   const [checkingSession, setCheckingSession] = useState<boolean>(true);
-  const googleInitialized               = useRef(false);
+  const googleInitialized                 = useRef(false);
 
-  // ── Auto-login from refresh token ──
+  // ── Auto-login from refresh token ─────────────────────────────────────────
   useEffect(() => {
     const refresh = localStorage.getItem("refresh");
     if (!refresh) { setCheckingSession(false); return; }
@@ -127,7 +127,7 @@ export default function Login() {
       });
   }, [navigate]);
 
-  // ── Google response handler ──
+  // ── Google response handler ───────────────────────────────────────────────
   const handleGoogleResponse = async (response: { credential: string }) => {
     setGoogleLoading(true);
     setError("");
@@ -149,11 +149,12 @@ export default function Login() {
     }
   };
 
-  // ── Google SDK init ──
+  // ── Google SDK init ───────────────────────────────────────────────────────
   useEffect(() => {
     if (googleInitialized.current) return;
 
     const initGoogle = () => {
+      if (!import.meta.env.VITE_GOOGLE_CLIENT_ID) return; // skip if not configured
       window.google?.accounts.id.initialize({
         client_id: import.meta.env.VITE_GOOGLE_CLIENT_ID,
         callback: handleGoogleResponse,
@@ -167,19 +168,23 @@ export default function Login() {
     const existing = document.getElementById("gsi-script");
     if (existing) { initGoogle(); return; }
 
-    const script = document.createElement("script");
-    script.id    = "gsi-script";
-    script.src   = "https://accounts.google.com/gsi/client";
-    script.async = true;
-    script.defer = true;
-    script.onload = initGoogle;
+    const script    = document.createElement("script");
+    script.id       = "gsi-script";
+    script.src      = "https://accounts.google.com/gsi/client";
+    script.async    = true;
+    script.defer    = true;
+    script.onload   = initGoogle;
     document.head.appendChild(script);
 
     return () => { window.google?.accounts.id.cancel(); };
   }, []);
 
-  // ── Trigger Google One Tap ──
+  // ── Trigger Google One Tap ────────────────────────────────────────────────
   const triggerGoogle = () => {
+    if (!import.meta.env.VITE_GOOGLE_CLIENT_ID) {
+      setError("Google login is not configured.");
+      return;
+    }
     if (!googleInitialized.current) {
       setError("Google not loaded yet, please wait...");
       return;
@@ -191,20 +196,26 @@ export default function Login() {
     });
   };
 
-  // ── Email/password login ──
+  // ── Email / password login ────────────────────────────────────────────────
+  // Django SimpleJWT expects { username, password } — we use email as username
   const handleLogin = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    setError(""); setLoading(true);
+    setError("");
+    setLoading(true);
     try {
-      const response = await fetch(`${API}/api/login`, {
+      const response = await fetch(`${API}/api/token/`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ username: email, password }),
       });
       const data = await response.json();
-      if (!response.ok) { setError(data.detail || data.error || "Invalid credentials"); return; }
-      localStorage.setItem("access", data.access);
-      if (data.refresh) localStorage.setItem("refresh", data.refresh);
+      if (!response.ok) {
+        // SimpleJWT returns { detail: "No active account found..." } on failure
+        setError(data.detail || data.error || "Invalid credentials");
+        return;
+      }
+      localStorage.setItem("access",  data.access);
+      localStorage.setItem("refresh", data.refresh);
       navigate("/");
     } catch {
       setError("Unable to connect to server.");

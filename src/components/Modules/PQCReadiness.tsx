@@ -469,9 +469,56 @@ export default function PQCReadinessPage() {
   const bp=useBreakpoint(), isMobile=bp==="mobile", isTablet=bp==="tablet", isDesktop=bp==="desktop";
 
   useEffect(() => {
-    fetch(`${API}/cbom`).then(r=>r.json()).then(d=>{ if(d.apps?.length)setCbomData(d.apps); }).catch(()=>{});
-    fetch(`${API}/assets`).then(r=>r.json()).then(d=>{ if(d.assets?.length)setAssets(d.assets); }).catch(()=>{});
+    // Same merge as CBOMPage — registered assets enrich CBOM entries,
+    // registry-only assets appended so PQC scoring sees all assets
+    Promise.all([
+      fetch(`${API}/cbom`).then(r => r.json()).catch(() => ({})),
+      fetch(`${API}/assets`).then(r => r.json()).catch(() => ({ assets: [] })),
+    ]).then(([cbom, assetsData]) => {
+      const registeredMap: Record<string, any> = {};
+      (assetsData?.assets ?? []).forEach((a: any) => {
+        if (a.name) registeredMap[a.name] = a;
+      });
+
+      const cbomApps: any[] = (cbom.apps ?? []).map((app: any) => {
+        const reg = registeredMap[app.app];
+        if (!reg) return app;
+        return {
+          ...app,
+          is_wildcard:        reg.is_wildcard        ?? app.is_wildcard,
+          criticality:        reg.criticality,
+          owner:              reg.owner,
+          compliance_scope:   reg.compliance_scope,
+          financial_exposure: reg.financial_exposure,
+        };
+      });
+
+      const cbomDomains = new Set(cbomApps.map((a: any) => a.app));
+      const registeredOnly = (assetsData?.assets ?? [])
+        .filter((a: any) => a.id && !cbomDomains.has(a.name))
+        .map((a: any) => ({
+          app:                a.name,
+          keylen:             a.keylen             || "—",
+          cipher:             a.cipher             || "—",
+          tls:                a.tls                || "—",
+          ca:                 a.ca                 || "—",
+          status:             a.risk === "weak" ? "weak" : "ok",
+          pqc:                false,
+          pqc_support:        "none",
+          key_exchange_group: a.key_exchange_group || null,
+          is_wildcard:        a.is_wildcard        ?? null,
+          criticality:        a.criticality,
+          owner:              a.owner,
+          compliance_scope:   a.compliance_scope,
+          financial_exposure: a.financial_exposure,
+        }));
+
+      const merged = [...cbomApps, ...registeredOnly];
+      if (merged.length) setCbomData(merged);
+      if (assetsData?.assets?.length) setAssets(assetsData.assets);
+    });
   }, []);
+
 
   const displayCbom   = cbomData.length ? cbomData   : MOCK_CBOM;
   const displayAssets = assets.length   ? assets     : MOCK_ASSETS;
