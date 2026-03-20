@@ -86,22 +86,17 @@ function exportAuditPDF(
   const displayName = clientName.trim()||(clientDomain?normaliseDomain(clientDomain):"All Assets");
 
 
-const pct = Math.min(0.999, Math.max(0.001, migrationScore / 100));
-  const W = 200, H = 120, cx = 100, cy = 105, r = 72, sw = 13;
-  // track: left end to right end, clockwise OVER the top (large-arc=1, sweep=1)
-  const x0 = cx - r, x1 = cx + r, y0 = cy;
-  // value end point: starts at left, sweeps clockwise by pct*180°
-  const vAngle = Math.PI - Math.PI * pct;  // 0%=left(π), 100%=right(0)
-  const vx = +(cx + r * Math.cos(vAngle)).toFixed(3);
-  const vy = +(cy + r * Math.sin(vAngle)).toFixed(3);
-  const laf = pct > 0.5 ? 1 : 0;
-  const gaugeSVG = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
-    <path d="M ${x0} ${y0} A ${r} ${r} 0 1 1 ${x1} ${y0}" fill="none" stroke="#e5e7eb" stroke-width="${sw}" stroke-linecap="round"/>
-    <path d="M ${x0} ${y0} A ${r} ${r} 0 ${laf} 1 ${vx} ${vy}" fill="none" stroke="${scoreColor}" stroke-width="${sw}" stroke-linecap="round"/>
-    <text x="${cx}" y="${cy - 8}" text-anchor="middle" font-family="Arial" font-size="30" font-weight="900" fill="${scoreColor}">${migrationScore}</text>
-    <text x="${cx}" y="${cy + 11}" text-anchor="middle" font-family="Arial" font-size="8" fill="#6b7280" letter-spacing="2">${scoreLabel}</text>
-    <text x="20" y="${cy + 2}" text-anchor="middle" font-family="Arial" font-size="8" fill="#9ca3af">0</text>
-    <text x="${W-20}" y="${cy + 2}" text-anchor="middle" font-family="Arial" font-size="8" fill="#9ca3af">100</text>
+// Gauge SVG — clamp pct to avoid degenerate arc at 0% and 100%
+  const pct = Math.min(0.999, Math.max(0.001, migrationScore / 100));
+  const gr=54, gcx=70, gcy=76;
+  const gx1=gcx+gr*Math.cos(Math.PI), gy1=gcy+gr*Math.sin(Math.PI);
+  const gx2=gcx+gr*Math.cos(Math.PI+Math.PI*pct), gy2=gcy+gr*Math.sin(Math.PI+Math.PI*pct);
+  const glf=pct>0.5?1:0;
+  const gaugeSVG=`<svg width="140" height="84" viewBox="0 0 140 84" xmlns="http://www.w3.org/2000/svg">
+    <path d="M ${gcx-gr} ${gcy} A ${gr} ${gr} 0 0 1 ${gcx+gr} ${gcy}" fill="none" stroke="#e5e7eb" stroke-width="10" stroke-linecap="round"/>
+    <path d="M ${gx1.toFixed(2)} ${gy1.toFixed(2)} A ${gr} ${gr} 0 ${glf} 1 ${gx2.toFixed(2)} ${gy2.toFixed(2)}" fill="none" stroke="${scoreColor}" stroke-width="10" stroke-linecap="round"/>
+    <text x="${gcx}" y="${gcy-5}" text-anchor="middle" font-family="Arial" font-size="22" font-weight="bold" fill="${scoreColor}">${migrationScore}</text>
+    <text x="${gcx}" y="${gcy+13}" text-anchor="middle" font-family="Arial" font-size="7" fill="#6b7280" letter-spacing="1">${scoreLabel}</text>
   </svg>`;
 
   // Score distribution — milestone pass/fail for PDF
