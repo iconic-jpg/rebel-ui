@@ -355,36 +355,87 @@ export default function CBOMPage() {
   const [expandedRow, setExpandedRow] = useState<number | null>(null);
 
   useEffect(() => {
-    fetch(`${API}/cbom`)
-      .then(r => r.json())
-      .then(d => {
-        if (d.apps?.length) {
-          setCbomData(d.apps);
-          setStats(d.stats || stats);
-          if (d.cipher_counts?.length) setCipherData(
-            d.cipher_counts.map((c: any, i: number) => ({
-              name: c.name, count: c.count,
-              color: [T.green, T.blue, T.cyan, T.yellow, T.red][i] || T.text3,
-            }))
-          );
-          if (d.ca_counts?.length) setCaData(
-            d.ca_counts.map((c: any, i: number) => ({
-              label: c.label, val: c.val,
-              color: [T.blue, T.cyan, T.green, T.yellow][i] || T.text3,
-            }))
-          );
-          if (d.proto_counts?.length) setProtoData(
-            d.proto_counts.map((p: any) => ({
-              label: p.label, val: p.val,
-              color: p.label.includes("1.3") ? T.green
-                   : p.label.includes("1.2") ? T.blue
-                   : p.label.includes("1.1") ? T.orange : T.red,
-            }))
-          );
-          setKeyData(d.key_counts || {});
-        }
-      })
-      .catch(() => {});
+    // Fetch both /cbom (passive scan) and /assets (registry)
+    // Registered assets enrich CBOM entries with business context,
+    // and registered-only assets (manually added) are appended.
+    Promise.all([
+      fetch(`${API}/cbom`).then(r => r.json()).catch(() => ({})),
+      fetch(`${API}/assets`).then(r => r.json()).catch(() => ({ assets: [] })),
+    ]).then(([d, assetsData]) => {
+      // Registry map keyed by domain
+      const registeredMap: Record<string, any> = {};
+      (assetsData?.assets ?? []).forEach((a: any) => {
+        if (a.name) registeredMap[a.name] = a;
+      });
+
+      // Enrich CBOM apps with registry context where domain matches
+      const cbomApps: any[] = (d.apps ?? []).map((app: any) => {
+        const reg = registeredMap[app.app];
+        if (!reg) return app;
+        return {
+          ...app,
+          is_wildcard:        reg.last_is_wildcard  ?? app.is_wildcard,
+          criticality:        reg.criticality,
+          owner:              reg.owner,
+          owner_email:        reg.owner_email,
+          business_unit:      reg.business_unit,
+          financial_exposure: reg.financial_exposure,
+          compliance_scope:   reg.compliance_scope,
+        };
+      });
+
+      // Append registered assets not in CBOM scan (manually added, have scan data)
+      const cbomDomains = new Set(cbomApps.map((a: any) => a.app));
+      const registeredOnly = (assetsData?.assets ?? [])
+        .filter((a: any) => a.id && !cbomDomains.has(a.name) && a.last_tls)
+        .map((a: any) => ({
+          app:                a.name,
+          keylen:             a.last_keylen    || "—",
+          cipher:             a.last_cipher    || "—",
+          tls:                a.last_tls       || "—",
+          ca:                 a.last_ca        || "—",
+          status:             a.last_risk === "weak" ? "weak" : "ok",
+          pqc:                false,
+          pqc_support:        "none",
+          key_exchange_group: a.last_kx_group  || null,
+          is_wildcard:        a.last_is_wildcard,
+          criticality:        a.criticality,
+          owner:              a.owner,
+          owner_email:        a.owner_email,
+          business_unit:      a.business_unit,
+          financial_exposure: a.financial_exposure,
+          compliance_scope:   a.compliance_scope,
+        }));
+
+      const merged = [...cbomApps, ...registeredOnly];
+      if (merged.length) {
+        setCbomData(merged);
+        setStats(d.stats || stats);
+      }
+
+      // Charts use /cbom aggregate counts only
+      if (d.cipher_counts?.length) setCipherData(
+        d.cipher_counts.map((c: any, i: number) => ({
+          name: c.name, count: c.count,
+          color: [T.green, T.blue, T.cyan, T.yellow, T.red][i] || T.text3,
+        }))
+      );
+      if (d.ca_counts?.length) setCaData(
+        d.ca_counts.map((c: any, i: number) => ({
+          label: c.label, val: c.val,
+          color: [T.blue, T.cyan, T.green, T.yellow][i] || T.text3,
+        }))
+      );
+      if (d.proto_counts?.length) setProtoData(
+        d.proto_counts.map((p: any) => ({
+          label: p.label, val: p.val,
+          color: p.label.includes("1.3") ? T.green
+               : p.label.includes("1.2") ? T.blue
+               : p.label.includes("1.1") ? T.orange : T.red,
+        }))
+      );
+      setKeyData(d.key_counts || {});
+    });
   }, []);
 
   useEffect(() => { drawKeyLength(); }, [keyData, bp]);
