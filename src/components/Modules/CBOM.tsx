@@ -387,18 +387,23 @@ export default function CBOMPage() {
       // Append registered assets not in CBOM scan (manually added, have scan data)
       const cbomDomains = new Set(cbomApps.map((a: any) => a.app));
       const registeredOnly = (assetsData?.assets ?? [])
-        .filter((a: any) => a.id && !cbomDomains.has(a.name) && a.last_tls)
+        // Include all registered assets not already in CBOM
+        // Don't gate on last_tls — show even if not yet scanned
+        .filter((a: any) => a.id && !cbomDomains.has(a.name))
         .map((a: any) => ({
           app:                a.name,
-          keylen:             a.last_keylen    || "—",
-          cipher:             a.last_cipher    || "—",
-          tls:                a.last_tls       || "—",
-          ca:                 a.last_ca        || "—",
-          status:             a.last_risk === "weak" ? "weak" : "ok",
+          // /assets returns live scan fields directly (tls, keylen, cipher, ca)
+          // fall back to "—" for assets not yet scanned
+          keylen:             a.keylen             || "—",
+          cipher:             a.cipher             || "—",
+          tls:                a.tls                || "—",
+          ca:                 a.ca                 || "—",
+          status:             a.risk === "weak" ? "weak" : "ok",
           pqc:                false,
           pqc_support:        "none",
-          key_exchange_group: a.last_kx_group  || null,
-          is_wildcard:        a.last_is_wildcard,
+          key_exchange_group: a.key_exchange_group || null,
+          is_wildcard:        a.is_wildcard        ?? null,
+          // business context from registry
           criticality:        a.criticality,
           owner:              a.owner,
           owner_email:        a.owner_email,
