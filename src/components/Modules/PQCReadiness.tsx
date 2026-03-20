@@ -86,16 +86,20 @@ function exportAuditPDF(
   const displayName = clientName.trim()||(clientDomain?normaliseDomain(clientDomain):"All Assets");
 
   // Gauge SVG — clamp pct to avoid degenerate arc at 0% and 100%
+  // Gauge SVG — clean semicircle, left=0%, right=100%
   const pct = Math.min(0.999, Math.max(0.001, migrationScore / 100));
-  const gr=54, gcx=70, gcy=76;
-  const gx1=gcx+gr*Math.cos(Math.PI), gy1=gcy+gr*Math.sin(Math.PI);
-  const gx2=gcx+gr*Math.cos(Math.PI+Math.PI*pct), gy2=gcy+gr*Math.sin(Math.PI+Math.PI*pct);
-  const glf=pct>0.5?1:0;
-  const gaugeSVG=`<svg width="140" height="84" viewBox="0 0 140 84" xmlns="http://www.w3.org/2000/svg">
-    <path d="M ${gcx-gr} ${gcy} A ${gr} ${gr} 0 0 1 ${gcx+gr} ${gcy}" fill="none" stroke="#e5e7eb" stroke-width="10" stroke-linecap="round"/>
-    <path d="M ${gx1.toFixed(2)} ${gy1.toFixed(2)} A ${gr} ${gr} 0 ${glf} 1 ${gx2.toFixed(2)} ${gy2.toFixed(2)}" fill="none" stroke="${scoreColor}" stroke-width="10" stroke-linecap="round"/>
-    <text x="${gcx}" y="${gcy-5}" text-anchor="middle" font-family="Arial" font-size="22" font-weight="bold" fill="${scoreColor}">${migrationScore}</text>
-    <text x="${gcx}" y="${gcy+13}" text-anchor="middle" font-family="Arial" font-size="7" fill="#6b7280" letter-spacing="1">${scoreLabel}</text>
+  const W = 200, H = 116, cx = 100, cy = 104, r = 72, sw = 13;
+  const pt = (a: number) => ({ x: +(cx + r * Math.cos(a)).toFixed(3), y: +(cy + r * Math.sin(a)).toFixed(3) });
+  const tS = pt(Math.PI), tE = pt(0);
+  const vE = pt(Math.PI - Math.PI * pct);
+  const laf = pct > 0.5 ? 1 : 0;
+  const gaugeSVG = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
+    <path d="M ${tS.x} ${tS.y} A ${r} ${r} 0 1 1 ${tE.x} ${tE.y}" fill="none" stroke="#e5e7eb" stroke-width="${sw}" stroke-linecap="round"/>
+    <path d="M ${tS.x} ${tS.y} A ${r} ${r} 0 ${laf} 1 ${vE.x} ${vE.y}" fill="none" stroke="${scoreColor}" stroke-width="${sw}" stroke-linecap="round"/>
+    <text x="${cx}" y="${cy - 10}" text-anchor="middle" font-family="Arial" font-size="30" font-weight="900" fill="${scoreColor}">${migrationScore}</text>
+    <text x="${cx}" y="${cy + 10}" text-anchor="middle" font-family="Arial" font-size="8" fill="#6b7280" letter-spacing="2">${scoreLabel}</text>
+    <text x="22" y="${cy + 2}" text-anchor="middle" font-family="Arial" font-size="8" fill="#9ca3af">0</text>
+    <text x="${W - 22}" y="${cy + 2}" text-anchor="middle" font-family="Arial" font-size="8" fill="#9ca3af">100</text>
   </svg>`;
 
   // Score distribution — milestone pass/fail for PDF
