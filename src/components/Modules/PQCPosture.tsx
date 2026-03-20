@@ -61,10 +61,103 @@ export default function PQCPosturePage() {
   const mobile = useMobile();
 
   useEffect(() => {
-    fetch(`${API}/pqc`)
-      .then(r => r.json())
-      .then(d => { if (d.assets?.length) { setAssets(d.assets); setStats(d.stats); } })
-      .catch(() => {});
+    // Same hybrid fetch as CBOMPage and PQCReadinessPage
+    Promise.all([
+      fetch(`${API}/cbom`).then(r => r.json()).catch(() => ({})),
+      fetch(`${API}/assets`).then(r => r.json()).catch(() => ({ assets: [] })),
+    ]).then(([cbom, assetsData]) => {
+      // Registry map keyed by domain
+      const registeredMap: Record<string, any> = {};
+      (assetsData?.assets ?? []).forEach((a: any) => {
+        if (a.name) registeredMap[a.name] = a;
+      });
+
+      // Enrich CBOM apps with registry context
+      const cbomApps: any[] = (cbom.apps ?? []).map((app: any) => {
+        const reg = registeredMap[app.app];
+        if (!reg) return app;
+        return {
+          ...app,
+          is_wildcard:        reg.is_wildcard        ?? app.is_wildcard,
+          criticality:        reg.criticality,
+          owner:              reg.owner,
+          compliance_scope:   reg.compliance_scope,
+          financial_exposure: reg.financial_exposure,
+        };
+      });
+
+      // Append registry assets not in CBOM
+      const cbomDomains = new Set(cbomApps.map((a: any) => a.app));
+      const registeredOnly = (assetsData?.assets ?? [])
+        .filter((a: any) => a.id && !cbomDomains.has(a.name))
+        .map((a: any) => ({
+          app:                a.name,
+          keylen:             a.keylen             || "—",
+          cipher:             a.cipher             || "—",
+          tls:                a.tls                || "—",
+          ca:                 a.ca                 || "—",
+          status:             a.risk === "weak" ? "weak" : "ok",
+          pqc:                false,
+          pqc_support:        "none",
+          key_exchange_group: a.key_exchange_group || null,
+          is_wildcard:        a.is_wildcard        ?? null,
+          criticality:        a.criticality,
+          owner:              a.owner,
+          compliance_scope:   a.compliance_scope,
+          financial_exposure: a.financial_exposure,
+        }));
+
+      const merged = [...cbomApps, ...registeredOnly];
+
+      if (merged.length) {
+        // Convert merged CBOM shape → PQC posture asset shape
+        const pqcAssets = merged.map((a: any) => {
+          const score = (() => {
+            let s = 500;
+            const tls = (a.tls || "").replace(/^TLSv?/i, "");
+            if (tls === "1.3")        s += 200;
+            else if (tls === "1.2")   s += 100;
+            else if (tls === "1.1")   s -= 100;
+            else if (tls === "1.0")   s -= 200;
+            const bits = parseInt(String(a.keylen || "0").match(/(\d+)/)?.[1] ?? "0", 10);
+            if (bits >= 4096)         s += 200;
+            else if (bits >= 2048)    s += 100;
+            else if (bits === 1024)   s -= 150;
+            else if (bits > 0)        s -= 200;
+            if (a.pqc)                s += 100;
+            return Math.max(0, Math.min(1000, s));
+          })();
+          const status = score >= 700 ? "Elite" : score >= 400 ? "Standard" : score >= 200 ? "Legacy" : "Critical";
+          return {
+            name:   a.app,
+            ip:     a.ip || "—",
+            tls:    (a.tls || "—").replace(/^TLSv?/i, ""),
+            pqc:    !!a.pqc,
+            score,
+            status,
+            owner:  a.owner || a.ca || "—",
+          };
+        });
+
+        setAssets(pqcAssets);
+
+        const total    = pqcAssets.length;
+        const elite    = pqcAssets.filter(a => a.status === "Elite").length;
+        const standard = pqcAssets.filter(a => a.status === "Standard").length;
+        const legacy   = pqcAssets.filter(a => a.status === "Legacy").length;
+        const critical = pqcAssets.filter(a => a.status === "Critical").length;
+        const pqc_ready= pqcAssets.filter(a => a.pqc).length;
+        const avg_score= total ? Math.round(pqcAssets.reduce((s, a) => s + a.score, 0) / total) : 0;
+        setStats({
+          avg_score,  total,
+          elite,      standard,   legacy,   critical,   pqc_ready,
+          elite_pct:    Math.round(elite    / Math.max(total, 1) * 100),
+          standard_pct: Math.round(standard / Math.max(total, 1) * 100),
+          legacy_pct:   Math.round(legacy   / Math.max(total, 1) * 100),
+          critical_pct: Math.round(critical / Math.max(total, 1) * 100),
+        });
+      }
+    });
   }, []);
 
   const scoreColor = (s: number) =>
@@ -85,7 +178,6 @@ export default function PQCPosturePage() {
           display:"flex", gap: mobile ? 14 : 24,
           alignItems:"center", flexWrap:"wrap" }}>
 
-          {/* Score + SVG side by side on mobile */}
           <div style={{ display:"flex", gap:14, alignItems:"center",
             flex: mobile ? "1 1 100%" : "unset" }}>
             <div style={{ flex:1 }}>
@@ -131,7 +223,6 @@ export default function PQCPosturePage() {
             </svg>
           </div>
 
-          {/* Progress bars */}
           <div style={{ flex:1, minWidth: mobile ? "100%" : 200 }}>
             {[
               { label:"Elite-PQC Ready", pct: stats.elite_pct    || 45, color:T.green  },
@@ -212,7 +303,7 @@ export default function PQCPosturePage() {
       <Panel>
         <PanelHeader left="PQC ASSET STATUS"
           right={<span style={{ fontSize:8, color:T.text3, fontFamily:"'Orbitron',monospace" }}>
-            CRITICAL: {stats.critical || 8}
+            CRITICAL: {stats.critical || 0}
           </span>}
         />
         {mobile ? (
