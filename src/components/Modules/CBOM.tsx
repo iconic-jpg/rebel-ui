@@ -76,31 +76,25 @@ function FindingBadge({ severity }: { severity: string }) {
   );
 }
 
-// ── PQC Score Badge — compact table/card cell ─────────────────────────────────
 function PQCScoreBadge({ score }: { score: PQCScoreBreakdown }) {
   return (
     <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:2 }}>
-      {/* label */}
       <span style={{
         fontSize: 7, fontWeight: 700, letterSpacing: ".07em",
-        color: score.color,
-        border: `1px solid ${score.color}44`,
+        color: score.color, border: `1px solid ${score.color}44`,
         borderRadius: 2, padding: "1px 5px",
       }}>
         {score.active ? "ACTIVE" : score.label}
       </span>
-      {/* score bar */}
       {!score.active && (
         <div style={{ width: 48, height: 3, background: "rgba(255,255,255,0.07)", borderRadius: 2 }}>
           <div style={{
             height: "100%", borderRadius: 2,
-            width: `${score.score}%`,
-            background: score.color,
+            width: `${score.score}%`, background: score.color,
             transition: "width 0.6s ease",
           }}/>
         </div>
       )}
-      {/* numeric */}
       {!score.active && (
         <span style={{ fontSize: 7, color: score.color, fontFamily: "'Orbitron',monospace" }}>
           {score.score}/100
@@ -110,7 +104,6 @@ function PQCScoreBadge({ score }: { score: PQCScoreBreakdown }) {
   );
 }
 
-// ── PQC Score Detail — expanded row breakdown ─────────────────────────────────
 function PQCScoreDetail({ score }: { score: PQCScoreBreakdown }) {
   const rows = Object.values(score.criteria);
   return (
@@ -126,7 +119,6 @@ function PQCScoreDetail({ score }: { score: PQCScoreBreakdown }) {
         <span style={{ fontFamily:"'Orbitron',monospace", fontSize: 14,
           color: score.color }}>{score.active ? "ACTIVE" : `${score.score}/100`}</span>
       </div>
-
       {!score.active && (
         <div style={{ height: 4, background: "rgba(255,255,255,0.06)",
           borderRadius: 2, marginBottom: 10 }}>
@@ -138,7 +130,6 @@ function PQCScoreDetail({ score }: { score: PQCScoreBreakdown }) {
           }}/>
         </div>
       )}
-
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
         {rows.map(c => (
           <div key={c.label} style={{
@@ -167,7 +158,6 @@ function PQCScoreDetail({ score }: { score: PQCScoreBreakdown }) {
           </div>
         ))}
       </div>
-
       {!score.active && (
         <div style={{ marginTop: 8, padding: "5px 8px",
           background: "rgba(59,130,246,0.05)",
@@ -187,11 +177,7 @@ function PQCScoreDetail({ score }: { score: PQCScoreBreakdown }) {
   );
 }
 
-function CipherBreakdown({
-  analysis, compact = false,
-}: {
-  analysis: CipherAnalysis; compact?: boolean;
-}) {
+function CipherBreakdown({ analysis, compact = false }: { analysis: CipherAnalysis; compact?: boolean }) {
   const { components: c, findings, pqcImpact: pqc } = analysis;
   return (
     <div style={{
@@ -216,8 +202,9 @@ function CipherBreakdown({
             border: "1px solid rgba(59,130,246,0.12)",
             borderRadius: 3, padding: "5px 7px",
           }}>
-            <div style={{ fontSize:7, color:T.text3, marginBottom:2,
-              letterSpacing:".1em" }}>{item.label.toUpperCase()}</div>
+            <div style={{ fontSize:7, color:T.text3, marginBottom:2, letterSpacing:".1em" }}>
+              {item.label.toUpperCase()}
+            </div>
             <div style={{
               fontSize: 9,
               color: item.label === "PFS" ? (c.pfs ? T.green : T.red) : T.text2,
@@ -229,42 +216,24 @@ function CipherBreakdown({
           </div>
         ))}
       </div>
-
-      {findings.filter((f: CipherFinding) => f.severity !== "ok")
-        .map((f: CipherFinding, i: number) => (
-        <div key={i} style={{
-          borderLeft: `2px solid ${severityColor(f.severity)}`,
-          paddingLeft: 8, marginBottom: 8,
-        }}>
-          <div style={{ display:"flex", alignItems:"center",
-            gap:6, marginBottom:2, flexWrap:"wrap" as const }}>
+      {findings.filter((f: CipherFinding) => f.severity !== "ok").map((f: CipherFinding, i: number) => (
+        <div key={i} style={{ borderLeft: `2px solid ${severityColor(f.severity)}`, paddingLeft: 8, marginBottom: 8 }}>
+          <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:2, flexWrap:"wrap" as const }}>
             <FindingBadge severity={f.severity} />
             <span style={{ fontSize:9, color:T.text2, fontWeight:600 }}>{f.title}</span>
-            {!compact && (
-              <span style={{ fontSize:8, color:T.text3, marginLeft:"auto" }}>
-                {f.doraArticle}
-              </span>
-            )}
+            {!compact && <span style={{ fontSize:8, color:T.text3, marginLeft:"auto" }}>{f.doraArticle}</span>}
           </div>
           <div style={{ fontSize:8, color:T.text3, lineHeight:1.5 }}>{f.description}</div>
-          {compact && (
-            <div style={{ fontSize:7, color:T.text3, marginTop:2,
-              fontStyle:"italic" }}>{f.doraArticle}</div>
-          )}
-          <div style={{ fontSize:8, color:T.cyan, marginTop:3 }}>
-            ↳ {f.remediation}
-          </div>
+          {compact && <div style={{ fontSize:7, color:T.text3, marginTop:2, fontStyle:"italic" }}>{f.doraArticle}</div>}
+          <div style={{ fontSize:8, color:T.cyan, marginTop:3 }}>↳ {f.remediation}</div>
         </div>
       ))}
-
       <div style={{
         background: c.pqcHybrid ? "rgba(34,197,94,0.06)" : "rgba(239,68,68,0.06)",
         border: `1px solid ${c.pqcHybrid ? "rgba(34,197,94,0.2)" : "rgba(239,68,68,0.15)"}`,
         borderRadius: 3, padding: "5px 8px",
       }}>
-        <span style={{ fontSize:7, color:T.text3, letterSpacing:".1em" }}>
-          PQC IMPACT{"  "}
-        </span>
+        <span style={{ fontSize:7, color:T.text3, letterSpacing:".1em" }}>PQC IMPACT{"  "}</span>
         <span style={{ fontSize:8, color:T.text2 }}>{pqc}</span>
       </div>
     </div>
@@ -273,9 +242,9 @@ function CipherBreakdown({
 
 function AppCard({ d, compact }: { d: any; compact: boolean }) {
   const [open, setOpen] = useState(false);
-  const risk    = d.analysis.overallRisk;
-  const c       = d.analysis.components;
-  const tlsNorm = normaliseTLS(d.tls);
+  const risk     = d.analysis.overallRisk;
+  const c        = d.analysis.components;
+  const tlsNorm  = normaliseTLS(d.tls);
   const pqcScore = pqcReadinessScore(c, d.tls, d.keylen, d.is_wildcard ?? false);
 
   return (
@@ -285,33 +254,24 @@ function AppCard({ d, compact }: { d: any; compact: boolean }) {
           display:"flex", justifyContent:"space-between", alignItems:"center" }}>
         <div style={{ minWidth:0, flex:1 }}>
           <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:3 }}>
-            <span style={{ fontSize:11, color:T.blue,
-              overflow:"hidden", textOverflow:"ellipsis",
-              whiteSpace:"nowrap" as const }}>{d.app}</span>
+            <span style={{ fontSize:11, color:T.blue, overflow:"hidden",
+              textOverflow:"ellipsis", whiteSpace:"nowrap" as const }}>{d.app}</span>
             <PQCScoreBadge score={pqcScore} />
           </div>
           <div style={{ display:"flex", gap:6, flexWrap:"wrap" as const }}>
-            <Badge v={tlsNorm==="1.0"?"red":tlsNorm==="1.2"?"yellow":"green"}>
-              TLS {tlsNorm}
-            </Badge>
-            <span style={{ fontSize:9,
-              color: d.keylen?.startsWith("1024") ? T.red
-                   : d.keylen?.startsWith("2048") ? T.yellow : T.green }}>
+            <Badge v={tlsNorm==="1.0"?"red":tlsNorm==="1.2"?"yellow":"green"}>TLS {tlsNorm}</Badge>
+            <span style={{ fontSize:9, color: d.keylen?.startsWith("1024") ? T.red : d.keylen?.startsWith("2048") ? T.yellow : T.green }}>
               {d.keylen}
             </span>
-            <span style={{ fontSize:9, color: c.pfs ? T.green : T.red }}>
-              {c.pfs ? "PFS ✓" : "PFS ✗"}
-            </span>
+            <span style={{ fontSize:9, color: c.pfs ? T.green : T.red }}>{c.pfs ? "PFS ✓" : "PFS ✗"}</span>
           </div>
-          <div style={{ fontSize:8, color:T.text3, marginTop:4,
-            overflow:"hidden", textOverflow:"ellipsis",
-            whiteSpace:"nowrap" as const }}>
-            <span style={{ color:T.text2,
-              fontFamily:"'Share Tech Mono',monospace" }}>{c.keyExchange}</span>
+          <div style={{ fontSize:8, color:T.text3, marginTop:4, overflow:"hidden",
+            textOverflow:"ellipsis", whiteSpace:"nowrap" as const }}>
+            <span style={{ color:T.text2, fontFamily:"'Share Tech Mono',monospace" }}>{c.keyExchange}</span>
             {" · "}
             <span style={{
-              color: c.bulkCipher.includes("DES") || c.bulkCipher === "RC4-128"
-                ? T.red : c.bulkCipher.includes("CBC") ? T.orange : T.text2,
+              color: c.bulkCipher.includes("DES") || c.bulkCipher === "RC4-128" ? T.red
+                   : c.bulkCipher.includes("CBC") ? T.orange : T.text2,
               fontFamily:"'Share Tech Mono',monospace",
             }}>{c.bulkCipher}</span>
             {" · "}{d.ca}
@@ -344,37 +304,34 @@ export default function CBOMPage() {
   const isTablet  = bp === "tablet";
   const isDesktop = bp === "desktop";
 
-  const [cbomData,    setCbomData]    = useState<any[]>([]);
-  const [stats,       setStats]       = useState({
-    total_apps:0, weak_crypto:0, pqc_ready:0, active_certs:0
-  });
-  const [cipherData,  setCipherData]  = useState(DEFAULT_CIPHERS);
-  const [caData,      setCaData]      = useState(DEFAULT_CAS);
-  const [protoData,   setProtoData]   = useState(DEFAULT_PROTOCOLS);
-  const [keyData,     setKeyData]     = useState<any>({});
-  const [expandedRow, setExpandedRow] = useState<number | null>(null);
+  const [cbomData,   setCbomData]   = useState<any[]>([]);
+  const [stats,      setStats]      = useState({ total_apps:0, weak_crypto:0, pqc_ready:0, active_certs:0 });
+  const [cipherData, setCipherData] = useState(DEFAULT_CIPHERS);
+  const [caData,     setCaData]     = useState(DEFAULT_CAS);
+  const [protoData,  setProtoData]  = useState(DEFAULT_PROTOCOLS);
+  const [keyData,    setKeyData]    = useState<any>({});
+  const [expandedRow,setExpandedRow]= useState<number | null>(null);
 
+  // ── Hybrid fetch: /cbom (passive scan) + /assets (registry) ──────────────
   useEffect(() => {
-    // Fetch both /cbom (passive scan) and /assets (registry)
-    // Registered assets enrich CBOM entries with business context,
-    // and registered-only assets (manually added) are appended.
     Promise.all([
       fetch(`${API}/cbom`).then(r => r.json()).catch(() => ({})),
       fetch(`${API}/assets`).then(r => r.json()).catch(() => ({ assets: [] })),
     ]).then(([d, assetsData]) => {
-      // Registry map keyed by domain
+
+      // Build registry map keyed by domain name
       const registeredMap: Record<string, any> = {};
       (assetsData?.assets ?? []).forEach((a: any) => {
         if (a.name) registeredMap[a.name] = a;
       });
 
-      // Enrich CBOM apps with registry context where domain matches
+      // Enrich CBOM apps with registry business context where domain matches
       const cbomApps: any[] = (d.apps ?? []).map((app: any) => {
         const reg = registeredMap[app.app];
         if (!reg) return app;
         return {
           ...app,
-          is_wildcard:        reg.last_is_wildcard  ?? app.is_wildcard,
+          is_wildcard:        reg.is_wildcard        ?? app.is_wildcard,
           criticality:        reg.criticality,
           owner:              reg.owner,
           owner_email:        reg.owner_email,
@@ -384,16 +341,12 @@ export default function CBOMPage() {
         };
       });
 
-      // Append registered assets not in CBOM scan (manually added, have scan data)
+      // Append registered assets not in CBOM (manually added via registry)
       const cbomDomains = new Set(cbomApps.map((a: any) => a.app));
       const registeredOnly = (assetsData?.assets ?? [])
-        // Include all registered assets not already in CBOM
-        // Don't gate on last_tls — show even if not yet scanned
         .filter((a: any) => a.id && !cbomDomains.has(a.name))
         .map((a: any) => ({
           app:                a.name,
-          // /assets returns live scan fields directly (tls, keylen, cipher, ca)
-          // fall back to "—" for assets not yet scanned
           keylen:             a.keylen             || "—",
           cipher:             a.cipher             || "—",
           tls:                a.tls                || "—",
@@ -403,7 +356,6 @@ export default function CBOMPage() {
           pqc_support:        "none",
           key_exchange_group: a.key_exchange_group || null,
           is_wildcard:        a.is_wildcard        ?? null,
-          // business context from registry
           criticality:        a.criticality,
           owner:              a.owner,
           owner_email:        a.owner_email,
@@ -451,18 +403,12 @@ export default function CBOMPage() {
 
   const analysed = displayData.map((d: any) => ({
     ...d,
-    analysis: fullAnalysis(
-      d.cipher             ?? "",
-      d.tls                ?? "",
-      d.key_exchange_group ?? null
-    ),
+    analysis: fullAnalysis(d.cipher ?? "", d.tls ?? "", d.key_exchange_group ?? null),
   }));
 
   const findingCounts = analysed.reduce(
     (acc: any, a: any) => {
-      a.analysis.findings.forEach((f: any) => {
-        acc[f.severity] = (acc[f.severity] || 0) + 1;
-      });
+      a.analysis.findings.forEach((f: any) => { acc[f.severity] = (acc[f.severity] || 0) + 1; });
       return acc;
     },
     { critical:0, high:0, medium:0, low:0 }
@@ -486,11 +432,10 @@ export default function CBOMPage() {
       { label:"other", val: keyData["other"] || 0, color:T.red    },
     ];
     const max = Math.max(...bars.map(b => b.val), 1);
-    const bw = isMobile ? 22 : 30;
-    const gap = isMobile ? 8 : 16;
+    const bw = isMobile ? 22 : 30, gap = isMobile ? 8 : 16;
     const startX = (W - (bars.length * (bw + gap) - gap)) / 2;
     ctx.clearRect(0, 0, W, H);
-    bars.forEach((b) => {
+    bars.forEach(b => {
       const x = startX + bars.indexOf(b) * (bw + gap);
       const barH = Math.round((b.val / max) * (H - 30));
       const y = H - barH - 20;
@@ -579,12 +524,12 @@ export default function CBOMPage() {
     <div style={S.page}>
 
       <div style={{ display:"grid", gridTemplateColumns:metricCols, gap: isMobile ? 8 : 9 }}>
-        <MetricCard label="TOTAL APPS"  value={stats.total_apps || displayData.length} sub="Applications"   color={T.blue}   />
-        <MetricCard label="CRITICAL"    value={findingCounts.critical || 0}             sub="DORA findings"  color={T.red}    />
-        <MetricCard label="NO PFS"      value={noPFSCount}                              sub="No fwd secrecy" color={T.orange} />
+        <MetricCard label="TOTAL APPS"  value={stats.total_apps || displayData.length} sub="Applications"      color={T.blue}   />
+        <MetricCard label="CRITICAL"    value={findingCounts.critical || 0}             sub="DORA findings"     color={T.red}    />
+        <MetricCard label="NO PFS"      value={noPFSCount}                              sub="No fwd secrecy"    color={T.orange} />
         <MetricCard label="WEAK CIPHER" value={stats.weak_crypto || brokenCount}        sub="Needs remediation" color={T.yellow} />
         <div style={isMobile ? { gridColumn:"1/-1" } : {}}>
-          <MetricCard label="PQC READY" value={stats.pqc_ready || 0}                   sub="Post-quantum"   color={T.green}  />
+          <MetricCard label="PQC READY" value={stats.pqc_ready || 0}                   sub="Post-quantum"      color={T.green}  />
         </div>
       </div>
 
@@ -644,8 +589,7 @@ export default function CBOMPage() {
                 : parsed.bulkCipher.includes("CBC") ? T.orange : T.green;
               return (
                 <div key={c.name}>
-                  <div style={{ display:"flex", justifyContent:"space-between",
-                    marginBottom:3, gap:6 }}>
+                  <div style={{ display:"flex", justifyContent:"space-between", marginBottom:3, gap:6 }}>
                     <div style={{ display:"flex", alignItems:"center", gap:5, minWidth:0, flex:1 }}>
                       <span style={{ width:6, height:6, borderRadius:"50%",
                         background:riskCol, flexShrink:0 }}/>
@@ -690,7 +634,6 @@ export default function CBOMPage() {
             </button>
           }
         />
-
         {!isDesktop && (
           <div style={{ maxHeight: isMobile ? 420 : 560, overflowY:"auto" }}>
             {analysed.map((d: any, i: number) => (
@@ -698,22 +641,20 @@ export default function CBOMPage() {
             ))}
           </div>
         )}
-
         {isDesktop && (
           <Table cols={[
             "APPLICATION","KEY LEN","KEY EXCHANGE","BULK CIPHER",
             "PFS","TLS VER","CA","OVERALL RISK","PQC",""
           ]}>
             {analysed.map((d: any, i: number) => {
-              const c       = d.analysis.components;
-              const risk    = d.analysis.overallRisk;
-              const isOpen  = expandedRow === i;
-              const tlsNorm = normaliseTLS(d.tls);
+              const c        = d.analysis.components;
+              const risk     = d.analysis.overallRisk;
+              const isOpen   = expandedRow === i;
+              const tlsNorm  = normaliseTLS(d.tls);
               const pqcScore = pqcReadinessScore(c, d.tls, d.keylen, d.is_wildcard ?? false);
-              const keyCol  = d.keylen?.startsWith("1024") ? T.red
-                            : d.keylen?.startsWith("2048") ? T.yellow : T.green;
-              const bulkCol = c.bulkCipher.includes("DES") || c.bulkCipher === "RC4-128"
-                            ? T.red : c.bulkCipher.includes("CBC") ? T.orange : T.green;
+              const keyCol   = d.keylen?.startsWith("1024") ? T.red : d.keylen?.startsWith("2048") ? T.yellow : T.green;
+              const bulkCol  = c.bulkCipher.includes("DES") || c.bulkCipher === "RC4-128" ? T.red
+                             : c.bulkCipher.includes("CBC") ? T.orange : T.green;
               return (
                 <React.Fragment key={i}>
                   <TR>
@@ -726,15 +667,13 @@ export default function CBOMPage() {
                         <span style={{ fontSize:7, color:T.text3, marginLeft:4 }}>•</span>
                       )}
                     </TD>
-                    <TD style={{ fontSize:9, color:bulkCol,
-                      fontFamily:"'Share Tech Mono',monospace",
+                    <TD style={{ fontSize:9, color:bulkCol, fontFamily:"'Share Tech Mono',monospace",
                       maxWidth:120, overflow:"hidden", textOverflow:"ellipsis",
                       whiteSpace:"nowrap" as const }}>
                       {c.bulkCipher}
                     </TD>
                     <TD style={{ textAlign:"center", fontSize:13 }}>
-                      {c.pfs ? <span style={{color:T.green}}>✓</span>
-                              : <span style={{color:T.red}}>✗</span>}
+                      {c.pfs ? <span style={{color:T.green}}>✓</span> : <span style={{color:T.red}}>✗</span>}
                     </TD>
                     <TD>
                       <Badge v={tlsNorm==="1.0"?"red":tlsNorm==="1.1"?"orange":tlsNorm==="1.2"?"yellow":"green"}>
@@ -742,12 +681,8 @@ export default function CBOMPage() {
                       </Badge>
                     </TD>
                     <TD style={{ fontSize:9, color:T.text3 }}>{d.ca}</TD>
-                    <TD>
-                      <Badge v={severityVariant(risk) as any}>{risk.toUpperCase()}</Badge>
-                    </TD>
-                    <TD style={{ textAlign:"center" }}>
-                      <PQCScoreBadge score={pqcScore} />
-                    </TD>
+                    <TD><Badge v={severityVariant(risk) as any}>{risk.toUpperCase()}</Badge></TD>
+                    <TD style={{ textAlign:"center" }}><PQCScoreBadge score={pqcScore} /></TD>
                     <TD>
                       <button onClick={() => setExpandedRow(isOpen ? null : i)}
                         style={{ ...S.btn, fontSize:9, padding:"2px 7px" }}>
@@ -768,7 +703,6 @@ export default function CBOMPage() {
             })}
           </Table>
         )}
-
         <div style={{ padding:"8px 12px", borderTop:`1px solid rgba(59,130,246,0.07)`,
           display:"flex", justifyContent:"space-between",
           alignItems:"center", flexWrap:"wrap" as const, gap:8 }}>
