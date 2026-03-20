@@ -86,17 +86,21 @@ function exportAuditPDF(
   const displayName = clientName.trim()||(clientDomain?normaliseDomain(clientDomain):"All Assets");
 
 
-// Gauge SVG — clamp pct to avoid degenerate arc at 0% and 100%
-  const pct = Math.min(0.999, Math.max(0.001, migrationScore / 100));
-  const gr=54, gcx=70, gcy=76;
+// Gauge SVG
+  const pct=weightedScore/100, gr=54, gcx=70, gcy=75;
   const gx1=gcx+gr*Math.cos(Math.PI), gy1=gcy+gr*Math.sin(Math.PI);
-  const gx2=gcx+gr*Math.cos(Math.PI+Math.PI*pct), gy2=gcy+gr*Math.sin(Math.PI+Math.PI*pct);
+  const gx2=gcx+gr*Math.cos(Math.PI+Math.PI*pct);
+  const gy2=gcy+gr*Math.sin(Math.PI+Math.PI*pct);
   const glf=pct>0.5?1:0;
-  const gaugeSVG=`<svg width="140" height="84" viewBox="0 0 140 84" xmlns="http://www.w3.org/2000/svg">
-    <path d="M ${gcx-gr} ${gcy} A ${gr} ${gr} 0 0 1 ${gcx+gr} ${gcy}" fill="none" stroke="#e5e7eb" stroke-width="10" stroke-linecap="round"/>
-    <path d="M ${gx1.toFixed(2)} ${gy1.toFixed(2)} A ${gr} ${gr} 0 ${glf} 1 ${gx2.toFixed(2)} ${gy2.toFixed(2)}" fill="none" stroke="${scoreColor}" stroke-width="10" stroke-linecap="round"/>
-    <text x="${gcx}" y="${gcy-5}" text-anchor="middle" font-family="Arial" font-size="22" font-weight="bold" fill="${scoreColor}">${migrationScore}</text>
-    <text x="${gcx}" y="${gcy+13}" text-anchor="middle" font-family="Arial" font-size="7" fill="#6b7280" letter-spacing="1">${scoreLabel}</text>
+  const gaugeSVG=`<svg width="140" height="82" viewBox="0 0 140 82" xmlns="http://www.w3.org/2000/svg">
+    <path d="M ${gcx-gr} ${gcy} A ${gr} ${gr} 0 0 1 ${gcx+gr} ${gcy}"
+      fill="none" stroke="#e5e7eb" stroke-width="10" stroke-linecap="round"/>
+    <path d="M ${gx1.toFixed(2)} ${gy1.toFixed(2)} A ${gr} ${gr} 0 ${glf} 1 ${gx2.toFixed(2)} ${gy2.toFixed(2)}"
+      fill="none" stroke="${sc}" stroke-width="10" stroke-linecap="round"/>
+    <text x="${gcx}" y="${gcy-4}" text-anchor="middle"
+      font-family="Arial" font-size="22" font-weight="bold" fill="${sc}">${weightedScore}</text>
+    <text x="${gcx}" y="${gcy+13}" text-anchor="middle"
+      font-family="Arial" font-size="7" fill="#6b7280" letter-spacing="1">${sl}</text>
   </svg>`;
 
   // Score distribution — milestone pass/fail for PDF
