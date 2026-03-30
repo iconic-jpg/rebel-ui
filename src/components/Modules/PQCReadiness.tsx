@@ -87,7 +87,12 @@ function exportAuditPDF(
 
 
 // Gauge SVG
-  const pct=weightedScore/100, gr=54, gcx=70, gcy=75;
+  // ✅ AFTER — declare them first
+    const weightedScore = migrationScore
+    const sc = migrationScore >= 70 ? "#16a34a" : migrationScore >= 40 ? "#d97706" : "#dc2626"
+    const sl = migrationScore >= 70 ? "COMPLIANT" : migrationScore >= 40 ? "AT RISK" : "CRITICAL"
+
+    const pct = weightedScore / 100, gr = 54, gcx = 70, gcy = 75
   const gx1=gcx+gr*Math.cos(Math.PI), gy1=gcy+gr*Math.sin(Math.PI);
   const gx2=gcx+gr*Math.cos(Math.PI+Math.PI*pct);
   const gy2=gcy+gr*Math.sin(Math.PI+Math.PI*pct);
