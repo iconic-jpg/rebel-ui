@@ -12,32 +12,30 @@ import PQCPosturePage from "./components/Modules/PQCPosture.js";
 import PQCReadinessPage from "./components/Modules/PQCReadiness.js";
 import CyberRatingPage from "./components/Modules/CyberRating.js";
 import ReportingPage from "./components/Modules/Reporting.js";
-import { useTheme } from "./hooks/useTheme.js";
-import { useThemeContext } from './components/context/ThemeContext.js'
+import { ThemeProvider } from './components/context/ThemeContext.js'
+
 
 export default function App() {
-  const { theme, toggle } = useTheme();
-
   return (
-    <ThemeContext.Provider value={{ theme, toggle }}>
+    <ThemeProvider>
       <Router>
         <Routes>
-          <Route path="/login"  element={<Login />} />
+          <Route path="/login" element={<Login />} />
           <Route path="/signup" element={<Signup />} />
 
           <Route path="/" element={<AppShell />}>
-            <Route index                  element={<RebelDashboard />} />
-            <Route path="inventory"       element={<AssetInventoryPage />} />
-            <Route path="discovery"       element={<AssetDiscoveryPage />} />
-            <Route path="cbom"            element={<CBOMPage />} />
-            <Route path="pqc"             element={<PQCPosturePage />} />
-            <Route path="pqc-readiness"   element={<PQCReadinessPage />} />
-            <Route path="rating"          element={<CyberRatingPage />} />
-            <Route path="reporting"       element={<ReportingPage />} />
+            <Route index element={<RebelDashboard />} />
+            <Route path="inventory" element={<AssetInventoryPage />} />
+            <Route path="discovery" element={<AssetDiscoveryPage />} />
+            <Route path="cbom" element={<CBOMPage />} />
+            <Route path="pqc" element={<PQCPosturePage />} />
+            <Route path="pqc-readiness" element={<PQCReadinessPage />} />
+            <Route path="rating" element={<CyberRatingPage />} />
+            <Route path="reporting" element={<ReportingPage />} />
             <Route path="settings/assets" element={<AssetRegistryPage />} />
           </Route>
         </Routes>
       </Router>
-    </ThemeContext.Provider>
+    </ThemeProvider>
   );
 }

@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
-import { ThemeContext } from '../context/ThemeContext.js'
+import { useThemeContext } from '../context/ThemeContext.js'
 
 const NAV_ITEMS = [
   { path: "/",              label: "Dashboard",      icon: "⬡", section: "CORE"        },

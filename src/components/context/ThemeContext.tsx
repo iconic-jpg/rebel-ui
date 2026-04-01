@@ -7,7 +7,7 @@ type ThemeContextType = {
   toggle: () => void
 }
 
-const ThemeContext = createContext<ThemeContextType | undefined>(undefined)
+export const ThemeContext = createContext<ThemeContextType | undefined>(undefined)
 
 export const ThemeProvider = ({ children }: { children: React.ReactNode }) => {
   const [theme, setTheme] = useState<Theme>('light')
@@ -23,7 +23,6 @@ export const ThemeProvider = ({ children }: { children: React.ReactNode }) => {
   )
 }
 
-// ✅ THIS is what you're missing
 export const useThemeContext = () => {
   const context = useContext(ThemeContext)
   if (!context) {
