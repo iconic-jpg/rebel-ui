@@ -13,43 +13,28 @@ const NAV_ITEMS = [
   { path: "/reporting", label: "Reporting", icon: "▣", section: null },
 ];
 
-const SETTINGS_ITEMS = [
-  { path: "/settings/assets", label: "Asset Registry", icon: "⚙" },
-];
+// ─── LIGHT PALETTE (mirrors RebelDashboard.tsx) ───────────────────────────────
+const L = {
+  accent:       "#0ea5e9",
+  accentDark:   "#0284c7",
+  accentDim:    "rgba(14,165,233,0.1)",
+  accentBorder: "rgba(14,165,233,0.28)",
+  text:         "#050d1a",
+  textSec:      "#1e293b",
+  textDim:      "#334155",
+  textMuted:    "#475569",
+  textFaint:    "#64748b",
+  divider:      "rgba(14,165,233,0.12)",
+  panelBg:      "#ffffff",
+  pageBg:       "#f1f5f9",
+  success:      "#16a34a",
+};
 
 export default function AppShell() {
   const location = useLocation();
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
-  const { theme, toggle } = useThemeContext();
-
-  const isDark = theme === "dark";
-
-  // 🎯 CLEAN TOKENS (no rgba fading)
-  const labelActive = "var(--text-primary)";
-  const labelInactive = "var(--text-dim)";
-  const labelDim = "var(--text-faint)";
-  const footerMuted = "var(--text-faint)";
-
-  const sidebarBg = isDark
-    ? "linear-gradient(180deg,#070c16 0%,#080c14 100%)"
-    : "linear-gradient(180deg,#e8edf5 0%,#edf1f7 100%)";
-
-  const sidebarBorder = isDark
-    ? "rgba(59,130,246,0.25)"
-    : "rgba(59,130,246,0.35)";
-
-  const overlayBg = isDark
-    ? "rgba(0,0,0,0.6)"
-    : "rgba(0,0,0,0.3)";
-
-  const hamburgerBg = isDark
-    ? "rgba(8,12,20,0.95)"
-    : "rgba(255,255,255,0.95)";
-
-  const hamburgerBar = isDark
-    ? "rgba(255,255,255,0.7)"
-    : "rgba(30,60,120,0.8)";
+  const { toggle } = useThemeContext();
 
   const isActive = (path: string) =>
     path === "/" ? location.pathname === "/" : location.pathname.startsWith(path);
@@ -59,19 +44,20 @@ export default function AppShell() {
     setOpen(false);
   };
 
-  function NavButton({
-    path,
-    label,
-    icon,
-    badge,
-  }: {
-    path: string;
-    label: string;
-    icon: string;
-    badge?: React.ReactNode;
-  }) {
-    const active = isActive(path);
+  // Group nav items by section
+  const sections: { title: string | null; items: typeof NAV_ITEMS }[] = [];
+  let currentSection: { title: string | null; items: typeof NAV_ITEMS } | null = null;
+  for (const item of NAV_ITEMS) {
+    if (item.section !== null) {
+      currentSection = { title: item.section, items: [item] };
+      sections.push(currentSection);
+    } else if (currentSection) {
+      currentSection.items.push(item);
+    }
+  }
 
+  function NavButton({ path, label, icon }: { path: string; label: string; icon: string }) {
+    const active = isActive(path);
     return (
       <button
         onClick={() => go(path)}
@@ -81,71 +67,92 @@ export default function AppShell() {
           alignItems: "center",
           gap: 12,
           padding: "9px 10px",
-          background: active ? "rgba(59,130,246,0.15)" : "none",
-          border: `1px solid ${
-            active ? "rgba(59,130,246,0.35)" : "transparent"
-          }`,
-          borderRadius: 3,
+          background: active ? "rgba(14,165,233,0.1)" : "none",
+          border: `1px solid ${active ? L.accentBorder : "transparent"}`,
+          borderRadius: 6,
           cursor: "pointer",
           textAlign: "left",
           transition: "all 0.15s",
-          marginBottom: 1,
+          marginBottom: 2,
+        }}
+        onMouseEnter={e => {
+          if (!active) {
+            e.currentTarget.style.background = "rgba(14,165,233,0.06)";
+            e.currentTarget.style.borderColor = "rgba(14,165,233,0.18)";
+          }
+        }}
+        onMouseLeave={e => {
+          if (!active) {
+            e.currentTarget.style.background = "none";
+            e.currentTarget.style.borderColor = "transparent";
+          }
         }}
       >
+        {/* Icon box */}
         <div
           style={{
             width: 32,
             height: 32,
             flexShrink: 0,
-            background: active
-              ? "rgba(59,130,246,0.2)"
-              : "rgba(59,130,246,0.08)",
-            border: `1px solid ${
-              active ? "rgba(59,130,246,0.4)" : "rgba(59,130,246,0.2)"
-            }`,
-            borderRadius: 3,
+            background: active ? "rgba(14,165,233,0.15)" : "rgba(14,165,233,0.07)",
+            border: `1px solid ${active ? L.accentBorder : "rgba(14,165,233,0.18)"}`,
+            borderRadius: 6,
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
             fontFamily: "'Orbitron',monospace",
             fontSize: 13,
-            color: active ? "#3b82f6" : "var(--text-dim)",
+            color: active ? L.accent : L.textDim,
+            transition: "all 0.15s",
           }}
         >
           {icon}
         </div>
 
+        {/* Label */}
         <div style={{ flex: 1 }}>
           <div
             style={{
               fontFamily: "'Share Tech Mono',monospace",
               fontSize: 11,
-              color: active ? labelActive : labelInactive,
+              fontWeight: active ? 700 : 500,
+              color: active ? L.text : L.textSec,
+              letterSpacing: "0.02em",
             }}
           >
             {label}
           </div>
         </div>
 
+        {/* Active dot */}
         {active && (
           <span
             style={{
-              width: 4,
-              height: 4,
+              width: 5,
+              height: 5,
               borderRadius: "50%",
-              background: "#3b82f6",
-              boxShadow: "0 0 6px #3b82f6",
+              background: L.accent,
+              boxShadow: `0 0 6px ${L.accent}`,
+              flexShrink: 0,
             }}
           />
         )}
-
-        {badge}
       </button>
     );
   }
 
   return (
     <>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;700;900&family=Share+Tech+Mono&display=swap');
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        ::-webkit-scrollbar { width: 4px; }
+        ::-webkit-scrollbar-thumb { background: rgba(14,165,233,0.2); border-radius: 2px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        button { -webkit-tap-highlight-color: transparent; }
+      `}</style>
+
+      {/* Overlay */}
       {open && (
         <div
           onClick={() => setOpen(false)}
@@ -153,107 +160,258 @@ export default function AppShell() {
             position: "fixed",
             inset: 0,
             zIndex: 198,
-            background: overlayBg,
-            backdropFilter: "blur(3px)",
+            background: "rgba(5,13,26,0.35)",
+            backdropFilter: "blur(4px)",
+            WebkitBackdropFilter: "blur(4px)",
           }}
         />
       )}
 
-      {/* Sidebar */}
+      {/* ── SIDEBAR ── */}
       <div
         style={{
           position: "fixed",
           top: 0,
           left: 0,
           bottom: 0,
-          width: 260,
+          width: 264,
           zIndex: 199,
-          background: sidebarBg,
-          borderRight: `1px solid ${sidebarBorder}`,
+          background: L.panelBg,
+          borderRight: `1px solid ${L.divider}`,
+          boxShadow: open ? "16px 0 60px rgba(0,0,0,0.1)" : "none",
           transform: open ? "translateX(0)" : "translateX(-100%)",
-          transition: "transform 0.28s ease",
+          transition: "transform 0.28s cubic-bezier(0.4,0,0.2,1), box-shadow 0.28s",
           display: "flex",
           flexDirection: "column",
+          overflow: "hidden",
         }}
       >
-        {/* Header */}
-        <div style={{ padding: 14 }}>
-          <div
+        {/* Sidebar header */}
+        <div
+          style={{
+            padding: "18px 16px 14px",
+            borderBottom: `1px solid ${L.divider}`,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            flexShrink: 0,
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            {/* Logo mark */}
+            <svg width="22" height="22" viewBox="0 0 28 28">
+              <polygon
+                points="14,2 26,8 26,20 14,26 2,20 2,8"
+                fill="none"
+                stroke={L.accent}
+                strokeWidth="1.5"
+                style={{ filter: `drop-shadow(0 0 3px ${L.accent}88)` }}
+              />
+              <polygon
+                points="14,7 21,11 21,17 14,21 7,17 7,11"
+                fill="rgba(14,165,233,0.1)"
+                stroke="rgba(14,165,233,0.3)"
+                strokeWidth="1"
+              />
+              <circle
+                cx="14" cy="14" r="3"
+                fill={L.accent}
+                style={{ filter: `drop-shadow(0 0 4px ${L.accent})` }}
+              />
+            </svg>
+            <div>
+              <div
+                style={{
+                  fontFamily: "'Orbitron',monospace",
+                  fontWeight: 900,
+                  fontSize: 15,
+                  color: L.text,
+                  letterSpacing: ".22em",
+                  lineHeight: 1,
+                }}
+              >
+                REBEL
+              </div>
+              <div
+                style={{
+                  fontSize: 7.5,
+                  color: L.textMuted,
+                  letterSpacing: ".14em",
+                  fontFamily: "'Orbitron',monospace",
+                  marginTop: 3,
+                  fontWeight: 600,
+                }}
+              >
+                THREAT INTELLIGENCE
+              </div>
+            </div>
+          </div>
+          {/* Close button */}
+          <button
+            onClick={() => setOpen(false)}
             style={{
-              fontFamily: "'Orbitron',monospace",
-              fontWeight: 900,
+              background: L.accentDim,
+              border: `1px solid ${L.accentBorder}`,
+              borderRadius: 6,
+              color: L.textDim,
+              cursor: "pointer",
+              width: 28,
+              height: 28,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
               fontSize: 14,
-              color: "var(--text-primary)",
-              letterSpacing: ".2em",
+              fontWeight: 600,
+              transition: "all 0.15s",
             }}
           >
-            REBEL
-          </div>
-          <div
-            style={{
-              fontSize: 8,
-              color: labelDim,
-              letterSpacing: ".15em",
-            }}
-          >
-            THREAT INTELLIGENCE
-          </div>
+            ✕
+          </button>
         </div>
 
         {/* Nav */}
-        <nav style={{ flex: 1, padding: 10 }}>
-          {NAV_ITEMS.map((item) => (
-            <NavButton
-              key={item.path}
-              path={item.path}
-              label={item.label}
-              icon={item.icon}
-            />
+        <nav style={{ flex: 1, overflowY: "auto", padding: "10px 10px 6px" }}>
+          {sections.map((section) => (
+            <div key={section.title} style={{ marginBottom: 8 }}>
+              {/* Section label */}
+              <div
+                style={{
+                  fontSize: 7.5,
+                  color: L.textMuted,
+                  letterSpacing: ".2em",
+                  fontFamily: "'Orbitron',monospace",
+                  fontWeight: 700,
+                  padding: "10px 8px 5px",
+                  textTransform: "uppercase",
+                }}
+              >
+                {section.title}
+              </div>
+              {section.items.map((item) => (
+                <NavButton
+                  key={item.path}
+                  path={item.path}
+                  label={item.label}
+                  icon={item.icon}
+                />
+              ))}
+            </div>
           ))}
         </nav>
 
         {/* Theme toggle */}
-        <button
-          onClick={toggle}
-          style={{
-            margin: 10,
-            padding: 10,
-            borderRadius: 4,
-            border: "1px solid rgba(59,130,246,0.3)",
-            background: "transparent",
-            color: "var(--text-primary)",
-          }}
-        >
-          Toggle Theme
-        </button>
+        <div style={{ padding: "8px 10px", borderTop: `1px solid ${L.divider}` }}>
+          <button
+            onClick={toggle}
+            style={{
+              width: "100%",
+              padding: "9px 12px",
+              borderRadius: 6,
+              border: `1px solid ${L.accentBorder}`,
+              background: L.accentDim,
+              color: L.textSec,
+              fontFamily: "'Orbitron',monospace",
+              fontSize: 8.5,
+              letterSpacing: "0.14em",
+              fontWeight: 700,
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 7,
+              transition: "all 0.15s",
+            }}
+          >
+            <span style={{ fontSize: 12 }}>☀</span>
+            TOGGLE THEME
+          </button>
+        </div>
 
         {/* Footer */}
         <div
           style={{
-            padding: 10,
-            fontSize: 10,
-            color: footerMuted,
+            padding: "10px 14px 14px",
+            display: "flex",
+            flexDirection: "column",
+            gap: 6,
           }}
         >
-          r3bel-production.up.railway.app
+          {/* Live badge */}
+          <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+            <span style={{ position: "relative", display: "inline-flex", width: 7, height: 7, flexShrink: 0 }}>
+              <span style={{ position: "absolute", inset: 0, borderRadius: "50%", background: L.success, opacity: 0.4, animation: "ping 1.4s ease infinite" }} />
+              <span style={{ width: 7, height: 7, borderRadius: "50%", background: L.success, display: "block", boxShadow: `0 0 4px ${L.success}` }} />
+            </span>
+            <span
+              style={{
+                fontSize: 7.5,
+                fontFamily: "'Orbitron',monospace",
+                color: L.success,
+                letterSpacing: ".12em",
+                fontWeight: 700,
+              }}
+            >
+              LIVE · CONNECTED
+            </span>
+          </div>
+          <div
+            style={{
+              fontSize: 8,
+              color: L.textMuted,
+              fontFamily: "'Share Tech Mono',monospace",
+              fontWeight: 500,
+            }}
+          >
+            r3bel-production.up.railway.app
+          </div>
         </div>
       </div>
 
-      {/* Hamburger */}
+      {/* ── HAMBURGER ── */}
       <button
         onClick={() => setOpen((o) => !o)}
         style={{
           position: "fixed",
-          top: 10,
+          top: 9,
           left: 10,
           zIndex: 200,
-          background: hamburgerBg,
-          border: "1px solid rgba(59,130,246,0.3)",
+          background: "rgba(255,255,255,0.95)",
+          border: `1px solid ${L.accentBorder}`,
+          borderRadius: 7,
           width: 36,
           height: 36,
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: 4.5,
+          cursor: "pointer",
+          boxShadow: "0 1px 6px rgba(14,165,233,0.12)",
+          backdropFilter: "blur(8px)",
+          transition: "box-shadow 0.2s",
         }}
       >
-        ☰
+        {[0, 1, 2].map((i) => (
+          <span
+            key={i}
+            style={{
+              display: "block",
+              width: 16,
+              height: 1.5,
+              borderRadius: 2,
+              background: open ? L.accent : L.textDim,
+              transform: open
+                ? i === 0
+                  ? "translateY(6px) rotate(45deg)"
+                  : i === 2
+                  ? "translateY(-6px) rotate(-45deg)"
+                  : "scaleX(0)"
+                : "none",
+              opacity: open && i === 1 ? 0 : 1,
+              transition: "all 0.22s cubic-bezier(0.4,0,0.2,1)",
+            }}
+          />
+        ))}
       </button>
 
       <Outlet />
