@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
-import { ThemeContext } from '../context/ThemeContext'
+import { ThemeContext } from '../context/ThemeContext.js'
+
 const NAV_ITEMS = [
   { path: "/",              label: "Dashboard",      icon: "⬡", section: "CORE"        },
   { path: "/inventory",     label: "Asset Inventory",icon: "◈", section: "ASSET & PQC" },

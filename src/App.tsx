@@ -13,7 +13,7 @@ import PQCReadinessPage from "./components/Modules/PQCReadiness.js";
 import CyberRatingPage from "./components/Modules/CyberRating.js";
 import ReportingPage from "./components/Modules/Reporting.js";
 import { useTheme } from "./hooks/useTheme.js";
-import { ThemeContext } from "./context/ThemeContext";
+import { ThemeContext } from './components/context/ThemeContext.js'
 
 export default function App() {
   const { theme, toggle } = useTheme();
