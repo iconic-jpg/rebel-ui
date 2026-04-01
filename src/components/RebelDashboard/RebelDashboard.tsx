@@ -43,11 +43,11 @@ const L = {
   accentDark:   "#0284c7",   // sky-600
   accentDim:    "rgba(14,165,233,0.12)",
   accentBorder: "rgba(14,165,233,0.28)",
-  text:         "#0f172a",   // slate-900
-  textSec:      "#334155",   // slate-700
-  textDim:      "#64748b",   // slate-500
-  textMuted:    "#94a3b8",   // slate-400
-  textFaint:    "#cbd5e1",   // slate-300
+  text:         "#050d1a",   // near-black
+  textSec:      "#1e293b",   // slate-800 — was 700
+  textDim:      "#334155",   // slate-700 — was 500
+  textMuted:    "#475569",   // slate-600 — was 400
+  textFaint:    "#64748b",   // slate-500 — was 300
   rowHover:     "rgba(14,165,233,0.04)",
   divider:      "rgba(14,165,233,0.12)",
   inputBg:      "#f8fafc",
@@ -96,7 +96,7 @@ function RiskArc({ score, label }: { score: number; label: string }) {
           style={{ transition: "stroke-dasharray 1s ease", filter: `drop-shadow(0 0 4px ${color}66)` }} />
         <text x="50" y="54" textAnchor="middle" fill={color} fontSize="16" fontFamily="Orbitron" fontWeight="700">{score}</text>
       </svg>
-      <span style={{ fontSize: 8, color: L.textDim, letterSpacing: "0.08em", fontFamily: "Share Tech Mono", textTransform: "uppercase" }}>{label}</span>
+      <span style={{ fontSize: 8, color: "#334155", letterSpacing: "0.08em", fontFamily: "Share Tech Mono", textTransform: "uppercase", fontWeight: 600 }}>{label}</span>
     </div>
   );
 }
@@ -624,7 +624,7 @@ function MobileNav({ onChat, onScan, chatOpen }: { onChat: () => void; onScan: (
 // ─── DASHBOARD ────────────────────────────────────────────────────────────────
 export default function RebelDashboard() {
   const S: Record<string, React.CSSProperties> = {
-    label:   { fontFamily: "'Orbitron',monospace", fontSize: 10, letterSpacing: "0.15em", color: L.textDim },
+    label:   { fontFamily: "'Orbitron',monospace", fontSize: 10, letterSpacing: "0.15em", color: "#1e3a5f", fontWeight: 600 },
     btn:     { background: L.accent, border: "none", borderRadius: 6, color: "#fff", cursor: "pointer", padding: "0 15px", fontFamily: "'Orbitron',monospace", fontSize: 9, letterSpacing: "0.12em", whiteSpace: "nowrap", transition: "all 0.2s", boxShadow: `0 2px 8px ${L.accent}44` },
     tabBtn:  { background: "none", border: "none", cursor: "pointer", fontFamily: "'Orbitron',monospace", fontSize: 9, letterSpacing: "0.14em", padding: "8px 13px", transition: "all 0.2s" },
     spinner: { width: 13, height: 13, border: `2px solid ${L.accentDim}`, borderTop: `2px solid ${L.accent}`, borderRadius: "50%", animation: "spin 0.8s linear infinite" },
@@ -688,7 +688,7 @@ export default function RebelDashboard() {
         }
         .panel:hover{border-color:rgba(14,165,233,0.28);box-shadow:0 2px 8px rgba(14,165,233,0.1),0 8px 24px rgba(0,0,0,0.06);}
         .ph{padding:11px 16px;border-bottom:1px solid ${L.divider};display:flex;align-items:center;justify-content:space-between;}
-        .s-label{font-family:'Orbitron',monospace;font-size:10px;letter-spacing:0.15em;color:${L.textDim};}
+        .s-label{font-family:'Orbitron',monospace;font-size:10px;letter-spacing:0.15em;color:#1e3a5f;font-weight:600;}
         .row:hover{background:${L.rowHover}!important;cursor:pointer;}
         .ab:hover{opacity:0.88;transform:translateY(-1px);}
         @keyframes slideIn{from{transform:translateX(100%)}to{transform:translateX(0)}}
@@ -719,7 +719,7 @@ export default function RebelDashboard() {
           {!mobile && (
             <>
               <div style={{ width: 1, height: 18, background: L.divider }} />
-              <span style={{ fontSize: 8, color: L.textMuted, letterSpacing: "0.14em" }}>THREAT INTELLIGENCE PLATFORM</span>
+              <span style={{ fontSize: 8, color: "#334155", letterSpacing: "0.14em", fontWeight: 600 }}>THREAT INTELLIGENCE PLATFORM</span>
             </>
           )}
         </div>
@@ -755,11 +755,11 @@ export default function RebelDashboard() {
           ].map((m, i) => (
             <div key={i} className="panel" style={{ padding: mobile ? "12px 14px" : "14px 16px", background: `linear-gradient(135deg, #fff 0%, ${m.bgTint} 100%)` }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 6 }}>
-                <span style={{ ...S.label as React.CSSProperties, fontSize: mobile ? 7 : 7.5 }}>{m.label}</span>
+                <span style={{ ...S.label as React.CSSProperties, fontSize: mobile ? 7 : 8, color: "#1e3a5f", fontWeight: 700, letterSpacing: "0.12em" }}>{m.label}</span>
                 <span style={{ fontSize: mobile ? 11 : 13, color: m.color, opacity: 0.7 }}>{m.icon}</span>
               </div>
               <div style={{ fontFamily: "'Orbitron',monospace", fontSize: mobile ? 26 : 32, fontWeight: 700, color: m.color, lineHeight: 1, marginBottom: 4 }}>{m.value}</div>
-              <div style={{ fontSize: 8, color: L.textMuted, letterSpacing: "0.06em" }}>{m.sub}</div>
+              <div style={{ fontSize: 8, color: "#475569", letterSpacing: "0.06em", fontWeight: 500 }}>{m.sub}</div>
             </div>
           ))}
         </div>
@@ -772,7 +772,7 @@ export default function RebelDashboard() {
               {[["NORMAL", L.accent], ["ANOMALY", L.danger]].map(([lbl, c]) => (
                 <div key={lbl} style={{ display: "flex", alignItems: "center", gap: 5 }}>
                   <div style={{ width: 18, height: 2, background: c, borderRadius: 1, boxShadow: `0 0 4px ${c}66` }} />
-                  <span style={{ fontSize: 7.5, color: L.textDim, letterSpacing: "0.12em" }}>{lbl}</span>
+                  <span style={{ fontSize: 8, color: "#334155", letterSpacing: "0.12em", fontWeight: 600 }}>{lbl}</span>
                 </div>
               ))}
             </div>}
@@ -800,7 +800,7 @@ export default function RebelDashboard() {
             <span style={S.label as React.CSSProperties}>RISK SURFACE</span>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <span style={{ fontFamily: "'Orbitron',monospace", fontSize: 22, color: overallColor }}>{overallRisk}</span>
-              <span style={{ fontSize: 8, color: L.textMuted, fontFamily: "Share Tech Mono" }}>/ 100</span>
+              <span style={{ fontSize: 9, color: "#334155", fontFamily: "Share Tech Mono", fontWeight: 600 }}>/ 100</span>
             </div>
           </div>
           <div style={{ padding: "14px 8px", display: "flex", gap: mobile ? 6 : 5, justifyContent: mobile ? "space-around" : "center", overflowX: mobile ? "auto" : "visible", flexWrap: mobile ? "nowrap" : "wrap" }}>
@@ -818,7 +818,7 @@ export default function RebelDashboard() {
                 <button key={id} onClick={() => setActiveTab(id)} style={{ ...S.tabBtn as React.CSSProperties, color: activeTab === id ? L.accent : L.textMuted, borderBottom: activeTab === id ? `2px solid ${L.accent}` : "2px solid transparent" }}>{label}</button>
               ))}
             </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 6 }}><Pulse color={L.danger} /><span style={{ fontSize: 7.5, fontFamily: "'Orbitron',monospace", color: L.textMuted, letterSpacing: "0.1em" }}>POLLING · 2s</span></div>
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}><Pulse color={L.danger} /><span style={{ fontSize: 8, fontFamily: "'Orbitron',monospace", color: "#334155", letterSpacing: "0.1em", fontWeight: 600 }}>POLLING · 2s</span></div>
           </div>
 
           {mobile ? (
@@ -847,17 +847,17 @@ export default function RebelDashboard() {
             <>
               <div style={{ display: "grid", gridTemplateColumns: "72px 86px 118px 68px 62px 1fr 80px", padding: "7px 16px", borderBottom: `1px solid ${L.divider}`, background: L.pageBg }}>
                 {["ID", "TIME", "SRC IP", "DST PORT", "SIZE", "RISK", "STATUS"].map(h => (
-                  <span key={h} style={{ fontSize: 7, color: L.textMuted, letterSpacing: "0.14em", fontFamily: "'Orbitron',monospace" }}>{h}</span>
+                  <span key={h} style={{ fontSize: 7.5, color: "#1e3a5f", letterSpacing: "0.14em", fontFamily: "'Orbitron',monospace", fontWeight: 700 }}>{h}</span>
                 ))}
               </div>
               <div style={{ maxHeight: 268, overflowY: "auto" }}>
                 {displayFeed.map((p, i) => (
                   <div key={p.id} className="row fr" onClick={() => setEnrichTarget(p.src)} style={{ display: "grid", gridTemplateColumns: "72px 86px 118px 68px 62px 1fr 80px", padding: "8px 16px", borderBottom: `1px solid ${L.divider}`, background: i === 0 && p.label === "CRITICAL" ? "rgba(220,38,38,0.025)" : "transparent", alignItems: "center" }}>
                     <span style={{ color: L.accent, fontSize: 10 }}>{p.id}</span>
-                    <span style={{ color: L.textDim, fontSize: 10 }}>{p.time}</span>
+                    <span style={{ color: "#475569", fontSize: 10 }}>{p.time}</span>
                     <span style={{ color: L.text, fontSize: 10 }}>{p.src}</span>
-                    <span style={{ color: L.textDim, fontSize: 10 }}>:{p.dst_port}</span>
-                    <span style={{ color: L.textDim, fontSize: 10 }}>{p.size}B</span>
+                    <span style={{ color: "#475569", fontSize: 10 }}>:{p.dst_port}</span>
+                    <span style={{ color: "#475569", fontSize: 10 }}>{p.size}B</span>
                     <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
                       <div style={{ width: 36, height: 3, background: L.divider, borderRadius: 2, overflow: "hidden" }}>
                         <div style={{ width: `${p.risk * 100}%`, height: "100%", background: p.color, borderRadius: 2, transition: "width .4s" }} />
