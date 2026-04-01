@@ -1,82 +1,109 @@
 /* =====================
-   THEME TOKENS
+   THEME TOKENS — REBEL
    ===================== */
 
 :root,
 [data-theme="dark"] {
   color-scheme: dark;
 
-  /* ✅ Stronger contrast */
-  color: rgba(255, 255, 255, 0.96);
-  background-color: #0b0f17;
+  color: rgba(220, 230, 255, 0.95);
+  background-color: #080c14;
 
-  --text-primary: #ffffff;
-  --text-secondary: rgba(255, 255, 255, 0.7);
+  --text-primary:   rgba(220, 230, 255, 0.96);
+  --text-secondary: rgba(180, 200, 240, 0.55);
 
-  --scrollbar-thumb: rgba(255, 255, 255, 0.3);
-  --scrollbar-thumb-hover: rgba(255, 255, 255, 0.5);
-  --scrollbar-firefox: rgba(255, 255, 255, 0.3);
+  --scrollbar-thumb:       rgba(255, 255, 255, 0.18);
+  --scrollbar-thumb-hover: rgba(255, 255, 255, 0.32);
+  --scrollbar-firefox:     rgba(255, 255, 255, 0.18);
 
-  --btn-bg: #121826;
+  --btn-bg: rgba(255, 255, 255, 0.04);
 
-  --link-color: #3b82f6;
-  --link-hover: #60a5fa;
+  --link-color: #60a5fa;
+  --link-hover:  #93c5fd;
+
+  /* ── Rebel component tokens (dark) ── */
+  --rebel-page-bg:       #080c14;
+  --rebel-page-grad:     radial-gradient(ellipse at 15% 50%, rgba(59,130,246,0.04) 0%, transparent 55%);
+  --rebel-nav-bg:        rgba(8, 12, 20, 0.97);
+  --rebel-panel-bg:      rgba(255, 255, 255, 0.025);
+  --rebel-panel-border:  rgba(59, 130, 246, 0.09);
+  --rebel-row-hover:     rgba(59, 130, 246, 0.06);
+  --rebel-modal-bg:      #0d1117;
+  --rebel-chat-bg:       #0a0f1a;
+  --rebel-chat-border:   rgba(59, 130, 246, 0.18);
+  --rebel-msg-bg:        rgba(255, 255, 255, 0.035);
+  --rebel-drawer-bg:     linear-gradient(180deg, #070c16 0%, #080c14 100%);
+  --rebel-code-bg:       #060a10;
+  --rebel-divider:       rgba(59, 130, 246, 0.2);
+  --rebel-metric-sub:    rgba(180, 200, 240, 0.28);
 }
 
 [data-theme="light"] {
   color-scheme: light;
 
-  /* ✅ Cleaner, less grey */
-  color: #0f172a;
-  background-color: #f8fafc;
+  /*
+   * Warm cream base — not clinical white.
+   * High-contrast ink text — not washed grey.
+   * Sharp blue accent — not soft cornflower.
+   */
+  color: #0f1623;
+  background-color: #f5f2ec;
 
-  --text-primary: #0f172a;
-  --text-secondary: #0f141c;
+  --text-primary:   #0f1623;
+  --text-secondary: #4a5568;
 
-  --scrollbar-thumb: rgba(0, 0, 0, 0.25);
-  --scrollbar-thumb-hover: rgba(0, 0, 0, 0.4);
-  --scrollbar-firefox: rgba(0, 0, 0, 0.25);
+  --scrollbar-thumb:       rgba(15, 22, 35, 0.18);
+  --scrollbar-thumb-hover: rgba(15, 22, 35, 0.32);
+  --scrollbar-firefox:     rgba(15, 22, 35, 0.18);
 
   --btn-bg: #ffffff;
 
-  --link-color: #2563eb;
-  --link-hover: #1d4ed8;
+  --link-color: #1d4ed8;
+  --link-hover:  #1e40af;
+
+  /* ── Rebel component tokens (light) ── */
+  --rebel-page-bg:       #f5f2ec;
+  --rebel-page-grad:     radial-gradient(ellipse at 20% 40%, rgba(29,78,216,0.055) 0%, transparent 60%);
+  --rebel-nav-bg:        rgba(245, 242, 236, 0.96);
+  --rebel-panel-bg:      #ffffff;
+  --rebel-panel-border:  rgba(15, 22, 35, 0.08);
+  --rebel-row-hover:     rgba(29, 78, 216, 0.04);
+  --rebel-modal-bg:      #ffffff;
+  --rebel-chat-bg:       #faf9f6;
+  --rebel-chat-border:   rgba(15, 22, 35, 0.1);
+  --rebel-msg-bg:        #f5f2ec;
+  --rebel-drawer-bg:     linear-gradient(180deg, #ffffff 0%, #faf9f6 100%);
+  --rebel-code-bg:       #f0ede6;
+  --rebel-divider:       rgba(15, 22, 35, 0.1);
+  --rebel-metric-sub:    #4a5568;
 }
 
 /* =========================
    GLOBAL BASE STYLES
    ========================= */
 
-body {
+* {
+  box-sizing: border-box;
   margin: 0;
+  padding: 0;
+}
+
+body {
   min-width: 320px;
   min-height: 100vh;
-
-  display: block;
-
-  /* ✅ Use theme colors */
   color: var(--text-primary);
-  background-color: inherit;
-
+  background-color: var(--rebel-page-bg);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
     "Helvetica Neue", Arial, sans-serif;
-
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* Text hierarchy */
-p,
-span,
-small {
+p, span, small {
   color: var(--text-secondary);
 }
 
-h1,
-h2,
-h3,
-h4,
-h5 {
+h1, h2, h3, h4, h5 {
   color: var(--text-primary);
   letter-spacing: 0.04em;
 }
@@ -106,10 +133,8 @@ button {
   font-size: 0.95em;
   font-weight: 500;
   font-family: inherit;
-
   background-color: var(--btn-bg);
   color: var(--text-primary);
-
   cursor: pointer;
   transition: all 0.2s ease;
 }
@@ -125,12 +150,11 @@ button:focus-visible {
 }
 
 /* =========================
-   SCROLLBAR (CLEAN)
+   SCROLLBAR
    ========================= */
 
-/* Chrome / Edge */
 ::-webkit-scrollbar {
-  width: 8px;
+  width: 3px;
 }
 
 ::-webkit-scrollbar-thumb {
@@ -142,27 +166,153 @@ button:focus-visible {
   background-color: var(--scrollbar-thumb-hover);
 }
 
-/* Firefox */
 * {
   scrollbar-width: thin;
   scrollbar-color: var(--scrollbar-firefox) transparent;
 }
 
 /* =========================
-   OPTIONAL UI POLISH
+   REBEL SHARED CLASSES
    ========================= */
 
-/* Cards / panels (use if needed) */
-.card {
-  background: rgba(255, 255, 255, 0.02);
-  border: 1px solid rgba(59, 130, 246, 0.15);
-  color: var(--text-primary);
+.panel {
+  background: var(--rebel-panel-bg);
+  border: 1px solid var(--rebel-panel-border);
+  border-radius: 2px;
+  transition: border-color 0.3s, box-shadow 0.3s;
 }
 
-/* Neon accent glow (fits your UI style) */
+/* Light mode gets a subtle lift on hover instead of glow */
+[data-theme="light"] .panel:hover {
+  border-color: rgba(29, 78, 216, 0.2);
+  box-shadow: 0 2px 12px rgba(15, 22, 35, 0.06);
+}
+
+[data-theme="dark"] .panel:hover {
+  border-color: rgba(59, 130, 246, 0.2);
+}
+
+.ph {
+  padding: 10px 15px;
+  border-bottom: 1px solid var(--rebel-panel-border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+/* Label style — uses accent blue in light mode for crispness */
+.s-label {
+  font-family: 'Orbitron', monospace;
+  font-size: 10px;
+  letter-spacing: 0.15em;
+  color: var(--text-secondary);
+}
+
+[data-theme="light"] .s-label {
+  color: #1d4ed8;
+  opacity: 0.7;
+}
+
+.row:hover {
+  background: var(--rebel-row-hover) !important;
+  cursor: pointer;
+}
+
+.ab:hover {
+  filter: brightness(1.1);
+}
+
+/* Inputs */
+.rebel-input {
+  background: var(--btn-bg);
+  border: 1px solid var(--rebel-panel-border);
+  border-radius: 3px;
+  padding: 8px 12px;
+  color: var(--text-primary);
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 12px;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.rebel-input:focus {
+  border-color: rgba(29, 78, 216, 0.4);
+}
+
+[data-theme="dark"] .rebel-input:focus {
+  border-color: rgba(59, 130, 246, 0.5);
+}
+
+/* Buttons */
+.rebel-btn {
+  background: rgba(29, 78, 216, 0.08);
+  border: 1px solid rgba(29, 78, 216, 0.25);
+  border-radius: 3px;
+  color: #1d4ed8;
+  cursor: pointer;
+  padding: 0 15px;
+  font-family: 'Orbitron', monospace;
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  white-space: nowrap;
+  transition: all 0.2s;
+}
+
+.rebel-btn:hover {
+  background: rgba(29, 78, 216, 0.14);
+  border-color: rgba(29, 78, 216, 0.4);
+}
+
+[data-theme="dark"] .rebel-btn {
+  background: rgba(59, 130, 246, 0.1);
+  border-color: rgba(59, 130, 246, 0.32);
+  color: #60a5fa;
+}
+
+[data-theme="dark"] .rebel-btn:hover {
+  background: rgba(59, 130, 246, 0.18);
+}
+
+/* Ghost close button */
+.rebel-ghost-btn {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 16px;
+  padding: 4px;
+  opacity: 0.6;
+  transition: opacity 0.2s;
+}
+
+.rebel-ghost-btn:hover {
+  opacity: 1;
+}
+
+/* Spinner */
+.rebel-spinner {
+  width: 13px;
+  height: 13px;
+  border: 2px solid rgba(29, 78, 216, 0.15);
+  border-top: 2px solid #1d4ed8;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+[data-theme="dark"] .rebel-spinner {
+  border-color: rgba(59, 130, 246, 0.15);
+  border-top-color: #60a5fa;
+}
+
+/* Neon accent — toned down to ink-glow in light mode */
 .neon {
-  color: #3b82f6;
-  text-shadow: 0 0 6px rgba(59, 130, 246, 0.6);
+  color: #1d4ed8;
+  text-shadow: none;
+}
+
+[data-theme="dark"] .neon {
+  color: #60a5fa;
+  text-shadow: 0 0 6px rgba(96, 165, 250, 0.5);
 }
 
 /* =========================
@@ -172,19 +322,29 @@ button:focus-visible {
 @media (prefers-color-scheme: light) {
   :root:not([data-theme]) {
     color-scheme: light;
-    color: #0f172a;
-    background-color: #f8fafc;
-
-    --text-primary: #0f172a;
-    --text-secondary: #475569;
-
-    --scrollbar-thumb: rgba(0, 0, 0, 0.25);
-    --scrollbar-thumb-hover: rgba(0, 0, 0, 0.4);
-    --scrollbar-firefox: rgba(0, 0, 0, 0.25);
-
+    color: #0f1623;
+    background-color: #f5f2ec;
+    --text-primary:   #0f1623;
+    --text-secondary: #4a5568;
+    --scrollbar-thumb:       rgba(15, 22, 35, 0.18);
+    --scrollbar-thumb-hover: rgba(15, 22, 35, 0.32);
+    --scrollbar-firefox:     rgba(15, 22, 35, 0.18);
     --btn-bg: #ffffff;
-
-    --link-color: #2563eb;
-    --link-hover: #1d4ed8;
+    --link-color: #1d4ed8;
+    --link-hover:  #1e40af;
+    --rebel-page-bg:       #f5f2ec;
+    --rebel-page-grad:     radial-gradient(ellipse at 20% 40%, rgba(29,78,216,0.055) 0%, transparent 60%);
+    --rebel-nav-bg:        rgba(245, 242, 236, 0.96);
+    --rebel-panel-bg:      #ffffff;
+    --rebel-panel-border:  rgba(15, 22, 35, 0.08);
+    --rebel-row-hover:     rgba(29, 78, 216, 0.04);
+    --rebel-modal-bg:      #ffffff;
+    --rebel-chat-bg:       #faf9f6;
+    --rebel-chat-border:   rgba(15, 22, 35, 0.1);
+    --rebel-msg-bg:        #f5f2ec;
+    --rebel-drawer-bg:     linear-gradient(180deg, #ffffff 0%, #faf9f6 100%);
+    --rebel-code-bg:       #f0ede6;
+    --rebel-divider:       rgba(15, 22, 35, 0.1);
+    --rebel-metric-sub:    #4a5568;
   }
 }
