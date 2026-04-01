@@ -13,13 +13,95 @@ import type { PQCScoreBreakdown } from "./cipherAnalysis.js";
 
 const API = "https://r3bel-production.up.railway.app";
 
+// ── Light Theme Palette ───────────────────────────────────────────────────────
+const L = {
+  // Backgrounds
+  pageBg:      "#f5f7fa",
+  panelBg:     "#ffffff",
+  panelBorder: "#e2e8f0",
+  rowHover:    "rgba(59,130,246,0.04)",
+  subtleBg:    "#f8fafc",
+  insetBg:     "#f1f5f9",
+
+  // Text
+  text1:  "#0f172a",   // headings
+  text2:  "#334155",   // body
+  text3:  "#64748b",   // secondary / labels
+  text4:  "#94a3b8",   // muted
+
+  // Brand accents (matching original hues but vivid on light)
+  blue:   "#1d4ed8",
+  cyan:   "#0284c7",
+  green:  "#16a34a",
+  yellow: "#b45309",
+  orange: "#c2410c",
+  red:    "#dc2626",
+
+  // Borders & dividers
+  border:      "#e2e8f0",
+  borderLight: "#f1f5f9",
+};
+
+// Light-mode style helpers
+const LS = {
+  page: {
+    background: L.pageBg,
+    minHeight: "100vh",
+    padding: "20px 16px",
+    display: "flex",
+    flexDirection: "column" as const,
+    gap: 12,
+    fontFamily: "'DM Sans', system-ui, sans-serif",
+    color: L.text1,
+  },
+  panel: {
+    background: L.panelBg,
+    border: `1px solid ${L.panelBorder}`,
+    borderRadius: 8,
+    boxShadow: "0 1px 4px rgba(0,0,0,0.06)",
+  },
+  input: {
+    background: L.insetBg,
+    border: `1px solid ${L.border}`,
+    borderRadius: 5,
+    color: L.text1,
+    padding: "7px 10px",
+    fontSize: 12,
+    outline: "none",
+  },
+  btn: {
+    background: L.subtleBg,
+    border: `1px solid ${L.border}`,
+    borderRadius: 4,
+    color: L.text2,
+    padding: "5px 11px",
+    cursor: "pointer",
+    fontSize: 11,
+    fontWeight: 600,
+    letterSpacing: ".06em",
+  },
+};
+
+// ── INR Formatter ─────────────────────────────────────────────────────────────
+const INR_RATE = 83; // 1 USD = 83 INR (approximate)
+function toINR(usd: number): number { return Math.round(usd * INR_RATE); }
+function fmtINR(usd: number): string {
+  const inr = toINR(usd);
+  if (inr >= 10000000) return `₹${(inr/10000000).toFixed(2)}Cr`;
+  if (inr >= 100000)   return `₹${(inr/100000).toFixed(1)}L`;
+  return `₹${inr.toLocaleString("en-IN")}`;
+}
+function fmtINRFull(usd: number): string {
+  return `₹${toINR(usd).toLocaleString("en-IN")}`;
+}
+
 const EFFORT: Record<string, number> = {
   "Web App": 2, "Web Apps": 2,
   "API": 3,     "APIs": 3,
   "Server": 5,  "Servers": 5,
   "LB": 1,      "Other": 3,
 };
-const DEV_RATE = 800;
+const DEV_RATE_USD = 800; // internal USD base; display in INR
 
 function normaliseDomain(raw: string): string {
   return raw.trim().toLowerCase()
@@ -70,30 +152,62 @@ function useBreakpoint() {
   return bp;
 }
 
+// ── Light Panel Components ────────────────────────────────────────────────────
+function LPanel({ children, style={} }: { children: React.ReactNode; style?: React.CSSProperties }) {
+  return <div style={{...LS.panel, ...style}}>{children}</div>;
+}
+
+function LPanelHeader({ left, right }: { left: string; right?: React.ReactNode }) {
+  return (
+    <div style={{
+      display: "flex", justifyContent: "space-between", alignItems: "center",
+      padding: "10px 14px", borderBottom: `1px solid ${L.borderLight}`,
+      background: L.subtleBg, borderRadius: "8px 8px 0 0",
+    }}>
+      <span style={{ fontSize: 9, fontWeight: 700, color: L.text3, letterSpacing: ".14em", textTransform: "uppercase" }}>{left}</span>
+      {right}
+    </div>
+  );
+}
+
+function LMetricCard({ label, value, sub, color }: { label: string; value: string|number; sub: string; color: string }) {
+  return (
+    <div style={{
+      background: L.panelBg, border: `1px solid ${L.panelBorder}`, borderRadius: 8,
+      padding: "14px 16px", boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
+    }}>
+      <div style={{ fontSize: 8, color: L.text4, textTransform: "uppercase", letterSpacing: ".12em", marginBottom: 6 }}>{label}</div>
+      <div style={{ fontSize: 22, fontWeight: 800, color, lineHeight: 1 }}>{value}</div>
+      <div style={{ fontSize: 9, color: L.text3, marginTop: 5 }}>{sub}</div>
+    </div>
+  );
+}
+
 // ── PDF Export ────────────────────────────────────────────────────────────────
 function exportAuditPDF(
   enriched: any[], migrationScore: number, pqcReady: number, total: number,
-  totalDays: number, calDays: number, totalCost: number,
-  teamSize: number, devRate: number, dateStr: string,
+  totalDays: number, calDays: number, totalCostUSD: number,
+  teamSize: number, devRateUSD: number, dateStr: string,
   clientName: string, clientDomain: string,
   milestoneData: { label:string; done:boolean; pct:number }[],
 ) {
   const now       = new Date();
-  const timestamp = now.toLocaleString("en-US",{year:"numeric",month:"long",day:"numeric",hour:"2-digit",minute:"2-digit",timeZoneName:"short"});
+  const timestamp = now.toLocaleString("en-IN",{year:"numeric",month:"long",day:"numeric",hour:"2-digit",minute:"2-digit",timeZoneName:"short"});
   const scanDate  = now.toISOString().split("T")[0];
   const reportId  = `REBEL-${scanDate.replace(/-/g,"")}-${Math.random().toString(36).slice(2,8).toUpperCase()}`;
   const scoreColor= migrationScore>=70?"#16a34a":migrationScore>=40?"#d97706":"#dc2626";
   const scoreLabel= migrationScore>=70?"COMPLIANT":migrationScore>=40?"AT RISK":"CRITICAL";
   const displayName = clientName.trim()||(clientDomain?normaliseDomain(clientDomain):"All Assets");
 
+  const totalCostINR = toINR(totalCostUSD);
+  const devRateINR   = toINR(devRateUSD);
 
-// Gauge SVG
-  // ✅ AFTER — declare them first
-    const weightedScore = migrationScore
-    const sc = migrationScore >= 70 ? "#16a34a" : migrationScore >= 40 ? "#d97706" : "#dc2626"
-    const sl = migrationScore >= 70 ? "COMPLIANT" : migrationScore >= 40 ? "AT RISK" : "CRITICAL"
+  // Gauge SVG
+  const weightedScore = migrationScore;
+  const sc = migrationScore >= 70 ? "#16a34a" : migrationScore >= 40 ? "#d97706" : "#dc2626";
+  const sl = migrationScore >= 70 ? "COMPLIANT" : migrationScore >= 40 ? "AT RISK" : "CRITICAL";
 
-    const pct = weightedScore / 100, gr = 54, gcx = 70, gcy = 75
+  const pct = weightedScore / 100, gr = 54, gcx = 70, gcy = 75;
   const gx1=gcx+gr*Math.cos(Math.PI), gy1=gcy+gr*Math.sin(Math.PI);
   const gx2=gcx+gr*Math.cos(Math.PI+Math.PI*pct);
   const gy2=gcy+gr*Math.sin(Math.PI+Math.PI*pct);
@@ -109,7 +223,6 @@ function exportAuditPDF(
       font-family="Arial" font-size="7" fill="#6b7280" letter-spacing="1">${sl}</text>
   </svg>`;
 
-  // Score distribution — milestone pass/fail for PDF
   const scoreDist = milestoneData.map(m => {
     const color = m.done ? "#16a34a" : m.pct > 50 ? "#eab308" : "#ef4444";
     return `<div style="margin-bottom:9px;">
@@ -126,7 +239,6 @@ function exportAuditPDF(
     </div>`;
   }).join("");
 
-  // Asset table
   const assetRows = enriched.map((a,i)=>{
     const rc=a.risk==="Critical"?"#dc2626":a.risk==="High"?"#ea580c":a.risk==="Medium"?"#d97706":"#16a34a";
     const kc=a.keylen?.startsWith("1024")?"#dc2626":a.keylen?.startsWith("2048")?"#d97706":"#16a34a";
@@ -135,7 +247,6 @@ function exportAuditPDF(
     const ps=a.pqcScore as PQCScoreBreakdown|undefined;
     const psc=ps?.active?"#16a34a":ps?.color??"#ef4444";
     const psl=ps?.active?"ACTIVE":ps?`${ps.score}/100`:"—";
-    // criterion dots
     const dots=ps?Object.values(ps.criteria).map((c:any)=>
       `<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${c.pass?"#16a34a":c.pts>0?"#eab308":"#ef4444"};margin-right:2px;" title="${c.label}: ${c.pts}/${c.max}"></span>`
     ).join(""):"";
@@ -153,11 +264,10 @@ function exportAuditPDF(
         <div style="margin-top:3px;">${dots}</div>
       </td>
       <td style="padding:5px 7px;font-size:8px;color:#0891b2;text-align:center;">${a.days}d</td>
-      <td style="padding:5px 7px;font-size:8px;color:#ea580c;text-align:right;font-weight:600;">$${a.cost.toLocaleString()}</td>
+      <td style="padding:5px 7px;font-size:8px;color:#ea580c;text-align:right;font-weight:600;">${fmtINRFull(a.cost)}</td>
     </tr>`;
   }).join("");
 
-  // Criteria legend
   const criteriaLegend=[
     {label:"Cert RSA-4096 / EC P-384",max:70,color:"#1e40af"},
     {label:"No wildcard certificate", max:20,color:"#0891b2"},
@@ -171,7 +281,6 @@ function exportAuditPDF(
       <span style="color:${c.color};font-weight:700;min-width:30px;text-align:right;">${c.max>0?`${c.max}pts`:"info"}</span>
     </div>`).join("");
 
-  // DORA
   const doraRows=[
     {art:"Art. 9.2", title:"ICT Asset Register",      desc:"Maintain an up-to-date register of all ICT assets including cryptographic configurations.", status:total>0?"COVERED":"PENDING"},
     {art:"Art. 9.4", title:"Cryptographic Controls",   desc:"Implement cryptographic controls protecting data in transit and at rest.",                  status:enriched.filter(a=>a.status!=="weak"&&a.status!=="WEAK").length>0?"PARTIAL":"PENDING"},
@@ -187,7 +296,6 @@ function exportAuditPDF(
     </tr>`;
   }).join("");
 
-  // Remediation
   const remCards=[
     {title:"Upgrade Certificate Key",  color:"#dc2626",bg:"#fef2f2",border:"#fecaca",
      count:enriched.filter(a=>!(a.pqcScore?.criteria?.certKey4096?.pass)).length,
@@ -304,7 +412,7 @@ function exportAuditPDF(
         </div>
         <div class="grid2">
           <div class="card"><div class="lbl">Est. Timeline</div><div class="val" style="color:#0891b2;">${calDays}d</div><div class="sub">${teamSize} dev · ${totalDays} dev-days</div></div>
-          <div class="card"><div class="lbl">Est. Cost</div><div class="val" style="color:#ea580c;">$${(totalCost/1000).toFixed(1)}k</div><div class="sub">At $${devRate}/dev/day</div></div>
+          <div class="card"><div class="lbl">Est. Cost</div><div class="val" style="color:#ea580c;">${fmtINR(totalCostUSD)}</div><div class="sub">At ${fmtINR(devRateUSD)}/dev/day</div></div>
         </div>
         <div class="card" style="background:#f8fafc;"><div class="lbl">Projected Completion</div><div style="font-size:16px;font-weight:700;color:#0891b2;margin-top:4px;">${dateStr}</div><div class="sub">${teamSize}-dev team</div></div>
       </div>
@@ -343,13 +451,13 @@ function exportAuditPDF(
       <thead><tr>
         <th style="width:22px;">#</th><th>Application</th><th>Type</th><th>Risk</th>
         <th>Key Len</th><th>Cipher Suite</th><th>TLS</th><th>CA</th>
-        <th style="text-align:center;">PQC Score</th><th>Days</th><th>Cost</th>
+        <th style="text-align:center;">PQC Score</th><th>Days</th><th>Cost (INR)</th>
       </tr></thead>
       <tbody>${assetRows}</tbody>
       <tfoot><tr style="background:#f8fafc;border-top:2px solid #e5e7eb;">
         <td colspan="9" style="padding:7px 10px;font-size:9px;color:#374151;font-weight:700;">TOTALS</td>
         <td style="padding:7px 10px;font-size:9px;color:#0891b2;font-weight:700;text-align:center;">${totalDays}d</td>
-        <td style="padding:7px 10px;font-size:9px;color:#ea580c;font-weight:700;text-align:right;">$${totalCost.toLocaleString()}</td>
+        <td style="padding:7px 10px;font-size:9px;color:#ea580c;font-weight:700;text-align:right;">${fmtINRFull(totalCostUSD)}</td>
       </tr></tfoot>
     </table>
     <div style="margin-top:6px;font-size:7px;color:#9ca3af;">
@@ -380,7 +488,7 @@ function exportAuditPDF(
   <div class="footer">
     REBEL Threat Intelligence Platform · r3bel-production.up.railway.app · Report ID: ${reportId} · ${displayName}
     ${clientDomain?`· Scope: *.${normaliseDomain(clientDomain)}`:""}
-    <br/>Confidential — intended solely for the named organisation.
+    <br/>Confidential — intended solely for the named organisation. · Costs displayed in Indian Rupees (INR).
   </div>
 
 </div>
@@ -407,21 +515,32 @@ function ScoreGauge({ score, size=200 }: { score:number; size?:number }) {
     const ctx=c.getContext("2d")!;
     const W=size,H=Math.round(size*0.6),cx=W/2,cy=H+5,r=Math.round(size*0.4);
     c.width=W; c.height=H; ctx.clearRect(0,0,W,H);
-    ctx.beginPath(); ctx.arc(cx,cy,r,Math.PI,0,false); ctx.lineWidth=Math.round(size*0.06); ctx.strokeStyle="rgba(59,130,246,0.1)"; ctx.stroke();
-    const col=shown>=70?T.green:shown>=40?T.yellow:T.red;
+    // Track background
+    ctx.beginPath(); ctx.arc(cx,cy,r,Math.PI,0,false);
+    ctx.lineWidth=Math.round(size*0.06); ctx.strokeStyle="#e2e8f0"; ctx.stroke();
+    const col=shown>=70?L.green:shown>=40?L.yellow:L.red;
     const safePct = Math.min(0.999, Math.max(0.001, shown/100));
-    ctx.beginPath(); ctx.arc(cx,cy,r,Math.PI,Math.PI+Math.PI*safePct,false); ctx.lineWidth=Math.round(size*0.06); ctx.strokeStyle=col; ctx.lineCap="round"; ctx.shadowColor=col; ctx.shadowBlur=10; ctx.stroke(); ctx.shadowBlur=0;
-    for(let i=0;i<=10;i++){const a=Math.PI+(Math.PI*i)/10;ctx.beginPath();ctx.moveTo(cx+(r-size*0.09)*Math.cos(a),cy+(r-size*0.09)*Math.sin(a));ctx.lineTo(cx+(r-size*0.05)*Math.cos(a),cy+(r-size*0.05)*Math.sin(a));ctx.strokeStyle="rgba(200,220,255,0.15)";ctx.lineWidth=1;ctx.stroke();}
+    ctx.beginPath(); ctx.arc(cx,cy,r,Math.PI,Math.PI+Math.PI*safePct,false);
+    ctx.lineWidth=Math.round(size*0.06); ctx.strokeStyle=col; ctx.lineCap="round";
+    ctx.shadowColor=col; ctx.shadowBlur=8; ctx.stroke(); ctx.shadowBlur=0;
+    // Tick marks
+    for(let i=0;i<=10;i++){
+      const a=Math.PI+(Math.PI*i)/10;
+      ctx.beginPath();
+      ctx.moveTo(cx+(r-size*0.09)*Math.cos(a),cy+(r-size*0.09)*Math.sin(a));
+      ctx.lineTo(cx+(r-size*0.05)*Math.cos(a),cy+(r-size*0.05)*Math.sin(a));
+      ctx.strokeStyle="#cbd5e1"; ctx.lineWidth=1; ctx.stroke();
+    }
   },[shown,size]);
-  const col=shown>=70?T.green:shown>=40?T.yellow:T.red;
+  const col=shown>=70?L.green:shown>=40?L.yellow:L.red;
   const label=shown>=70?"GOOD":shown>=40?"AT RISK":"CRITICAL";
   return (
     <div style={{display:"flex",flexDirection:"column",alignItems:"center",width:"100%"}}>
       <canvas ref={ref} style={{width:"100%",maxWidth:size,height:"auto"}}/>
       <div style={{marginTop:-6,textAlign:"center"}}>
-        <div style={{fontFamily:"'Orbitron',monospace",fontSize:Math.round(size*0.18),fontWeight:900,color:col,textShadow:`0 0 20px ${col}44`}}>{shown}</div>
-        <div style={{fontFamily:"'Orbitron',monospace",fontSize:9,color:col,letterSpacing:".2em",marginTop:2}}>{label}</div>
-        <div style={{fontSize:9,color:T.text3,marginTop:4}}>MIGRATION PROGRESS</div>
+        <div style={{fontFamily:"'DM Mono',monospace",fontSize:Math.round(size*0.18),fontWeight:900,color:col}}>{shown}</div>
+        <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:col,letterSpacing:".2em",marginTop:2}}>{label}</div>
+        <div style={{fontSize:9,color:L.text3,marginTop:4}}>MIGRATION PROGRESS</div>
       </div>
     </div>
   );
@@ -432,35 +551,46 @@ function RoadmapCard({ a, i }: { a:any; i:number }) {
   const [open, setOpen] = useState(false);
   const ps = a.pqcScore as PQCScoreBreakdown|undefined;
   return (
-    <div className="pqc-row" style={{borderBottom:`1px solid rgba(59,130,246,0.05)`,animationDelay:`${i*0.04}s`}}>
+    <div style={{
+      borderBottom:`1px solid ${L.borderLight}`,
+      background: L.panelBg,
+      animation:`fadeIn 0.3s ease both`,
+      animationDelay:`${i*0.04}s`,
+      transition: "background 0.15s",
+    }}
+      onMouseEnter={e=>(e.currentTarget.style.background=L.subtleBg)}
+      onMouseLeave={e=>(e.currentTarget.style.background=L.panelBg)}
+    >
       <div onClick={()=>setOpen(o=>!o)} style={{padding:"10px 14px",cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
         <div style={{display:"flex",alignItems:"center",gap:8,minWidth:0,flex:1}}>
-          <span style={{fontFamily:"'Orbitron',monospace",fontSize:9,color:T.text3,flexShrink:0}}>#{i+1}</span>
-          <span style={{fontSize:12,color:T.blue,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{a.app}</span>
-          {a.isPublic&&<span style={{fontSize:7,color:T.cyan,border:`1px solid ${T.cyan}44`,borderRadius:2,padding:"1px 4px",flexShrink:0}}>PUB</span>}
+          <span style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:L.text4,flexShrink:0}}>#{i+1}</span>
+          <span style={{fontSize:12,color:L.blue,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",fontWeight:500}}>{a.app}</span>
+          {a.isPublic&&<span style={{fontSize:7,color:L.cyan,border:`1px solid ${L.cyan}55`,borderRadius:2,padding:"1px 4px",flexShrink:0,background:`${L.cyan}10`}}>PUB</span>}
         </div>
         <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
-          {ps&&<span style={{fontSize:8,fontWeight:700,color:ps.color,border:`1px solid ${ps.color}44`,borderRadius:2,padding:"1px 5px"}}>{ps.active?"ACTIVE":`${ps.score}/100`}</span>}
+          {ps&&<span style={{fontSize:8,fontWeight:700,color:ps.color,border:`1px solid ${ps.color}55`,borderRadius:2,padding:"1px 5px",background:`${ps.color}10`}}>{ps.active?"ACTIVE":`${ps.score}/100`}</span>}
           <Badge v={riskVariant(a.risk)}>{a.risk}</Badge>
-          <span style={{fontSize:10,color:T.text3}}>{open?"▲":"▼"}</span>
+          <span style={{fontSize:10,color:L.text4}}>{open?"▲":"▼"}</span>
         </div>
       </div>
       <div style={{padding:"0 14px 10px",display:"flex",gap:10,flexWrap:"wrap"}}>
-        <span style={{fontSize:9,color:T.text3}}>{a.assetType}</span>
-        <span style={{fontSize:9,color:T.cyan}}>{a.days}d</span>
-        <span style={{fontSize:9,color:T.orange}}>${a.cost.toLocaleString()}</span>
-        <span style={{fontSize:9,color:a.pqc?T.green:T.red}}>{a.pqc?"PQC ✓":"PQC ✗"}</span>
+        <span style={{fontSize:9,color:L.text3}}>{a.assetType}</span>
+        <span style={{fontSize:9,color:L.cyan,fontWeight:600}}>{a.days}d</span>
+        <span style={{fontSize:9,color:L.orange,fontWeight:600}}>{fmtINR(a.cost)}</span>
+        <span style={{fontSize:9,color:a.pqc?L.green:L.red,fontWeight:600}}>{a.pqc?"PQC ✓":"PQC ✗"}</span>
       </div>
       {open&&ps&&(
-        <div style={{padding:"0 14px 12px",borderTop:`1px solid rgba(59,130,246,0.06)`,paddingTop:10}}>
+        <div style={{padding:"0 14px 12px",borderTop:`1px solid ${L.borderLight}`,paddingTop:10,background:L.insetBg}}>
           {Object.values(ps.criteria).map((c:any)=>(
             <div key={c.label} style={{display:"flex",alignItems:"center",gap:8,fontSize:9,marginBottom:4}}>
-              <span style={{color:c.pass?"#22c55e":c.pts>0?"#eab308":"#ef4444",width:10}}>{c.pass?"✓":c.pts>0?"~":"✗"}</span>
-              <span style={{color:T.text3,flex:1}}>{c.label}</span>
-              <span style={{color:T.text2,fontFamily:"'Orbitron',monospace"}}>{c.pts}/{c.max}</span>
+              <span style={{color:c.pass?"#16a34a":c.pts>0?"#b45309":"#dc2626",width:10,fontWeight:700}}>{c.pass?"✓":c.pts>0?"~":"✗"}</span>
+              <span style={{color:L.text2,flex:1}}>{c.label}</span>
+              <span style={{color:L.text1,fontFamily:"'DM Mono',monospace",fontWeight:600}}>{c.pts}/{c.max}</span>
             </div>
           ))}
-          <div style={{fontSize:8,color:T.text3,marginTop:6,fontStyle:"italic"}}>{ps.active?"Kyber hybrid active — ACTIVE status confirmed.":ps.score>=70?"Address remaining criteria then deploy Kyber hybrid.":"Significant gaps — fix cert key and wildcard first."}</div>
+          <div style={{fontSize:8,color:L.text3,marginTop:6,fontStyle:"italic"}}>
+            {ps.active?"Kyber hybrid active — ACTIVE status confirmed.":ps.score>=70?"Address remaining criteria then deploy Kyber hybrid.":"Significant gaps — fix cert key and wildcard first."}
+          </div>
         </div>
       )}
     </div>
@@ -472,7 +602,7 @@ export default function PQCReadinessPage() {
   const [cbomData,     setCbomData]     = useState<any[]>([]);
   const [assets,       setAssets]       = useState<any[]>([]);
   const [teamSize,     setTeamSize]     = useState(2);
-  const [devRate,      setDevRate]      = useState(DEV_RATE);
+  const [devRate,      setDevRate]      = useState(DEV_RATE_USD); // stored in USD internally
   const [domainInput,  setDomainInput]  = useState("");
   const [activeDomain, setActiveDomain] = useState("");
   const [clientName,   setClientName]   = useState("");
@@ -480,8 +610,6 @@ export default function PQCReadinessPage() {
   const bp=useBreakpoint(), isMobile=bp==="mobile", isTablet=bp==="tablet", isDesktop=bp==="desktop";
 
   useEffect(() => {
-    // Same merge as CBOMPage — registered assets enrich CBOM entries,
-    // registry-only assets appended so PQC scoring sees all assets
     Promise.all([
       fetch(`${API}/cbom`).then(r => r.json()).catch(() => ({})),
       fetch(`${API}/assets`).then(r => r.json()).catch(() => ({ assets: [] })),
@@ -530,14 +658,12 @@ export default function PQCReadinessPage() {
     });
   }, []);
 
-
   const displayCbom   = cbomData.length ? cbomData   : MOCK_CBOM;
   const displayAssets = assets.length   ? assets     : MOCK_ASSETS;
 
   const scopedCbom  = activeDomain ? displayCbom.filter((a:any)=>appMatchesDomain(a.app??"",activeDomain)) : displayCbom;
   const uniqueCbom  = scopedCbom.filter((a:any,i:number,arr:any[])=>arr.findIndex((b:any)=>b.app===a.app)===i);
 
-  // Compute per-app PQC score
   const withPQCScore = uniqueCbom.map((app:any)=>{
     const analysis = fullAnalysis(app.cipher??"", app.tls??"", app.key_exchange_group??null);
     const ps = pqcReadinessScore(analysis.components, app.tls, app.keylen, app.is_wildcard??false);
@@ -545,42 +671,18 @@ export default function PQCReadinessPage() {
   });
 
   // ── Migration Progress Score ──────────────────────────────────────────────
-  // Scores the BANK'S ACTUAL PQC PROGRAMME PROGRESS — not TLS hygiene.
-  // TLS 1.3 and no-broken-ciphers are table stakes that every public site has.
-  // Real milestones are things only a bank actively working on PQC would pass.
-  //
-  // Five milestones × 20pts = 100:
-  //   1. All certs RSA-4096 or EC P-384      (20pts) — cert upgrade programme done
-  //   2. Zero wildcard certs in portfolio    (20pts) — cert discipline enforced
-  //   3. AES-256-GCM on 100% of apps        (20pts) — cipher policy enforced
-  //   4. TLS 1.2 completely eliminated       (20pts) — protocol policy enforced
-  //   5. At least one app running Kyber      (20pts) — active PQC deployment
-  //
-  // A bank that has done nothing PQC-specific scores 0–20.
-  // A bank that has done the cert work scores 40–60.
-  // Full marks requires Kyber deployed.
   const n = withPQCScore.length || 1;
 
-  // Milestone 1: ALL certs are RSA-4096 or EC P-384
   const allCertsStrong = withPQCScore.every((a: any) => {
     const bits = parseInt(String(a.keylen ?? "0").match(/(\d+)/)?.[1] ?? "0", 10);
     return bits >= 4096 || bits === 384;
   });
-
-  // Milestone 2: ZERO wildcard certs
-  // is_wildcard must be explicitly false — undefined (not sent by backend) = unknown = fail
   const noWildcards = withPQCScore.every((a: any) => a.is_wildcard === false);
-
-  // Milestone 3: AES-256-GCM or ChaCha20 on ALL apps (no AES-128 anywhere)
   const allAES256 = withPQCScore.every((a: any) => {
     const bulk = a.analysis?.components?.bulkCipher ?? "";
     return bulk === "AES-256-GCM" || bulk === "ChaCha20-Poly1305";
   });
-
-  // Milestone 4: TLS 1.2 completely eliminated (100% TLS 1.3)
   const allTLS13 = withPQCScore.every((a: any) => normaliseTLS(a.tls) === "1.3");
-
-  // Milestone 5: At least one app with Kyber/ML-KEM hybrid
   const anyKyber = withPQCScore.some((a: any) => a.pqcScore?.active);
 
   const migrationScore = Math.round(
@@ -591,7 +693,6 @@ export default function PQCReadinessPage() {
     (anyKyber       ? 20 : 0)
   );
 
-  // Partial progress bars (% of apps passing each criterion)
   const certStrongPct  = Math.round(withPQCScore.filter((a:any)=>{ const b=parseInt(String(a.keylen??"0").match(/(\d+)/)?.[1]??"0",10); return b>=4096||b===384; }).length/n*100);
   const noWildPct      = Math.round(withPQCScore.filter((a:any)=>a.is_wildcard===false).length/n*100);
   const aes256Pct      = Math.round(withPQCScore.filter((a:any)=>{ const bulk=a.analysis?.components?.bulkCipher??""; return bulk==="AES-256-GCM"||bulk==="ChaCha20-Poly1305"; }).length/n*100);
@@ -611,7 +712,7 @@ export default function PQCReadinessPage() {
     const asset=matchAsset(app.app,displayAssets);
     const assetType=asset?.type??"Other";
     const days=EFFORT[assetType]??3;
-    const cost=days*devRate;
+    const cost=days*devRate; // USD internally
     const weight=riskWeight(app,asset);
     const risk=riskLabel(weight);
     const isPublic=asset?.type==="Web Apps"||asset?.type==="Web App";
@@ -622,21 +723,21 @@ export default function PQCReadinessPage() {
   const pqcReady    = withPQCScore.filter((a:any)=>a.pqc&&a.status!=="weak"&&a.status!=="WEAK").length;
   const totalDays   = enriched.reduce((s:number,a:any)=>s+a.days,0);
   const calDays     = Math.ceil(totalDays/Math.max(teamSize,1));
-  const totalCost   = enriched.reduce((s:number,a:any)=>s+a.cost,0);
+  const totalCost   = enriched.reduce((s:number,a:any)=>s+a.cost,0); // USD
   const critCount   = enriched.filter((a:any)=>a.risk==="Critical").length;
   const highCount   = enriched.filter((a:any)=>a.risk==="High").length;
   const unmatchedCount = enriched.filter((a:any)=>!a.asset).length;
 
   const completionDate=new Date(); completionDate.setDate(completionDate.getDate()+calDays);
-  const dateStr=completionDate.toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"});
+  const dateStr=completionDate.toLocaleDateString("en-IN",{month:"short",day:"numeric",year:"numeric"});
 
   function applyDomain(){ setActiveDomain(domainInput.trim()); }
   function clearFilter(){ setDomainInput(""); setActiveDomain(""); setClientName(""); }
 
   function exportCSV(){
     const rows=[
-      ["Priority","App","Asset Type","Risk","Key Length","Cipher","TLS","CA","PQC Score","PQC Label","Days","Cost ($)","Public","PQC Active"],
-      ...enriched.map((a:any,i:number)=>[i+1,a.app,a.assetType,a.risk,a.keylen,a.cipher,a.tls,a.ca,a.pqcScore?.score??0,a.pqcScore?.active?"ACTIVE":a.pqcScore?.label??"—",a.days,a.cost,a.isPublic?"Yes":"No",a.pqc?"Yes":"No"])
+      ["Priority","App","Asset Type","Risk","Key Length","Cipher","TLS","CA","PQC Score","PQC Label","Days","Cost (INR)","Public","PQC Active"],
+      ...enriched.map((a:any,i:number)=>[i+1,a.app,a.assetType,a.risk,a.keylen,a.cipher,a.tls,a.ca,a.pqcScore?.score??0,a.pqcScore?.active?"ACTIVE":a.pqcScore?.label??"—",a.days,fmtINRFull(a.cost),a.isPublic?"Yes":"No",a.pqc?"Yes":"No"])
     ];
     const csv=rows.map((r:any)=>r.join(",")).join("\n");
     const blob=new Blob([csv],{type:"text/csv"}); const url=URL.createObjectURL(blob);
@@ -646,241 +747,324 @@ export default function PQCReadinessPage() {
   const gaugeSize=isMobile?160:200;
   const metricCols=isMobile?"1fr 1fr":isTablet?"repeat(3,1fr)":"repeat(5,1fr)";
 
+  // Light-mode badge helper
+  const scoreColor = migrationScore>=70?L.green:migrationScore>=40?L.yellow:L.red;
+
   return (
-    <div style={S.page}>
+    <div style={LS.page}>
       <style>{`
-        @keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
-        .pqc-row{animation:fadeIn 0.3s ease both;} .pqc-row:hover{background:rgba(59,130,246,0.04)!important;}
-        .pqc-show-cards{display:block;} .pqc-show-table{display:none;}
-        @media(min-width:900px){.pqc-show-cards{display:none!important;}.pqc-show-table{display:block!important;}}
+        @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=DM+Mono:wght@400;500;600&display=swap');
+        @keyframes fadeIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+        input[type=range]{accent-color:${L.blue};}
+        input[type=range]::-webkit-slider-thumb{background:${L.blue};}
+        * { box-sizing: border-box; }
+        ::-webkit-scrollbar{width:5px;height:5px;}
+        ::-webkit-scrollbar-track{background:${L.insetBg};}
+        ::-webkit-scrollbar-thumb{background:${L.border};border-radius:3px;}
       `}</style>
 
       {/* DOMAIN FILTER */}
-      <Panel>
-        <PanelHeader left="REPORT SCOPE — CLIENT DOMAIN FILTER" />
+      <LPanel>
+        <LPanelHeader left="REPORT SCOPE — CLIENT DOMAIN FILTER" />
         <div style={{padding:14,display:"flex",flexDirection:"column",gap:12}}>
           <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"1fr 1fr",gap:10}}>
             <div>
-              <div style={{fontSize:8,color:T.text3,letterSpacing:".12em",marginBottom:5}}>CLIENT DOMAIN</div>
+              <div style={{fontSize:8,color:L.text3,letterSpacing:".12em",marginBottom:5,textTransform:"uppercase",fontWeight:600}}>CLIENT DOMAIN</div>
               <div style={{display:"flex",gap:6}}>
-                <input value={domainInput} onChange={e=>setDomainInput(e.target.value)} onKeyDown={e=>e.key==="Enter"&&applyDomain()} placeholder="e.g. barclays.com" style={{...S.input,flex:1,fontSize:12}}/>
-                <button style={{...S.btn,background:"rgba(59,130,246,0.15)",borderColor:"rgba(59,130,246,0.4)",fontSize:11}} onClick={applyDomain}>APPLY</button>
-                {activeDomain&&<button style={{...S.btn,fontSize:11}} onClick={clearFilter}>CLEAR</button>}
+                <input
+                  value={domainInput}
+                  onChange={e=>setDomainInput(e.target.value)}
+                  onKeyDown={e=>e.key==="Enter"&&applyDomain()}
+                  placeholder="e.g. barclays.com"
+                  style={{...LS.input,flex:1}}
+                />
+                <button style={{...LS.btn,background:`${L.blue}15`,borderColor:`${L.blue}40`,color:L.blue}} onClick={applyDomain}>APPLY</button>
+                {activeDomain&&<button style={{...LS.btn}} onClick={clearFilter}>CLEAR</button>}
               </div>
             </div>
             <div>
-              <div style={{fontSize:8,color:T.text3,letterSpacing:".12em",marginBottom:5}}>CLIENT NAME (for PDF)</div>
-              <input value={clientName} onChange={e=>setClientName(e.target.value)} placeholder="e.g. Barclays Bank PLC" style={{...S.input,width:"100%",fontSize:12}}/>
+              <div style={{fontSize:8,color:L.text3,letterSpacing:".12em",marginBottom:5,textTransform:"uppercase",fontWeight:600}}>CLIENT NAME (for PDF)</div>
+              <input value={clientName} onChange={e=>setClientName(e.target.value)} placeholder="e.g. Barclays Bank PLC" style={{...LS.input,width:"100%"}}/>
             </div>
           </div>
           {activeDomain&&(
-            <div style={{display:"flex",alignItems:"center",gap:10,background:"rgba(59,130,246,0.06)",border:"1px solid rgba(59,130,246,0.2)",borderRadius:4,padding:"7px 12px"}}>
-              <span style={{fontSize:9,color:T.text3}}>ACTIVE SCOPE</span>
-              <span style={{fontFamily:"'Orbitron',monospace",fontSize:10,color:T.blue}}>*.{normaliseDomain(activeDomain)}</span>
-              <span style={{fontSize:9,color:T.text3,marginLeft:"auto"}}><b style={{color:T.text2}}>{uniqueCbom.length}</b> apps · <b style={{color:T.red}}>{enriched.length}</b> need migration</span>
+            <div style={{display:"flex",alignItems:"center",gap:10,background:`${L.blue}0a`,border:`1px solid ${L.blue}25`,borderRadius:5,padding:"7px 12px"}}>
+              <span style={{fontSize:9,color:L.text3,fontWeight:600}}>ACTIVE SCOPE</span>
+              <span style={{fontFamily:"'DM Mono',monospace",fontSize:10,color:L.blue,fontWeight:600}}>*.{normaliseDomain(activeDomain)}</span>
+              <span style={{fontSize:9,color:L.text3,marginLeft:"auto"}}>
+                <b style={{color:L.text1}}>{uniqueCbom.length}</b> apps · <b style={{color:L.red}}>{enriched.length}</b> need migration
+              </span>
             </div>
           )}
           {activeDomain&&uniqueCbom.length===0&&(
-            <div style={{background:"rgba(239,68,68,0.06)",border:"1px solid rgba(239,68,68,0.2)",borderRadius:4,padding:"8px 12px",fontSize:10,color:T.text2}}>
-              ⚠ No assets found for <b style={{color:T.red}}>*.{normaliseDomain(activeDomain)}</b>
+            <div style={{background:`${L.red}0a`,border:`1px solid ${L.red}25`,borderRadius:5,padding:"8px 12px",fontSize:10,color:L.text2}}>
+              ⚠ No assets found for <b style={{color:L.red}}>*.{normaliseDomain(activeDomain)}</b>
             </div>
           )}
         </div>
-      </Panel>
+      </LPanel>
 
       {unmatchedCount>0&&(
-        <div style={{background:"rgba(234,179,8,0.06)",border:"1px solid rgba(234,179,8,0.25)",borderRadius:4,padding:"8px 14px",display:"flex",alignItems:"center",gap:10}}>
-          <span style={{color:T.yellow,fontSize:12}}>⚠</span>
-          <span style={{fontSize:10,color:T.text2}}><b style={{color:T.yellow}}>{unmatchedCount}</b> asset{unmatchedCount>1?"s":""} unmatched — defaulted to "Other".</span>
+        <div style={{background:`${L.yellow}10`,border:`1px solid ${L.yellow}40`,borderRadius:5,padding:"8px 14px",display:"flex",alignItems:"center",gap:10}}>
+          <span style={{color:L.yellow,fontSize:14}}>⚠</span>
+          <span style={{fontSize:10,color:L.text2}}>
+            <b style={{color:L.yellow}}>{unmatchedCount}</b> asset{unmatchedCount>1?"s":""} unmatched — defaulted to "Other".
+          </span>
         </div>
       )}
 
       {/* METRICS */}
       <div style={{display:"grid",gridTemplateColumns:metricCols,gap:isMobile?8:9}}>
-        <MetricCard label="MIGRATION SCORE" value={`${migrationScore}/100`} sub="Migration progress" color={migrationScore>=70?T.green:migrationScore>=40?T.yellow:T.red}/>
-        <MetricCard label="NEED MIGRATION" value={enriched.length} sub="Weak assets" color={T.red}/>
-        <MetricCard label="CRITICAL" value={critCount} sub="Immediate action" color={T.red}/>
-        <MetricCard label="EST. DAYS" value={calDays} sub={`${teamSize} dev team`} color={T.cyan}/>
+        <LMetricCard label="MIGRATION SCORE" value={`${migrationScore}/100`} sub="Migration progress" color={scoreColor}/>
+        <LMetricCard label="NEED MIGRATION" value={enriched.length} sub="Weak assets" color={L.red}/>
+        <LMetricCard label="CRITICAL" value={critCount} sub="Immediate action" color={L.red}/>
+        <LMetricCard label="EST. DAYS" value={calDays} sub={`${teamSize} dev team`} color={L.cyan}/>
         <div style={isMobile?{gridColumn:"1/-1"}:{}}>
-          <MetricCard label="EST. COST" value={`$${(totalCost/1000).toFixed(1)}k`} sub="At $800/day" color={T.orange}/>
+          <LMetricCard label="EST. COST (INR)" value={fmtINR(totalCost)} sub={`At ${fmtINR(devRate)}/day`} color={L.orange}/>
         </div>
       </div>
 
       {/* SCORE + PLAN */}
       <div style={{display:"grid",gridTemplateColumns:isDesktop?"1fr 1fr":"1fr",gap:isMobile?8:10}}>
-        <Panel>
-          <PanelHeader left="PQC MIGRATION PROGRESS" />
+        <LPanel>
+          <LPanelHeader left="PQC MIGRATION PROGRESS" />
           <div style={{padding:14,display:"flex",flexDirection:"column",alignItems:"center",gap:16}}>
             <div style={{width:"100%",maxWidth:gaugeSize+40,margin:"0 auto"}}><ScoreGauge score={migrationScore} size={gaugeSize}/></div>
             {/* Milestone bars */}
-            <div style={{width:"100%",display:"flex",flexDirection:"column",gap:6}}>
+            <div style={{width:"100%",display:"flex",flexDirection:"column",gap:8}}>
               {milestones.map(m=>(
                 <div key={m.label}>
-                  <div style={{display:"flex",justifyContent:"space-between",marginBottom:3}}>
-                    <span style={{fontSize:8,color:m.done?T.green:T.text3,display:"flex",alignItems:"center",gap:5}}>
-                      <span style={{fontSize:9}}>{m.done?"✓":"○"}</span>{m.label}
+                  <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
+                    <span style={{fontSize:9,color:m.done?L.green:L.text2,display:"flex",alignItems:"center",gap:5,fontWeight:m.done?600:400}}>
+                      <span style={{fontSize:10,color:m.done?L.green:L.text4}}>{m.done?"✓":"○"}</span>{m.label}
                     </span>
-                    <span style={{fontSize:8,fontFamily:"'Orbitron',monospace",color:m.done?T.green:T.text3}}>{m.pct}%</span>
+                    <span style={{fontSize:9,fontFamily:"'DM Mono',monospace",color:m.done?L.green:L.text3,fontWeight:600}}>{m.pct}%</span>
                   </div>
-                  <div style={{height:3,background:"rgba(255,255,255,0.06)",borderRadius:2}}>
-                    <div style={{height:"100%",width:`${m.pct}%`,background:m.done?T.green:m.pct>50?T.yellow:T.orange,borderRadius:2,transition:"width 0.8s ease"}}/>
+                  <div style={{height:4,background:L.insetBg,borderRadius:2,border:`1px solid ${L.border}`}}>
+                    <div style={{height:"100%",width:`${m.pct}%`,background:m.done?L.green:m.pct>50?L.yellow:L.orange,borderRadius:2,transition:"width 0.8s ease"}}/>
                   </div>
                 </div>
               ))}
             </div>
             <div style={{width:"100%",display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
               {[
-                {label:"PQC ACTIVE",val:withPQCScore.filter((a:any)=>a.pqcScore?.active).length,color:T.green},
-                {label:"WEAK",      val:enriched.length,                                         color:T.red},
-                {label:"IN SCOPE",  val:total,                                                   color:T.blue},
+                {label:"PQC ACTIVE",val:withPQCScore.filter((a:any)=>a.pqcScore?.active).length,color:L.green},
+                {label:"WEAK",      val:enriched.length,                                         color:L.red},
+                {label:"IN SCOPE",  val:total,                                                   color:L.blue},
               ].map(item=>(
-                <div key={item.label} style={{background:"rgba(59,130,246,0.04)",border:"1px solid rgba(59,130,246,0.1)",borderRadius:3,padding:isMobile?"6px 4px":"8px 6px",textAlign:"center"}}>
-                  <div style={{fontFamily:"'Orbitron',monospace",fontSize:isMobile?15:18,color:item.color}}>{item.val}</div>
-                  <div style={{fontSize:isMobile?7:8,color:T.text3,marginTop:3,letterSpacing:".08em"}}>{item.label}</div>
+                <div key={item.label} style={{background:L.subtleBg,border:`1px solid ${L.border}`,borderRadius:5,padding:isMobile?"6px 4px":"8px 6px",textAlign:"center"}}>
+                  <div style={{fontFamily:"'DM Mono',monospace",fontSize:isMobile?16:20,color:item.color,fontWeight:700}}>{item.val}</div>
+                  <div style={{fontSize:isMobile?7:8,color:L.text3,marginTop:3,letterSpacing:".08em",fontWeight:600}}>{item.label}</div>
                 </div>
               ))}
             </div>
           </div>
-        </Panel>
-        <Panel>
-          <PanelHeader left="MIGRATION PLAN SUMMARY" />
+        </LPanel>
+
+        <LPanel>
+          <LPanelHeader left="MIGRATION PLAN SUMMARY" />
           <div style={{padding:14,display:"flex",flexDirection:"column",gap:12}}>
             <div style={{display:"grid",gridTemplateColumns:(isTablet||isDesktop)?"1fr 1fr":"1fr",gap:10}}>
-              <div style={{background:"rgba(59,130,246,0.04)",border:"1px solid rgba(59,130,246,0.1)",borderRadius:3,padding:12}}>
-                <div style={{fontSize:8,color:T.text3,marginBottom:5,letterSpacing:".12em"}}>ESTIMATED COMPLETION</div>
-                <div style={{fontFamily:"'Orbitron',monospace",fontSize:isMobile?13:17,color:T.cyan}}>{dateStr}</div>
-                <div style={{fontSize:9,color:T.text2,marginTop:4}}>{calDays}d · {totalDays} dev days · {enriched.length} assets</div>
+              <div style={{background:L.subtleBg,border:`1px solid ${L.border}`,borderRadius:5,padding:12}}>
+                <div style={{fontSize:8,color:L.text3,marginBottom:5,letterSpacing:".12em",textTransform:"uppercase",fontWeight:600}}>ESTIMATED COMPLETION</div>
+                <div style={{fontFamily:"'DM Mono',monospace",fontSize:isMobile?13:17,color:L.cyan,fontWeight:700}}>{dateStr}</div>
+                <div style={{fontSize:9,color:L.text2,marginTop:4}}>{calDays}d · {totalDays} dev days · {enriched.length} assets</div>
               </div>
-              <div style={{background:"rgba(239,68,68,0.04)",border:"1px solid rgba(239,68,68,0.1)",borderRadius:3,padding:12}}>
-                <div style={{fontSize:8,color:T.text3,marginBottom:5,letterSpacing:".12em"}}>TOTAL MIGRATION COST</div>
-                <div style={{fontFamily:"'Orbitron',monospace",fontSize:isMobile?13:17,color:T.orange}}>${totalCost.toLocaleString()}</div>
-                <div style={{fontSize:9,color:T.text2,marginTop:4}}>{critCount} critical · {highCount} high · ${devRate}/day</div>
+              <div style={{background:"#fff5f5",border:`1px solid ${L.red}22`,borderRadius:5,padding:12}}>
+                <div style={{fontSize:8,color:L.text3,marginBottom:5,letterSpacing:".12em",textTransform:"uppercase",fontWeight:600}}>TOTAL MIGRATION COST</div>
+                <div style={{fontFamily:"'DM Mono',monospace",fontSize:isMobile?13:17,color:L.orange,fontWeight:700}}>{fmtINR(totalCost)}</div>
+                <div style={{fontSize:9,color:L.text2,marginTop:4}}>{critCount} critical · {highCount} high · {fmtINR(devRate)}/day</div>
               </div>
             </div>
             <div style={{display:"grid",gridTemplateColumns:(isTablet||isDesktop)?"1fr 1fr":"1fr",gap:12}}>
               {[
-                {label:"TEAM SIZE",      display:`${teamSize} devs`, min:1,   max:10,   step:1,   val:teamSize, set:(v:number)=>setTeamSize(v), l:"1",    r:"10"},
-                {label:"DEV RATE / DAY", display:`$${devRate}`,      min:200, max:2000, step:100, val:devRate,  set:(v:number)=>setDevRate(v),  l:"$200", r:"$2000"},
+                {
+                  label:"TEAM SIZE",
+                  display:`${teamSize} devs`,
+                  min:1, max:10, step:1,
+                  val:teamSize,
+                  set:(v:number)=>setTeamSize(v),
+                  l:"1", r:"10",
+                },
+                {
+                  label:"DEV RATE / DAY (INR)",
+                  display:fmtINR(devRate),
+                  min:200, max:2000, step:100,
+                  val:devRate,
+                  set:(v:number)=>setDevRate(v),
+                  l:fmtINR(200), r:fmtINR(2000),
+                },
               ].map(sl=>(
                 <div key={sl.label}>
                   <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}>
-                    <span style={{fontSize:9,color:T.text3,letterSpacing:".12em"}}>{sl.label}</span>
-                    <span style={{fontFamily:"'Orbitron',monospace",fontSize:11,color:T.blue}}>{sl.display}</span>
+                    <span style={{fontSize:9,color:L.text3,letterSpacing:".1em",textTransform:"uppercase",fontWeight:600}}>{sl.label}</span>
+                    <span style={{fontFamily:"'DM Mono',monospace",fontSize:11,color:L.blue,fontWeight:700}}>{sl.display}</span>
                   </div>
-                  <input type="range" min={sl.min} max={sl.max} step={sl.step} value={sl.val} onChange={e=>sl.set(Number(e.target.value))} style={{width:"100%",accentColor:T.blue,cursor:"pointer"}}/>
+                  <input type="range" min={sl.min} max={sl.max} step={sl.step} value={sl.val}
+                    onChange={e=>sl.set(Number(e.target.value))}
+                    style={{width:"100%",cursor:"pointer"}}
+                  />
                   <div style={{display:"flex",justifyContent:"space-between"}}>
-                    <span style={{fontSize:8,color:T.text3}}>{sl.l}</span>
-                    <span style={{fontSize:8,color:T.text3}}>{sl.r}</span>
+                    <span style={{fontSize:8,color:L.text4}}>{sl.l}</span>
+                    <span style={{fontSize:8,color:L.text4}}>{sl.r}</span>
                   </div>
                 </div>
               ))}
             </div>
           </div>
-        </Panel>
+        </LPanel>
       </div>
 
       {/* RISK DISTRIBUTION */}
-      <Panel>
-        <PanelHeader left="RISK DISTRIBUTION" />
+      <LPanel>
+        <LPanelHeader left="RISK DISTRIBUTION" />
         <div style={{padding:14,display:"grid",gridTemplateColumns:isMobile?"1fr 1fr":"repeat(4,1fr)",gap:10}}>
           {(["Critical","High","Medium","Low"] as const).map(level=>{
             const count=enriched.filter((a:any)=>a.risk===level).length;
             const pct=enriched.length?Math.round(count/enriched.length*100):0;
-            const color=level==="Critical"?T.red:level==="High"?T.orange:level==="Medium"?T.yellow:T.green;
+            const color=level==="Critical"?L.red:level==="High"?L.orange:level==="Medium"?L.yellow:L.green;
+            const bg=level==="Critical"?"#fff5f5":level==="High"?"#fff7ed":level==="Medium"?"#fffbeb":"#f0fdf4";
             return (
-              <div key={level} style={{background:"rgba(59,130,246,0.03)",border:`1px solid rgba(59,130,246,0.08)`,borderRadius:3,padding:12}}>
+              <div key={level} style={{background:bg,border:`1px solid ${color}22`,borderRadius:6,padding:12}}>
                 <div style={{display:"flex",justifyContent:"space-between",marginBottom:8}}>
-                  <span style={{fontSize:9,color,letterSpacing:".12em"}}>{level.toUpperCase()}</span>
-                  <span style={{fontFamily:"'Orbitron',monospace",fontSize:13,color}}>{count}</span>
+                  <span style={{fontSize:9,color,letterSpacing:".12em",fontWeight:700,textTransform:"uppercase"}}>{level}</span>
+                  <span style={{fontFamily:"'DM Mono',monospace",fontSize:15,color,fontWeight:800}}>{count}</span>
                 </div>
-                <div style={{height:3,background:"rgba(255,255,255,0.05)",borderRadius:2}}>
+                <div style={{height:4,background:`${color}20`,borderRadius:2}}>
                   <div style={{height:"100%",width:`${pct}%`,background:color,borderRadius:2,transition:"width 0.8s ease"}}/>
                 </div>
-                <div style={{fontSize:8,color:T.text3,marginTop:5}}>{enriched.filter((a:any)=>a.risk===level).reduce((s:number,a:any)=>s+a.days,0)} dev days</div>
+                <div style={{fontSize:8,color:L.text3,marginTop:6,fontWeight:500}}>
+                  {enriched.filter((a:any)=>a.risk===level).reduce((s:number,a:any)=>s+a.days,0)} dev days
+                </div>
               </div>
             );
           })}
         </div>
-      </Panel>
+      </LPanel>
 
       {/* ROADMAP */}
-      <Panel>
-        <PanelHeader left="MIGRATION ROADMAP" right={
+      <LPanel>
+        <LPanelHeader left="MIGRATION ROADMAP" right={
           <div style={{display:"flex",gap:6}}>
-            <button style={{...S.btn,fontSize:isMobile?9:11}} onClick={exportCSV}>↓ CSV</button>
-            <button style={{...S.btn,fontSize:isMobile?9:11,background:"rgba(59,130,246,0.12)",borderColor:"rgba(59,130,246,0.35)"}}
-              onClick={()=>exportAuditPDF(enriched,migrationScore,pqcReady,total,totalDays,calDays,totalCost,teamSize,devRate,dateStr,clientName,activeDomain,milestones)}>
+            <button style={{...LS.btn,fontSize:isMobile?9:11}} onClick={exportCSV}>↓ CSV</button>
+            <button
+              style={{...LS.btn,fontSize:isMobile?9:11,background:`${L.blue}15`,borderColor:`${L.blue}40`,color:L.blue,fontWeight:700}}
+              onClick={()=>exportAuditPDF(enriched,migrationScore,pqcReady,total,totalDays,calDays,totalCost,teamSize,devRate,dateStr,clientName,activeDomain,milestones)}
+            >
               {isMobile?"⬡ PDF":"⬡ AUDIT PDF"}
             </button>
           </div>
         }/>
-        <div className="pqc-show-cards">
+        {/* Mobile card view */}
+        <div style={{display:"block"}} className="pqc-show-cards">
+          <style>{`@media(min-width:900px){.pqc-show-cards{display:none!important;}}`}</style>
           <div style={{maxHeight:isMobile?400:520,overflowY:"auto"}}>
             {enriched.map((a:any,i:number)=><RoadmapCard key={i} a={a} i={i}/>)}
-            {enriched.length===0&&<div style={{padding:24,textAlign:"center",fontSize:10,color:T.text3}}>✓ No weak assets</div>}
+            {enriched.length===0&&<div style={{padding:24,textAlign:"center",fontSize:10,color:L.green,fontWeight:600}}>✓ No weak assets</div>}
           </div>
         </div>
-        <div className="pqc-show-table">
-          <Table cols={["#","APPLICATION","TYPE","RISK","KEY LEN","CIPHER","TLS","CA","PQC SCORE","DAYS","COST","PUB","PQC"]}>
-            {enriched.map((a:any,i:number)=>{
-              const ps=a.pqcScore as PQCScoreBreakdown|undefined;
-              return (
-                <TR key={i}>
-                  <TD style={{fontFamily:"'Orbitron',monospace",fontSize:9,color:T.text3}}>{i+1}</TD>
-                  <TD style={{color:T.blue,fontSize:10}}>{a.app}</TD>
-                  <TD><Badge v="gray">{a.assetType}</Badge></TD>
-                  <TD><Badge v={riskVariant(a.risk)}>{a.risk}</Badge></TD>
-                  <TD style={{fontSize:10,color:a.keylen?.startsWith("1024")?T.red:a.keylen?.startsWith("2048")?T.yellow:T.green}}>{a.keylen}</TD>
-                  <TD style={{fontSize:9,color:T.text3,maxWidth:140,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{a.cipher}</TD>
-                  <TD><Badge v={a.tls==="1.0"?"red":a.tls==="1.2"?"yellow":"green"}>TLS {a.tls}</Badge></TD>
-                  <TD style={{fontSize:9,color:T.text3}}>{a.ca}</TD>
-                  <TD style={{textAlign:"center"}}>
-                    {ps&&<span style={{fontSize:8,fontWeight:700,color:ps.color,border:`1px solid ${ps.color}44`,borderRadius:2,padding:"1px 5px"}}>{ps.active?"ACTIVE":`${ps.score}/100`}</span>}
-                  </TD>
-                  <TD style={{fontFamily:"'Orbitron',monospace",fontSize:10,color:T.cyan}}>{a.days}d</TD>
-                  <TD style={{fontFamily:"'Orbitron',monospace",fontSize:10,color:T.orange}}>${a.cost.toLocaleString()}</TD>
-                  <TD style={{textAlign:"center",fontSize:12}}>{a.isPublic?<span style={{color:T.cyan}}>●</span>:<span style={{color:T.text3}}>○</span>}</TD>
-                  <TD style={{textAlign:"center",fontSize:13}}>{a.pqc?<span style={{color:T.green}}>✓</span>:<span style={{color:T.red}}>✗</span>}</TD>
-                </TR>
-              );
-            })}
-          </Table>
+        {/* Desktop table view */}
+        <div style={{display:"none"}} className="pqc-show-table">
+          <style>{`@media(min-width:900px){.pqc-show-table{display:block!important;}}`}</style>
+          <div style={{overflowX:"auto"}}>
+            <table style={{width:"100%",borderCollapse:"collapse",fontFamily:"'DM Sans',system-ui,sans-serif"}}>
+              <thead>
+                <tr style={{background:L.subtleBg,borderBottom:`2px solid ${L.border}`}}>
+                  {["#","APPLICATION","TYPE","RISK","KEY LEN","CIPHER","TLS","CA","PQC SCORE","DAYS","COST (INR)","PUB","PQC"].map(h=>(
+                    <th key={h} style={{padding:"7px 8px",fontSize:8,fontWeight:700,color:L.text3,textTransform:"uppercase",letterSpacing:".08em",textAlign:"left",whiteSpace:"nowrap"}}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {enriched.map((a:any,i:number)=>{
+                  const ps=a.pqcScore as PQCScoreBreakdown|undefined;
+                  return (
+                    <tr key={i} style={{borderBottom:`1px solid ${L.borderLight}`,background:i%2===0?L.panelBg:L.subtleBg}}>
+                      <td style={{padding:"7px 8px",fontFamily:"'DM Mono',monospace",fontSize:9,color:L.text4}}>{i+1}</td>
+                      <td style={{padding:"7px 8px",color:L.blue,fontSize:10,fontWeight:500}}>{a.app}</td>
+                      <td style={{padding:"7px 8px"}}>
+                        <span style={{fontSize:8,color:L.text3,background:L.insetBg,border:`1px solid ${L.border}`,borderRadius:3,padding:"1px 5px",fontWeight:600}}>{a.assetType}</span>
+                      </td>
+                      <td style={{padding:"7px 8px"}}>
+                        <span style={{fontSize:8,fontWeight:700,color:a.risk==="Critical"?L.red:a.risk==="High"?L.orange:a.risk==="Medium"?L.yellow:L.green,background:a.risk==="Critical"?"#fef2f2":a.risk==="High"?"#fff7ed":a.risk==="Medium"?"#fffbeb":"#f0fdf4",border:`1px solid ${a.risk==="Critical"?L.red:a.risk==="High"?L.orange:a.risk==="Medium"?L.yellow:L.green}33`,borderRadius:3,padding:"1px 6px"}}>{a.risk}</span>
+                      </td>
+                      <td style={{padding:"7px 8px",fontSize:10,fontWeight:600,fontFamily:"'DM Mono',monospace",color:a.keylen?.startsWith("1024")?L.red:a.keylen?.startsWith("2048")?L.yellow:L.green}}>{a.keylen}</td>
+                      <td style={{padding:"7px 8px",fontSize:9,color:L.text3,maxWidth:140,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{a.cipher}</td>
+                      <td style={{padding:"7px 8px"}}>
+                        <span style={{fontSize:8,fontWeight:600,color:a.tls==="1.0"?L.red:a.tls==="1.2"?L.yellow:L.green}}>TLS {a.tls}</span>
+                      </td>
+                      <td style={{padding:"7px 8px",fontSize:9,color:L.text3}}>{a.ca}</td>
+                      <td style={{padding:"7px 8px",textAlign:"center"}}>
+                        {ps&&<span style={{fontSize:8,fontWeight:700,color:ps.color,border:`1px solid ${ps.color}44`,borderRadius:3,padding:"1px 5px",background:`${ps.color}10`}}>{ps.active?"ACTIVE":`${ps.score}/100`}</span>}
+                      </td>
+                      <td style={{padding:"7px 8px",fontFamily:"'DM Mono',monospace",fontSize:10,color:L.cyan,fontWeight:600}}>{a.days}d</td>
+                      <td style={{padding:"7px 8px",fontFamily:"'DM Mono',monospace",fontSize:10,color:L.orange,fontWeight:700}}>{fmtINR(a.cost)}</td>
+                      <td style={{padding:"7px 8px",textAlign:"center",fontSize:13}}>{a.isPublic?<span style={{color:L.cyan}}>●</span>:<span style={{color:L.text4}}>○</span>}</td>
+                      <td style={{padding:"7px 8px",textAlign:"center",fontSize:13}}>{a.pqc?<span style={{color:L.green}}>✓</span>:<span style={{color:L.red}}>✗</span>}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         </div>
-        <div style={{padding:"8px 12px",borderTop:`1px solid rgba(59,130,246,0.07)`,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
-          <span style={{fontSize:10,color:T.text3}}><b style={{color:T.text2}}>{enriched.length}</b> to migrate · <b style={{color:T.cyan}}>{totalDays}d</b> dev · <b style={{color:T.orange}}>${totalCost.toLocaleString()}</b></span>
-          {!isMobile&&<span style={{fontSize:9,color:T.text3}}>Ranked: public-facing → risk → cost</span>}
+        <div style={{padding:"8px 14px",borderTop:`1px solid ${L.borderLight}`,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8,background:L.subtleBg,borderRadius:"0 0 8px 8px"}}>
+          <span style={{fontSize:10,color:L.text2}}>
+            <b style={{color:L.text1}}>{enriched.length}</b> to migrate ·{" "}
+            <b style={{color:L.cyan}}>{totalDays}d</b> dev ·{" "}
+            <b style={{color:L.orange}}>{fmtINR(totalCost)}</b>
+          </span>
+          {!isMobile&&<span style={{fontSize:9,color:L.text3}}>Ranked: public-facing → risk → cost</span>}
         </div>
-      </Panel>
+      </LPanel>
 
       {/* REMEDIATION */}
-      <Panel>
-        <PanelHeader left="REMEDIATION GUIDE" />
+      <LPanel>
+        <LPanelHeader left="REMEDIATION GUIDE" />
         <div style={{padding:14,display:"grid",gridTemplateColumns:isMobile?"1fr":isTablet?"1fr 1fr":"repeat(3,1fr)",gap:10}}>
           {[
-            {title:"Upgrade cert key",      color:T.red,    icon:"⬡", items:enriched.filter((a:any)=>!(a.pqcScore?.criteria?.certKey4096?.pass)).map((a:any)=>a.app), fix:"Deploy RSA-4096 or EC P-384 — 70/100 pts"},
-            {title:"Remove wildcard certs", color:T.orange, icon:"◈", items:enriched.filter((a:any)=>a.is_wildcard).map((a:any)=>a.app),                             fix:"Dedicated per-service certificates — 20/100 pts"},
-            {title:"Enable Kyber hybrid",   color:T.cyan,   icon:"◉", items:enriched.filter((a:any)=>!a.pqc).map((a:any)=>a.app),                                   fix:"X25519+Kyber768 (FIPS 203) → ACTIVE status"},
+            {
+              title:"Upgrade cert key",
+              color:L.red, bg:"#fff5f5", border:`${L.red}25`,
+              icon:"⬡",
+              items:enriched.filter((a:any)=>!(a.pqcScore?.criteria?.certKey4096?.pass)).map((a:any)=>a.app),
+              fix:"Deploy RSA-4096 or EC P-384 — 70/100 pts",
+            },
+            {
+              title:"Remove wildcard certs",
+              color:L.orange, bg:"#fff7ed", border:`${L.orange}25`,
+              icon:"◈",
+              items:enriched.filter((a:any)=>a.is_wildcard).map((a:any)=>a.app),
+              fix:"Dedicated per-service certificates — 20/100 pts",
+            },
+            {
+              title:"Enable Kyber hybrid",
+              color:L.cyan, bg:"#f0f9ff", border:`${L.cyan}25`,
+              icon:"◉",
+              items:enriched.filter((a:any)=>!a.pqc).map((a:any)=>a.app),
+              fix:"X25519+Kyber768 (FIPS 203) → ACTIVE status",
+            },
           ].map(section=>(
-            <div key={section.title} style={{background:"rgba(59,130,246,0.03)",border:`1px solid ${section.color}22`,borderRadius:3,padding:12}}>
+            <div key={section.title} style={{background:section.bg,border:`1px solid ${section.border}`,borderRadius:6,padding:12}}>
               <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
-                <span style={{fontFamily:"'Orbitron',monospace",color:section.color,flexShrink:0}}>{section.icon}</span>
-                <span style={{fontSize:9,color:section.color,letterSpacing:".1em",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{section.title.toUpperCase()}</span>
-                <span style={{marginLeft:"auto",fontFamily:"'Orbitron',monospace",fontSize:11,color:section.color,flexShrink:0}}>{section.items.length}</span>
+                <span style={{fontFamily:"'DM Mono',monospace",color:section.color,fontSize:14,flexShrink:0}}>{section.icon}</span>
+                <span style={{fontSize:9,color:section.color,letterSpacing:".1em",textTransform:"uppercase",fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{section.title}</span>
+                <span style={{marginLeft:"auto",fontFamily:"'DM Mono',monospace",fontSize:14,color:section.color,flexShrink:0,fontWeight:800}}>{section.items.length}</span>
               </div>
-              <div style={{fontSize:9,color:T.text2,marginBottom:8,lineHeight:1.5}}>{section.fix}</div>
+              <div style={{fontSize:9,color:L.text2,marginBottom:8,lineHeight:1.6,fontWeight:500}}>{section.fix}</div>
               <div style={{display:"flex",flexDirection:"column",gap:4}}>
                 {section.items.slice(0,5).map((app:string,i:number)=>(
-                  <div key={i} style={{fontSize:9,color:T.text3,display:"flex",alignItems:"center",gap:6,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
-                    <span style={{color:section.color,fontSize:7,flexShrink:0}}>▸</span> {app}
+                  <div key={i} style={{fontSize:9,color:L.text2,display:"flex",alignItems:"center",gap:6,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",padding:"3px 0",borderTop:`1px solid ${section.border}`}}>
+                    <span style={{color:section.color,fontSize:8,flexShrink:0,fontWeight:700}}>▸</span> {app}
                   </div>
                 ))}
-                {section.items.length>5&&<div style={{fontSize:9,color:T.text3}}>+{section.items.length-5} more</div>}
-                {section.items.length===0&&<div style={{fontSize:9,color:T.green}}>✓ All clear</div>}
+                {section.items.length>5&&<div style={{fontSize:9,color:L.text3,fontStyle:"italic"}}>+{section.items.length-5} more</div>}
+                {section.items.length===0&&<div style={{fontSize:9,color:L.green,fontWeight:600}}>✓ All clear</div>}
               </div>
             </div>
           ))}
         </div>
-      </Panel>
+      </LPanel>
     </div>
   );
 }
