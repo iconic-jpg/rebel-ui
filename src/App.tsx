@@ -12,8 +12,10 @@ import PQCPosturePage from "./components/Modules/PQCPosture.js";
 import PQCReadinessPage from "./components/Modules/PQCReadiness.js";
 import CyberRatingPage from "./components/Modules/CyberRating.js";
 import ReportingPage from "./components/Modules/Reporting.js";
+import { useTheme } from "./hooks/useTheme";
 
 export default function App() {
+    useTheme();
   return (
     <Router>
       <Routes>

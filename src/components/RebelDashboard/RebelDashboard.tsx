@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { AreaChart, Area, XAxis, YAxis, ResponsiveContainer, Tooltip } from "recharts";
 import { ComposableMap, Geographies, Geography, Marker, Line } from "react-simple-maps";
 import { useNavigate } from "react-router-dom";
+import { ThemeToggle } from "./components/ThemeToggle";
 
 const API = "https://r3bel-production.up.railway.app";
 

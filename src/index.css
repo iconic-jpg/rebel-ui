@@ -1,39 +1,56 @@
-:root {
-  font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
-  line-height: 1.5;
-  font-weight: 400;
+/* =====================
+   THEME TOKENS
+   ===================== */
 
-  color-scheme: light dark;
+:root,
+[data-theme="dark"] {
+  color-scheme: dark;
   color: rgba(255, 255, 255, 0.87);
   background-color: #242424;
 
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+  --scrollbar-thumb: rgba(255, 255, 255, 0.22);
+  --scrollbar-thumb-hover: rgba(255, 255, 255, 0.38);
+  --scrollbar-firefox: rgba(255, 255, 255, 0.25);
+
+  --btn-bg: #1a1a1a;
+  --link-color: #646cff;
+  --link-hover: #535bf2;
 }
+
+[data-theme="light"] {
+  color-scheme: light;
+  color: #213547;
+  background-color: #ffffff;
+
+  --scrollbar-thumb: rgba(0, 0, 0, 0.25);
+  --scrollbar-thumb-hover: rgba(0, 0, 0, 0.4);
+  --scrollbar-firefox: rgba(0, 0, 0, 0.25);
+
+  --btn-bg: #f9f9f9;
+  --link-color: #646cff;
+  --link-hover: #747bff;
+}
+
+
 
 /* =========================
    GLOBAL SCROLLBAR (CLEAN)
    ========================= */
 
-/* Chrome, Edge, Safari */
-::-webkit-scrollbar {
-  width: 6px;
-}
-
-::-webkit-scrollbar-track {
-  background: transparent;
-}
-
 ::-webkit-scrollbar-thumb {
-  background-color: rgba(255, 255, 255, 0.22);
-  border-radius: 10px;
+  background-color: var(--scrollbar-thumb);
+}
+::-webkit-scrollbar-thumb:hover {
+  background-color: var(--scrollbar-thumb-hover);
+}
+* {
+  scrollbar-color: var(--scrollbar-firefox) transparent;
 }
 
-::-webkit-scrollbar-thumb:hover {
-  background-color: rgba(255, 255, 255, 0.38);
-}
+a { color: var(--link-color); }
+a:hover { color: var(--link-hover); }
+
+button { background-color: var(--btn-bg); }
 
 /* Firefox */
 * {
@@ -85,26 +102,19 @@ button:focus-visible {
   outline: 4px auto -webkit-focus-ring-color;
 }
 
+/* Respect OS preference when no data-theme is set yet */
 @media (prefers-color-scheme: light) {
-  :root {
+  :root:not([data-theme]) {
+    color-scheme: light;
     color: #213547;
     background-color: #ffffff;
-  }
 
-  a:hover {
-    color: #747bff;
-  }
+    --scrollbar-thumb: rgba(0, 0, 0, 0.25);
+    --scrollbar-thumb-hover: rgba(0, 0, 0, 0.4);
+    --scrollbar-firefox: rgba(0, 0, 0, 0.25);
 
-  button {
-    background-color: #f9f9f9;
-  }
-
-  /* Light-mode scrollbar */
-  ::-webkit-scrollbar-thumb {
-    background-color: rgba(0, 0, 0, 0.25);
-  }
-
-  * {
-    scrollbar-color: rgba(0, 0, 0, 0.25) transparent;
+    --btn-bg: #f9f9f9;
+    --link-color: #646cff;
+    --link-hover: #747bff;
   }
 }
