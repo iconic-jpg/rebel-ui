@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { AreaChart, Area, XAxis, YAxis, ResponsiveContainer, Tooltip } from "recharts";
 import { useNavigate } from "react-router-dom";
-import { ThemeContext } from '../context/ThemeContext.js'
+import { useThemeContext } from '../context/ThemeContext.js'
 
 const API = "https://r3bel-production.up.railway.app";
 

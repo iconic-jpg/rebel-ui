@@ -21,7 +21,7 @@ export default function AppShell() {
   const location  = useLocation();
   const navigate  = useNavigate();
   const [open, setOpen] = useState(false);
-  const { theme, toggle } = ThemeContext();
+  const { theme, toggle } = useThemeContext()
 
 
   const isDark = theme === "dark";
