@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
-import { useTheme } from "./hooks/useTheme";
+import { useTheme } from "../../hooks/useTheme.js";
 
 const NAV_ITEMS = [
   { path: "/",              label: "Dashboard",      icon: "⬡", section: "CORE"        },
