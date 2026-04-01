@@ -176,7 +176,7 @@ button:focus-visible {
     background-color: #f8fafc;
 
     --text-primary: #0f172a;
-    --text-secondary: #475569;
+    --text-secondary: #0f172a;
 
     --scrollbar-thumb: rgba(0, 0, 0, 0.25);
     --scrollbar-thumb-hover: rgba(0, 0, 0, 0.4);
