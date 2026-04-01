@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
-import { useTheme } from "../../hooks/useTheme.js";
+import { useThemeContext } from "../../context/ThemeContext.js";
 
 const NAV_ITEMS = [
   { path: "/",              label: "Dashboard",      icon: "⬡", section: "CORE"        },
@@ -21,7 +21,8 @@ export default function AppShell() {
   const location  = useLocation();
   const navigate  = useNavigate();
   const [open, setOpen] = useState(false);
-  const { theme, toggle } = useTheme();
+  const { theme, toggle } = useThemeContext();
+
 
   const isDark = theme === "dark";
 
