@@ -3,7 +3,8 @@ import {
   Panel, PanelHeader, Badge, ProgBar,
   Table, TR, TD,
 } from "./shared.js";
-
+import { Grid } from "antd";
+const { useBreakpoint } = Grid;
 import {
   parseCipher, fullAnalysis,
   normaliseTLS,
@@ -14,6 +15,7 @@ import {
 import type { CipherAnalysis, CipherFinding, PQCScoreBreakdown } from "./cipherAnalysis.js";
 
 const API = "https://r3bel-production.up.railway.app";
+const { useBreakpoint } = Grid;
 
 // ─── LIGHT PALETTE ────────────────────────────────────────────────────────────
 const L = {
