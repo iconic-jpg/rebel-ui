@@ -352,153 +352,7 @@ function LMetricCard({ label, value, sub, color }: { label: string; value: strin
   );
 }
 
-// ── PDF Export ────────────────────────────────────────────────────────────────
-function exportAuditPDF(
-  enriched: any[], migrationScore: number, pqcReady: number, total: number,
-  totalDays: number, calDays: number, totalCostUSD: number,
-  teamSize: number, devRateUSD: number, dateStr: string,
-  clientName: string, clientDomain: string,
-  milestoneData: { label:string; done:boolean; pct:number }[],
-) {
-  const now       = new Date();
-  const timestamp = now.toLocaleString("en-IN",{year:"numeric",month:"long",day:"numeric",hour:"2-digit",minute:"2-digit",timeZoneName:"short"});
-  const scanDate  = now.toISOString().split("T")[0];
-  const reportId  = `REBEL-${scanDate.replace(/-/g,"")}-${Math.random().toString(36).slice(2,8).toUpperCase()}`;
-  const displayName = clientName.trim()||(clientDomain?normaliseDomain(clientDomain):"All Assets");
 
-  const pct = migrationScore / 100, gr = 54, gcx = 70, gcy = 75;
-  const gx1=gcx+gr*Math.cos(Math.PI), gy1=gcy+gr*Math.sin(Math.PI);
-  const gx2=gcx+gr*Math.cos(Math.PI+Math.PI*pct);
-  const gy2=gcy+gr*Math.sin(Math.PI+Math.PI*pct);
-  const glf=pct>0.5?1:0;
-  const sc = migrationScore >= 70 ? "#16a34a" : migrationScore >= 40 ? "#d97706" : "#dc2626";
-  const sl = migrationScore >= 70 ? "COMPLIANT" : migrationScore >= 40 ? "AT RISK" : "CRITICAL";
-  const gaugeSVG=`<svg width="140" height="82" viewBox="0 0 140 82" xmlns="http://www.w3.org/2000/svg">
-    <path d="M ${gcx-gr} ${gcy} A ${gr} ${gr} 0 0 1 ${gcx+gr} ${gcy}" fill="none" stroke="#e5e7eb" stroke-width="10" stroke-linecap="round"/>
-    <path d="M ${gx1.toFixed(2)} ${gy1.toFixed(2)} A ${gr} ${gr} 0 ${glf} 1 ${gx2.toFixed(2)} ${gy2.toFixed(2)}" fill="none" stroke="${sc}" stroke-width="10" stroke-linecap="round"/>
-    <text x="${gcx}" y="${gcy-4}" text-anchor="middle" font-family="Arial" font-size="22" font-weight="bold" fill="${sc}">${migrationScore}</text>
-    <text x="${gcx}" y="${gcy+13}" text-anchor="middle" font-family="Arial" font-size="7" fill="#6b7280" letter-spacing="1">${sl}</text>
-  </svg>`;
-
-  const scoreDist = milestoneData.map(m => {
-    const color = m.done ? "#16a34a" : m.pct > 50 ? "#eab308" : "#ef4444";
-    return `<div style="margin-bottom:9px;">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;">
-        <span style="display:flex;align-items:center;gap:6px;font-size:9px;color:#374151;">
-          <span style="font-size:10px;color:${m.done?"#16a34a":"#ef4444"};">${m.done?"✓":"✗"}</span>${m.label}
-        </span>
-        <span style="font-size:9px;color:${color};font-weight:700;">${m.pct}%</span>
-      </div>
-      <div style="height:5px;background:#f3f4f6;border-radius:3px;">
-        <div style="height:100%;width:${m.pct}%;background:${color};border-radius:3px;"></div>
-      </div>
-    </div>`;
-  }).join("");
-
-  const assetRows = enriched.map((a,i)=>{
-    const rc=a.risk==="Critical"?"#dc2626":a.risk==="High"?"#ea580c":a.risk==="Medium"?"#d97706":"#16a34a";
-    const kc=a.keylen?.startsWith("1024")?"#dc2626":a.keylen?.startsWith("2048")?"#d97706":"#16a34a";
-    const tc=a.tls==="1.0"?"#dc2626":a.tls==="1.2"?"#d97706":"#16a34a";
-    const bg=i%2===0?"#ffffff":"#f9fafb";
-    const ps=a.pqcScore as PQCScoreBreakdown|undefined;
-    const psc=ps?.active?"#16a34a":ps?.color??"#ef4444";
-    const psl=ps?.active?"ACTIVE":ps?`${ps.score}/100`:"—";
-    const dots=ps?Object.values(ps.criteria).map((c:any)=>
-      `<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${c.pass?"#16a34a":c.pts>0?"#eab308":"#ef4444"};margin-right:2px;" title="${c.label}: ${c.pts}/${c.max}"></span>`
-    ).join(""):"";
-    return `<tr style="background:${bg};">
-      <td style="padding:5px 7px;font-size:8px;color:#9ca3af;text-align:center;">${i+1}</td>
-      <td style="padding:5px 7px;font-size:9px;color:#1e40af;font-weight:500;">${a.app}</td>
-      <td style="padding:5px 7px;font-size:8px;color:#374151;">${a.assetType}</td>
-      <td style="padding:5px 7px;text-align:center;"><span style="font-size:8px;font-weight:600;color:${rc};background:${rc}18;padding:2px 6px;border-radius:3px;">${a.risk}</span></td>
-      <td style="padding:5px 7px;font-size:8px;color:${kc};font-weight:600;text-align:center;">${a.keylen??"—"}</td>
-      <td style="padding:5px 7px;font-size:7px;color:#6b7280;max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${a.cipher??"—"}</td>
-      <td style="padding:5px 7px;text-align:center;font-size:8px;color:${tc};font-weight:500;">TLS ${a.tls??"—"}</td>
-      <td style="padding:5px 7px;font-size:8px;color:#6b7280;">${a.ca??"—"}</td>
-      <td style="padding:5px 7px;text-align:center;"><div style="font-size:9px;font-weight:700;color:${psc};">${psl}</div><div style="margin-top:3px;">${dots}</div></td>
-      <td style="padding:5px 7px;font-size:8px;color:#0891b2;text-align:center;">${a.days}d</td>
-      <td style="padding:5px 7px;font-size:8px;color:#ea580c;text-align:right;font-weight:600;">${fmtINRFull(a.cost)}</td>
-    </tr>`;
-  }).join("");
-
-  const criteriaLegend=[
-    {label:"Cert RSA-4096 / EC P-384",max:70,color:"#1e40af"},
-    {label:"No wildcard certificate", max:20,color:"#0891b2"},
-    {label:"AES-256-GCM / ChaCha20",  max: 8,color:"#16a34a"},
-    {label:"X25519 or P-384 KX",      max: 2,color:"#d97706"},
-    {label:"TLS 1.3 (hygiene)",       max: 0,color:"#9ca3af"},
-    {label:"No CBC mode (hygiene)",   max: 0,color:"#9ca3af"},
-  ].map(c=>`<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid #f3f4f6;font-size:9px;">
-    <span style="color:#374151;">${c.label}</span>
-    <span style="color:${c.color};font-weight:700;min-width:30px;text-align:right;">${c.max>0?`${c.max}pts`:"info"}</span>
-  </div>`).join("");
-
-  const doraRows=[
-    {art:"Art. 9.2", title:"ICT Asset Register",      desc:"Maintain an up-to-date register of all ICT assets including cryptographic configurations.", status:total>0?"COVERED":"PENDING"},
-    {art:"Art. 9.4", title:"Cryptographic Controls",   desc:"Implement cryptographic controls protecting data in transit and at rest.",                  status:enriched.filter(a=>a.status!=="weak"&&a.status!=="WEAK").length>0?"PARTIAL":"PENDING"},
-    {art:"Art. 10.1",title:"Vulnerability Management", desc:"Identify, classify and address ICT vulnerabilities in a timely manner.",                   status:enriched.length>0?"IDENTIFIED":"CLEAR"},
-    {art:"Art. 11.1",title:"ICT Business Continuity",  desc:"Maintain ICT business continuity plans covering cryptographic dependencies.",               status:"ROADMAP PROVIDED"},
-  ].map(d=>{
-    const sc=["COVERED","CLEAR","ROADMAP PROVIDED"].includes(d.status)?"#16a34a":["PARTIAL","IDENTIFIED"].includes(d.status)?"#d97706":"#dc2626";
-    return `<tr style="border-bottom:1px solid #f3f4f6;">
-      <td style="padding:7px 10px;font-size:9px;color:#1e40af;font-weight:700;white-space:nowrap;">${d.art}</td>
-      <td style="padding:7px 10px;font-size:9px;color:#111827;font-weight:600;">${d.title}</td>
-      <td style="padding:7px 10px;font-size:8px;color:#6b7280;line-height:1.5;">${d.desc}</td>
-      <td style="padding:7px 10px;text-align:center;"><span style="font-size:8px;font-weight:700;color:${sc};background:${sc}18;padding:2px 8px;border-radius:3px;white-space:nowrap;">${d.status}</span></td>
-    </tr>`;
-  }).join("");
-
-  const remCards=[
-    {title:"Upgrade Certificate Key",color:"#dc2626",bg:"#fef2f2",border:"#fecaca",count:enriched.filter(a=>!(a.pqcScore?.criteria?.certKey4096?.pass)).length,action:"Deploy RSA-4096 or EC P-384 certificates.",detail:"Worth 70/100 pts — the primary bank infrastructure gate.",items:enriched.filter(a=>!(a.pqcScore?.criteria?.certKey4096?.pass)).map(a=>`${a.app} (${a.keylen??"?"})`).slice(0,5)},
-    {title:"Remove Wildcard Certs",color:"#ea580c",bg:"#fff7ed",border:"#fed7aa",count:enriched.filter(a=>a.is_wildcard).length,action:"Replace wildcards with dedicated per-service certificates.",detail:"Worth 20/100 pts — bank services must not share certificates.",items:enriched.filter(a=>a.is_wildcard).map(a=>a.app).slice(0,5)},
-    {title:"Enable Kyber Hybrid",color:"#0891b2",bg:"#f0f9ff",border:"#bae6fd",count:enriched.filter(a=>!a.pqc).length,action:"Implement CRYSTALS-Kyber (FIPS 203) hybrid key exchange.",detail:"Deploy X25519+Kyber768 — the only path to ACTIVE status.",items:enriched.filter(a=>!a.pqc).map(a=>a.app).slice(0,5)},
-  ].map(s=>`<div style="border:1px solid ${s.border};border-radius:6px;padding:14px;background:${s.bg};">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-      <span style="font-size:10px;font-weight:700;color:${s.color};">${s.title}</span>
-      <span style="font-size:18px;font-weight:700;color:${s.color};">${s.count}</span>
-    </div>
-    <div style="font-size:9px;color:#374151;font-weight:500;margin-bottom:3px;">${s.action}</div>
-    <div style="font-size:8px;color:#6b7280;margin-bottom:10px;line-height:1.5;">${s.detail}</div>
-    ${s.items.map(app=>`<div style="font-size:8px;color:#374151;padding:3px 0;border-top:1px solid ${s.border};">▸ ${app}</div>`).join("")}
-    ${s.items.length===0?`<div style="font-size:8px;color:#16a34a;font-weight:500;">✓ All clear</div>`:""}
-  </div>`).join("");
-
-  const html=`<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"/>
-  <title>REBEL — PQC Audit — ${displayName} — ${scanDate}</title>
-  <style>*{box-sizing:border-box;margin:0;padding:0;}body{font-family:Arial,Helvetica,sans-serif;color:#111827;background:#fff;font-size:11px;}@media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact;}.no-print{display:none!important;}.page-break{page-break-before:always;}}.page{max-width:980px;margin:0 auto;padding:32px 40px;}h2{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#374151;margin-bottom:12px;}table{width:100%;border-collapse:collapse;}th{background:#f3f4f6;padding:6px 7px;font-size:8px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#6b7280;text-align:left;border-bottom:2px solid #e5e7eb;}hr{border:none;border-top:1px solid #e5e7eb;margin:22px 0;}.section{margin-bottom:26px;}.grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px;}.grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;}.card{border:1px solid #e5e7eb;border-radius:6px;padding:14px 16px;}.lbl{font-size:8px;color:#9ca3af;text-transform:uppercase;letter-spacing:.1em;margin-bottom:5px;}.val{font-size:20px;font-weight:700;line-height:1;}.sub{font-size:8px;color:#6b7280;margin-top:4px;}.print-btn{position:fixed;top:20px;right:20px;background:#1e40af;color:#fff;border:none;padding:10px 22px;border-radius:5px;cursor:pointer;font-size:13px;font-weight:600;z-index:99;box-shadow:0 2px 8px rgba(30,64,175,.35);}.confidential{background:#fef9c3;border:1px solid #fde047;border-radius:4px;padding:6px 12px;font-size:8px;color:#854d0e;margin-bottom:20px;}.footer{font-size:8px;color:#d1d5db;text-align:center;margin-top:28px;padding-top:14px;border-top:1px solid #f3f4f6;line-height:1.7;}</style>
-  </head><body>
-  <button class="print-btn no-print" onclick="window.print()">⬇ Save as PDF</button>
-  <div class="page">
-  <div style="display:flex;justify-content:space-between;align-items:flex-start;padding-bottom:20px;border-bottom:3px solid #1e40af;margin-bottom:22px;">
-    <div style="display:flex;align-items:center;gap:10px;">
-      <svg width="32" height="32" viewBox="0 0 28 28" xmlns="http://www.w3.org/2000/svg"><polygon points="14,2 26,8 26,20 14,26 2,20 2,8" fill="none" stroke="#1e40af" stroke-width="1.8"/><polygon points="14,7 21,11 21,17 14,21 7,17 7,11" fill="#dbeafe" stroke="#3b82f6" stroke-width="1"/><circle cx="14" cy="14" r="3" fill="#1e40af"/></svg>
-      <div><div style="font-size:18px;font-weight:900;letter-spacing:.2em;color:#111827;">REBEL</div><div style="font-size:7px;color:#9ca3af;letter-spacing:.14em;margin-top:1px;">THREAT INTELLIGENCE PLATFORM</div></div>
-    </div>
-    <div style="text-align:right;"><div style="font-size:8px;color:#9ca3af;text-transform:uppercase;letter-spacing:.1em;margin-bottom:4px;">Prepared for</div><div style="font-size:20px;font-weight:800;color:#111827;">${displayName}</div>${clientDomain?`<div style="font-size:9px;color:#6b7280;margin-top:3px;">${normaliseDomain(clientDomain)}</div>`:""}</div>
-  </div>
-  <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:22px;">
-    <div><div style="font-size:22px;font-weight:700;color:#111827;line-height:1.25;">Post-Quantum Cryptography<br/>Audit Report</div><div style="font-size:9px;color:#6b7280;margin-top:7px;line-height:1.9;">DORA Art. 9 · NIST FIPS 203/204/205 · PCI-DSS 4.0 · SWIFT CSP</div></div>
-    <div style="text-align:right;min-width:200px;"><div style="font-size:8px;color:#9ca3af;text-transform:uppercase;letter-spacing:.08em;">Generated</div><div style="font-size:9px;color:#374151;font-weight:500;margin-top:2px;">${timestamp}</div><div style="font-size:8px;color:#9ca3af;margin-top:8px;text-transform:uppercase;letter-spacing:.08em;">Report ID</div><div style="font-size:9px;color:#374151;font-family:monospace;margin-top:2px;">${reportId}</div>${clientDomain?`<div style="font-size:8px;color:#9ca3af;margin-top:8px;text-transform:uppercase;letter-spacing:.08em;">Scope</div><div style="font-size:9px;color:#1e40af;font-weight:500;margin-top:2px;">*.${normaliseDomain(clientDomain)}</div>`:""}</div>
-  </div>
-  <div class="confidential">⚠ CONFIDENTIAL — Sensitive cryptographic posture data. Not for external distribution.</div><hr/>
-  <div class="section"><h2>Executive Summary</h2><div class="grid2" style="align-items:start;"><div class="card" style="display:flex;flex-direction:column;align-items:center;padding:22px;">${gaugeSVG}<div style="margin-top:12px;width:100%;"><div style="font-size:9px;color:#374151;font-weight:600;text-align:center;margin-bottom:8px;">${total} Applications Assessed · PQC Migration Progress</div><div style="font-size:8px;color:#6b7280;line-height:1.6;background:#f9fafb;border-radius:4px;padding:8px;border:1px solid #e5e7eb;">Score = 5 milestones × 20pts each.<br/>All certs RSA-4096/EC P-384 · Zero wildcards · AES-256 everywhere · TLS 1.2 eliminated · Kyber deployed.</div></div></div><div style="display:flex;flex-direction:column;gap:10px;"><div class="grid2"><div class="card"><div class="lbl">Assessed</div><div class="val" style="color:#1e40af;">${total}</div><div class="sub">In scope</div></div><div class="card"><div class="lbl">Need Action</div><div class="val" style="color:#dc2626;">${enriched.length}</div><div class="sub">Weak assets</div></div></div><div class="grid2"><div class="card"><div class="lbl">Est. Timeline</div><div class="val" style="color:#0891b2;">${calDays}d</div><div class="sub">${teamSize} dev · ${totalDays} dev-days</div></div><div class="card"><div class="lbl">Est. Cost</div><div class="val" style="color:#ea580c;">${fmtINR(totalCostUSD)}</div><div class="sub">At ${fmtINR(devRateUSD)}/dev/day</div></div></div><div class="card" style="background:#f8fafc;"><div class="lbl">Projected Completion</div><div style="font-size:16px;font-weight:700;color:#0891b2;margin-top:4px;">${dateStr}</div><div class="sub">${teamSize}-dev team</div></div></div></div></div>
-  <div class="section"><h2>PQC Migration Progress — 5 Milestones</h2><div class="grid2"><div class="card">${scoreDist}</div><div class="card"><div style="font-size:10px;color:#374151;font-weight:600;margin-bottom:10px;">Scoring Criteria (per application)</div>${criteriaLegend}</div></div></div>
-  <hr class="page-break"/>
-  <div class="section"><h2>DORA Regulatory Mapping</h2><table><thead><tr><th>Article</th><th>Requirement</th><th>Description</th><th>Status</th></tr></thead><tbody>${doraRows}</tbody></table></div>
-  <hr/>
-  <div class="section"><h2>Application Cryptographic Inventory — Ranked by Risk Priority</h2><table><thead><tr><th style="width:22px;">#</th><th>Application</th><th>Type</th><th>Risk</th><th>Key Len</th><th>Cipher Suite</th><th>TLS</th><th>CA</th><th style="text-align:center;">PQC Score</th><th>Days</th><th>Cost (INR)</th></tr></thead><tbody>${assetRows}</tbody><tfoot><tr style="background:#f8fafc;border-top:2px solid #e5e7eb;"><td colspan="9" style="padding:7px 10px;font-size:9px;color:#374151;font-weight:700;">TOTALS</td><td style="padding:7px 10px;font-size:9px;color:#0891b2;font-weight:700;text-align:center;">${totalDays}d</td><td style="padding:7px 10px;font-size:9px;color:#ea580c;font-weight:700;text-align:right;">${fmtINRFull(totalCostUSD)}</td></tr></tfoot></table></div>
-  <hr/>
-  <div class="section"><h2>Remediation Actions — Priority Order</h2><div class="grid3">${remCards}</div></div>
-  <hr/>
-  <div class="grid3" style="margin-bottom:28px;">${["Prepared by","Reviewed by","Approved by"].map(role=>`<div><div style="font-size:8px;color:#9ca3af;text-transform:uppercase;letter-spacing:.1em;margin-bottom:22px;">${role}</div><div style="border-bottom:1px solid #374151;margin-bottom:5px;"></div><div style="font-size:8px;color:#9ca3af;">Signature &amp; Date</div></div>`).join("")}</div>
-  <div class="footer">REBEL Threat Intelligence Platform · ${new URL(API).hostname} · Report ID: ${reportId} · ${displayName}${clientDomain?`· Scope: *.${normaliseDomain(clientDomain)}`:""}<br/>Confidential — intended solely for the named organisation. · Costs displayed in Indian Rupees (INR).</div>
-  </div></body></html>`;
-
-  const blob=new Blob([html],{type:"text/html"});
-  const url=URL.createObjectURL(blob);
-  const win=window.open(url,"_blank");
-  if(win)win.focus();
-}
 
 // ── Score Gauge ───────────────────────────────────────────────────────────────
 function ScoreGauge({ score, size=200 }: { score:number; size?:number }) {
@@ -974,7 +828,21 @@ export default function PQCReadinessPage() {
             <button style={{...LS.btn,fontSize:isMobile?9:11}} onClick={exportCSV}>↓ CSV</button>
             <button
               style={{...LS.btn,fontSize:isMobile?9:11,background:`${L.blue}15`,borderColor:`${L.blue}40`,color:L.blue,fontWeight:700}}
-              onClick={()=>exportAuditPDF(enriched,migrationScore,pqcReady,total,totalDays,calDays,totalCost,teamSize,devRate,dateStr,clientName,activeDomain,milestones)}
+              onClick={() => exportAuditPDF({
+                                  enriched,
+                                  migrationScore,
+                                  pqcReady,
+                                  total,
+                                  totalDays,
+                                  calDays,
+                                  totalCostUSD: totalCost,
+                                  teamSize,
+                                  devRateUSD:   devRate,
+                                  completionDate: dateStr,
+                                  clientName,
+                                  clientDomain: activeDomain,
+                                  milestones,
+                                })}
             >{isMobile?"⬡ PDF":"⬡ AUDIT PDF"}</button>
           </div>
         }/>
