@@ -1,8 +1,4 @@
 import React, { useState, useEffect, useRef } from "react";
-import {
-  Panel, PanelHeader, Badge, ProgBar,
-  Table, TR, TD,
-} from "./shared.js";
 
 import {
   parseCipher, fullAnalysis,
@@ -14,6 +10,60 @@ import {
 import type { CipherAnalysis, CipherFinding, PQCScoreBreakdown } from "./cipherAnalysis.js";
 
 const API = "https://r3bel-production.up.railway.app";
+
+// ─── BREAKPOINT HOOK ─────────────────────────────────────────────────────────
+function useBreakpoint() {
+  const get = () => {
+    const w = window.innerWidth;
+    if (w < 480) return "mobile"  as const;
+    if (w < 900) return "tablet"  as const;
+    return            "desktop" as const;
+  };
+  const [bp, setBp] = useState(get);
+  useEffect(() => {
+    const h = () => setBp(get());
+    window.addEventListener("resize", h);
+    return () => window.removeEventListener("resize", h);
+  }, []);
+  return bp;
+}
+
+// ─── BADGE ───────────────────────────────────────────────────────────────────
+const BADGE_COLORS: Record<string, { color: string; bg: string; border: string }> = {
+  red:    { color: "#dc2626", bg: "rgba(220,38,38,0.08)",  border: "rgba(220,38,38,0.3)"  },
+  orange: { color: "#ea580c", bg: "rgba(234,88,12,0.08)",  border: "rgba(234,88,12,0.3)"  },
+  yellow: { color: "#ca8a04", bg: "rgba(202,138,4,0.08)",  border: "rgba(202,138,4,0.3)"  },
+  green:  { color: "#16a34a", bg: "rgba(22,163,74,0.08)",  border: "rgba(22,163,74,0.3)"  },
+  blue:   { color: "#1d4ed8", bg: "rgba(29,78,216,0.08)",  border: "rgba(29,78,216,0.3)"  },
+  gray:   { color: "#475569", bg: "rgba(71,85,105,0.08)",  border: "rgba(71,85,105,0.25)" },
+};
+
+function Badge({ v, children }: { v: string; children: React.ReactNode }) {
+  const s = BADGE_COLORS[v] ?? BADGE_COLORS.gray;
+  return (
+    <span style={{
+      fontSize: 8, fontWeight: 700, letterSpacing: ".08em",
+      color: s.color, background: s.bg,
+      border: `1px solid ${s.border}`,
+      borderRadius: 4, padding: "2px 6px",
+      whiteSpace: "nowrap" as const, display: "inline-block",
+    }}>
+      {children}
+    </span>
+  );
+}
+
+// ─── PROGRESS BAR ─────────────────────────────────────────────────────────────
+function ProgBar({ pct, color }: { pct: number; color: string }) {
+  return (
+    <div style={{ height: 4, background: "rgba(14,165,233,0.1)", borderRadius: 2, overflow: "hidden" }}>
+      <div style={{
+        height: "100%", width: `${Math.min(100, pct)}%`,
+        background: color, borderRadius: 2, transition: "width 0.6s ease",
+      }} />
+    </div>
+  );
+}
 
 // ─── LIGHT PALETTE ────────────────────────────────────────────────────────────
 const L = {
