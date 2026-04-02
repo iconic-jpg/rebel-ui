@@ -331,9 +331,11 @@ export default function CBOMPage() {
   const protoLegendRef = useRef<HTMLDivElement>(null);
 
   const bp        = useBreakpoint();
-  const isMobile  = bp === "mobile";
-  const isTablet  = bp === "tablet";
-  const isDesktop = bp === "desktop";
+
+
+    const isMobile  = !screens.md;
+    const isTablet  = screens.md && !screens.lg;
+    const isDesktop = screens.lg;
 
   const [loading,    setLoading]    = useState(true);
   const [cbomData,   setCbomData]   = useState<any[]>([]);
