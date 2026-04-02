@@ -7,6 +7,7 @@ const NAV_ITEMS = [
   { path: "/inventory", label: "Asset Inventory", icon: "◈", section: "ASSET & PQC" },
   { path: "/discovery", label: "Asset Discovery", icon: "◎", section: null },
   { path: "/cbom", label: "CBOM", icon: "◉", section: null },
+  { path: "/registry", label: "Asset Registry", icon: "▦", section: null },
   { path: "/pqc", label: "Posture of PQC", icon: "⬟", section: null },
   { path: "/pqc-readiness", label: "PQC Readiness", icon: "◐", section: null },
   { path: "/rating", label: "Cyber Rating", icon: "✦", section: "REPORTS" },

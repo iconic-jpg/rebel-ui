@@ -27,6 +27,8 @@ export default function App() {
             <Route index element={<RebelDashboard />} />
             <Route path="inventory" element={<AssetInventoryPage />} />
             <Route path="discovery" element={<AssetDiscoveryPage />} />
+            <Route path="registry" element={<AssetRegistryPage />} />
+
             <Route path="cbom" element={<CBOMPage />} />
             <Route path="pqc" element={<PQCPosturePage />} />
             <Route path="pqc-readiness" element={<PQCReadinessPage />} />
