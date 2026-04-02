@@ -830,20 +830,20 @@ export default function PQCReadinessPage() {
             <button
               style={{...LS.btn,fontSize:isMobile?9:11,background:`${L.blue}15`,borderColor:`${L.blue}40`,color:L.blue,fontWeight:700}}
               onClick={() => exportAuditPDF({
-                  enriched,
-                  migrationScore,
-                  pqcReady,
-                  total,
-                  totalDays,
-                  calDays,
-                  totalCostUSD: totalCost,
-                  teamSize,
-                  devRateUSD:   devRate,
-                  completionDate: dateStr,
-                  clientName,
-                  clientDomain: activeDomain,
-                  milestones,
-                })}
+                      enriched,
+                      migrationScore,
+                      pqcReady,
+                      total,
+                      totalDays,
+                      calDays,
+                      totalCostINR: totalCost,
+                      teamSize,
+                      devRateINR:   devRate,
+                      completionDate: dateStr,
+                      clientName,
+                      clientDomain: activeDomain,
+                      milestones,
+                    })}
             >{isMobile?"⬡ PDF":"⬡ AUDIT PDF"}</button>
           </div>
         }/>
