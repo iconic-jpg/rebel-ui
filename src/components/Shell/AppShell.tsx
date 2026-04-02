@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useThemeContext } from "../context/ThemeContext.js";
+import SecureModePanel, { SecureModeBadge } from "./SecureModePanel";
 
 const NAV_ITEMS = [
   { path: "/", label: "Dashboard", icon: "⬡", section: "CORE" },
@@ -14,7 +15,6 @@ const NAV_ITEMS = [
   { path: "/reporting", label: "Reporting", icon: "▣", section: null },
 ];
 
-// ─── LIGHT PALETTE (mirrors RebelDashboard.tsx) ───────────────────────────────
 const L = {
   accent:       "#0ea5e9",
   accentDark:   "#0284c7",
@@ -32,10 +32,14 @@ const L = {
 };
 
 export default function AppShell() {
-  const location = useLocation();
-  const navigate = useNavigate();
+  const location  = useLocation();
+  const navigate  = useNavigate();
   const [open, setOpen] = useState(false);
   const { toggle } = useThemeContext();
+
+  // If you have a JWT in context/localStorage, thread it through here.
+  // Leave undefined if your API is open.
+  const jwtToken: string | undefined = undefined;
 
   const isActive = (path: string) =>
     path === "/" ? location.pathname === "/" : location.pathname.startsWith(path);
@@ -45,7 +49,6 @@ export default function AppShell() {
     setOpen(false);
   };
 
-  // Group nav items by section
   const sections: { title: string | null; items: typeof NAV_ITEMS }[] = [];
   let currentSection: { title: string | null; items: typeof NAV_ITEMS } | null = null;
   for (const item of NAV_ITEMS) {
@@ -89,7 +92,6 @@ export default function AppShell() {
           }
         }}
       >
-        {/* Icon box */}
         <div
           style={{
             width: 32,
@@ -109,8 +111,6 @@ export default function AppShell() {
         >
           {icon}
         </div>
-
-        {/* Label */}
         <div style={{ flex: 1 }}>
           <div
             style={{
@@ -124,8 +124,6 @@ export default function AppShell() {
             {label}
           </div>
         </div>
-
-        {/* Active dot */}
         {active && (
           <span
             style={{
@@ -151,6 +149,10 @@ export default function AppShell() {
         ::-webkit-scrollbar-thumb { background: rgba(14,165,233,0.2); border-radius: 2px; }
         ::-webkit-scrollbar-track { background: transparent; }
         button { -webkit-tap-highlight-color: transparent; }
+        @keyframes ping {
+          0%   { transform: scale(1); opacity: .4; }
+          100% { transform: scale(2.4); opacity: 0; }
+        }
       `}</style>
 
       {/* Overlay */}
@@ -199,7 +201,6 @@ export default function AppShell() {
           }}
         >
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            {/* Logo mark */}
             <svg width="22" height="22" viewBox="0 0 28 28">
               <polygon
                 points="14,2 26,8 26,20 14,26 2,20 2,8"
@@ -247,7 +248,6 @@ export default function AppShell() {
               </div>
             </div>
           </div>
-          {/* Close button */}
           <button
             onClick={() => setOpen(false)}
             style={{
@@ -274,7 +274,6 @@ export default function AppShell() {
         <nav style={{ flex: 1, overflowY: "auto", padding: "10px 10px 6px" }}>
           {sections.map((section) => (
             <div key={section.title} style={{ marginBottom: 8 }}>
-              {/* Section label */}
               <div
                 style={{
                   fontSize: 7.5,
@@ -299,6 +298,11 @@ export default function AppShell() {
             </div>
           ))}
         </nav>
+
+        {/* ── SECURE MODE PANEL ── */}
+        <div style={{ borderTop: `1px solid ${L.divider}` }}>
+          <SecureModePanel token={jwtToken} />
+        </div>
 
         {/* Theme toggle */}
         <div style={{ padding: "8px 10px", borderTop: `1px solid ${L.divider}` }}>
@@ -337,7 +341,6 @@ export default function AppShell() {
             gap: 6,
           }}
         >
-          {/* Live badge */}
           <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
             <span style={{ position: "relative", display: "inline-flex", width: 7, height: 7, flexShrink: 0 }}>
               <span style={{ position: "absolute", inset: 0, borderRadius: "50%", background: L.success, opacity: 0.4, animation: "ping 1.4s ease infinite" }} />
@@ -402,11 +405,9 @@ export default function AppShell() {
               borderRadius: 2,
               background: open ? L.accent : L.textDim,
               transform: open
-                ? i === 0
-                  ? "translateY(6px) rotate(45deg)"
-                  : i === 2
-                  ? "translateY(-6px) rotate(-45deg)"
-                  : "scaleX(0)"
+                ? i === 0 ? "translateY(6px) rotate(45deg)"
+                : i === 2 ? "translateY(-6px) rotate(-45deg)"
+                : "scaleX(0)"
                 : "none",
               opacity: open && i === 1 ? 0 : 1,
               transition: "all 0.22s cubic-bezier(0.4,0,0.2,1)",
@@ -414,6 +415,18 @@ export default function AppShell() {
           />
         ))}
       </button>
+
+      {/* ── SECURE BADGE (top-right, always visible) ── */}
+      <div
+        style={{
+          position: "fixed",
+          top: 14,
+          right: 16,
+          zIndex: 200,
+        }}
+      >
+        <SecureModeBadge token={jwtToken} />
+      </div>
 
       <Outlet />
     </>
