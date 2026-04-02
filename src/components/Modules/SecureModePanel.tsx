@@ -1,23 +1,4 @@
-/**
- * REBEL — SecureModePanel & SecureModeBadge
- * ==========================================
- * Wired to the real /secure-mode/* endpoints.
- *
- * How to add to AppShell.tsx (two lines):
- *
- *   import SecureModePanel, { SecureModeBadge } from "./SecureModePanel";
- *
- *   // Inside the sidebar <nav> footer:
- *   <SecureModePanel token={jwtToken} />
- *
- *   // Inside your dashboard header:
- *   <SecureModeBadge token={jwtToken} />
- *
- * The toggle calls POST /secure-mode/toggle { enabled: true|false }.
- * That endpoint writes to rebel_config in PostgreSQL → survives restarts.
- * Env-locked mode (SECURE_MODE=true in docker-compose) shows a locked badge
- * and disables the toggle button — you can observe but not disable from UI.
- */
+
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
 
