@@ -11,38 +11,70 @@ import {
 
 import type { PQCScoreBreakdown } from "./cipherAnalysis.js";
 
-const API = "https://r3bel-production.up.railway.app";
+// ── API Base: VITE_API_BASE env var → Docker/airgap → cloud fallback ──────────
+const API =
+  (typeof import.meta !== "undefined" && (import.meta as any).env?.VITE_API_BASE) ||
+  "https://r3bel-production.up.railway.app";
+
+// ── Cache config ──────────────────────────────────────────────────────────────
+const CACHE_TTL_MS  = 12 * 60 * 60 * 1000; // 12 hours
+const CACHE_KEY_CBOM   = "rebel_cache_cbom";
+const CACHE_KEY_ASSETS = "rebel_cache_assets";
+
+interface CacheEntry<T> { ts: number; data: T; }
+
+function cacheGet<T>(key: string): T | null {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return null;
+    const entry: CacheEntry<T> = JSON.parse(raw);
+    if (Date.now() - entry.ts > CACHE_TTL_MS) { localStorage.removeItem(key); return null; }
+    return entry.data;
+  } catch { return null; }
+}
+
+function cacheSet<T>(key: string, data: T): void {
+  try { localStorage.setItem(key, JSON.stringify({ ts: Date.now(), data })); } catch {}
+}
+
+function cacheClear(): void {
+  localStorage.removeItem(CACHE_KEY_CBOM);
+  localStorage.removeItem(CACHE_KEY_ASSETS);
+}
+
+function cacheAge(key: string): string | null {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return null;
+    const entry: CacheEntry<unknown> = JSON.parse(raw);
+    const mins = Math.round((Date.now() - entry.ts) / 60000);
+    if (mins < 60)  return `${mins}m ago`;
+    return `${Math.round(mins / 60)}h ago`;
+  } catch { return null; }
+}
 
 // ── Light Theme Palette ───────────────────────────────────────────────────────
 const L = {
-  // Backgrounds
   pageBg:      "#f5f7fa",
   panelBg:     "#ffffff",
   panelBorder: "#e2e8f0",
   rowHover:    "rgba(59,130,246,0.04)",
   subtleBg:    "#f8fafc",
   insetBg:     "#f1f5f9",
-
-  // Text
-  text1:  "#0f172a",   // headings
-  text2:  "#334155",   // body
-  text3:  "#64748b",   // secondary / labels
-  text4:  "#94a3b8",   // muted
-
-  // Brand accents (matching original hues but vivid on light)
+  text1:  "#0f172a",
+  text2:  "#334155",
+  text3:  "#64748b",
+  text4:  "#94a3b8",
   blue:   "#1d4ed8",
   cyan:   "#0284c7",
   green:  "#16a34a",
   yellow: "#b45309",
   orange: "#c2410c",
   red:    "#dc2626",
-
-  // Borders & dividers
   border:      "#e2e8f0",
   borderLight: "#f1f5f9",
 };
 
-// Light-mode style helpers
 const LS = {
   page: {
     background: L.pageBg,
@@ -83,7 +115,7 @@ const LS = {
 };
 
 // ── INR Formatter ─────────────────────────────────────────────────────────────
-const INR_RATE = 83; // 1 USD = 83 INR (approximate)
+const INR_RATE = 83;
 function toINR(usd: number): number { return Math.round(usd * INR_RATE); }
 function fmtINR(usd: number): string {
   const inr = toINR(usd);
@@ -101,7 +133,7 @@ const EFFORT: Record<string, number> = {
   "Server": 5,  "Servers": 5,
   "LB": 1,      "Other": 3,
 };
-const DEV_RATE_USD = 800; // internal USD base; display in INR
+const DEV_RATE_USD = 800;
 
 function normaliseDomain(raw: string): string {
   return raw.trim().toLowerCase()
@@ -152,6 +184,143 @@ function useBreakpoint() {
   return bp;
 }
 
+// ── Skeleton Components ───────────────────────────────────────────────────────
+function Shimmer({ w="100%", h=16, radius=4, style={} }: { w?: string|number; h?: number; radius?: number; style?: React.CSSProperties }) {
+  return (
+    <div style={{
+      width: w, height: h, borderRadius: radius,
+      background: "linear-gradient(90deg, #e2e8f0 25%, #f1f5f9 50%, #e2e8f0 75%)",
+      backgroundSize: "200% 100%",
+      animation: "shimmer 1.4s ease infinite",
+      flexShrink: 0,
+      ...style,
+    }}/>
+  );
+}
+
+function SkeletonMetricCard() {
+  return (
+    <div style={{ background: L.panelBg, border: `1px solid ${L.panelBorder}`, borderRadius: 8, padding: "14px 16px", boxShadow: "0 1px 3px rgba(0,0,0,0.05)" }}>
+      <Shimmer w="55%" h={8} style={{ marginBottom: 10 }}/>
+      <Shimmer w="70%" h={26} style={{ marginBottom: 8 }}/>
+      <Shimmer w="45%" h={8}/>
+    </div>
+  );
+}
+
+function SkeletonGaugePanel() {
+  return (
+    <div style={{ ...LS.panel }}>
+      <div style={{ padding: "10px 14px", borderBottom: `1px solid ${L.borderLight}`, background: L.subtleBg, borderRadius: "8px 8px 0 0" }}>
+        <Shimmer w={160} h={9}/>
+      </div>
+      <div style={{ padding: 14, display: "flex", flexDirection: "column", alignItems: "center", gap: 16 }}>
+        {/* Fake gauge arc */}
+        <div style={{ width: 200, height: 120, display: "flex", alignItems: "flex-end", justifyContent: "center", position: "relative" }}>
+          <div style={{
+            width: 180, height: 90,
+            borderRadius: "90px 90px 0 0",
+            border: "14px solid #e2e8f0",
+            borderBottom: "none",
+            background: "transparent",
+            animation: "shimmer 1.4s ease infinite",
+          }}/>
+          <div style={{ position: "absolute", bottom: 0, textAlign: "center" }}>
+            <Shimmer w={60} h={32} radius={6} style={{ margin: "0 auto 6px" }}/>
+            <Shimmer w={80} h={9} radius={4} style={{ margin: "0 auto" }}/>
+          </div>
+        </div>
+        {/* Milestone bars */}
+        {[100, 80, 65, 90, 40].map((w, i) => (
+          <div key={i} style={{ width: "100%" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+              <Shimmer w={`${w}%`} h={9}/>
+              <Shimmer w={30} h={9} style={{ marginLeft: 8 }}/>
+            </div>
+            <Shimmer w="100%" h={4} radius={2}/>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function SkeletonTableRows({ count = 6 }: { count?: number }) {
+  return (
+    <>
+      {Array.from({ length: count }).map((_, i) => (
+        <tr key={i} style={{ borderBottom: `1px solid ${L.borderLight}`, background: i % 2 === 0 ? L.panelBg : L.subtleBg }}>
+          <td style={{ padding: "10px 8px" }}><Shimmer w={18} h={9}/></td>
+          <td style={{ padding: "10px 8px" }}><Shimmer w={140} h={10}/></td>
+          <td style={{ padding: "10px 8px" }}><Shimmer w={60} h={18} radius={3}/></td>
+          <td style={{ padding: "10px 8px" }}><Shimmer w={55} h={18} radius={3}/></td>
+          <td style={{ padding: "10px 8px" }}><Shimmer w={50} h={10}/></td>
+          <td style={{ padding: "10px 8px" }}><Shimmer w={120} h={9}/></td>
+          <td style={{ padding: "10px 8px" }}><Shimmer w={45} h={10}/></td>
+          <td style={{ padding: "10px 8px" }}><Shimmer w={70} h={9}/></td>
+          <td style={{ padding: "10px 8px", textAlign: "center" }}><Shimmer w={52} h={18} radius={3} style={{ margin: "0 auto" }}/></td>
+          <td style={{ padding: "10px 8px" }}><Shimmer w={30} h={10}/></td>
+          <td style={{ padding: "10px 8px" }}><Shimmer w={65} h={10}/></td>
+          <td style={{ padding: "10px 8px", textAlign: "center" }}><Shimmer w={12} h={12} radius={6} style={{ margin: "0 auto" }}/></td>
+          <td style={{ padding: "10px 8px", textAlign: "center" }}><Shimmer w={12} h={12} radius={6} style={{ margin: "0 auto" }}/></td>
+        </tr>
+      ))}
+    </>
+  );
+}
+
+function SkeletonRoadmapCards({ count = 5 }: { count?: number }) {
+  return (
+    <>
+      {Array.from({ length: count }).map((_, i) => (
+        <div key={i} style={{ borderBottom: `1px solid ${L.borderLight}`, padding: "12px 14px" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <Shimmer w={24} h={9}/>
+              <Shimmer w={160} h={11}/>
+            </div>
+            <div style={{ display: "flex", gap: 6 }}>
+              <Shimmer w={52} h={18} radius={3}/>
+              <Shimmer w={52} h={18} radius={3}/>
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: 10 }}>
+            <Shimmer w={50} h={9}/>
+            <Shimmer w={30} h={9}/>
+            <Shimmer w={55} h={9}/>
+            <Shimmer w={40} h={9}/>
+          </div>
+        </div>
+      ))}
+    </>
+  );
+}
+
+// ── Cache status badge ────────────────────────────────────────────────────────
+function CacheBadge({ age, onRefresh }: { age: string | null; onRefresh: () => void }) {
+  if (!age) return null;
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+      <span style={{
+        fontSize: 8, fontWeight: 600, color: L.text3,
+        background: L.insetBg, border: `1px solid ${L.border}`,
+        borderRadius: 3, padding: "2px 7px", letterSpacing: ".06em",
+      }}>
+        CACHED · {age}
+      </span>
+      <button
+        onClick={onRefresh}
+        title="Force re-fetch from API"
+        style={{
+          ...LS.btn, fontSize: 9, padding: "3px 8px",
+          color: L.blue, borderColor: `${L.blue}40`,
+          background: `${L.blue}0d`,
+        }}
+      >↺ REFRESH</button>
+    </div>
+  );
+}
+
 // ── Light Panel Components ────────────────────────────────────────────────────
 function LPanel({ children, style={} }: { children: React.ReactNode; style?: React.CSSProperties }) {
   return <div style={{...LS.panel, ...style}}>{children}</div>;
@@ -195,32 +364,20 @@ function exportAuditPDF(
   const timestamp = now.toLocaleString("en-IN",{year:"numeric",month:"long",day:"numeric",hour:"2-digit",minute:"2-digit",timeZoneName:"short"});
   const scanDate  = now.toISOString().split("T")[0];
   const reportId  = `REBEL-${scanDate.replace(/-/g,"")}-${Math.random().toString(36).slice(2,8).toUpperCase()}`;
-  const scoreColor= migrationScore>=70?"#16a34a":migrationScore>=40?"#d97706":"#dc2626";
-  const scoreLabel= migrationScore>=70?"COMPLIANT":migrationScore>=40?"AT RISK":"CRITICAL";
   const displayName = clientName.trim()||(clientDomain?normaliseDomain(clientDomain):"All Assets");
 
-  const totalCostINR = toINR(totalCostUSD);
-  const devRateINR   = toINR(devRateUSD);
-
-  // Gauge SVG
-  const weightedScore = migrationScore;
-  const sc = migrationScore >= 70 ? "#16a34a" : migrationScore >= 40 ? "#d97706" : "#dc2626";
-  const sl = migrationScore >= 70 ? "COMPLIANT" : migrationScore >= 40 ? "AT RISK" : "CRITICAL";
-
-  const pct = weightedScore / 100, gr = 54, gcx = 70, gcy = 75;
+  const pct = migrationScore / 100, gr = 54, gcx = 70, gcy = 75;
   const gx1=gcx+gr*Math.cos(Math.PI), gy1=gcy+gr*Math.sin(Math.PI);
   const gx2=gcx+gr*Math.cos(Math.PI+Math.PI*pct);
   const gy2=gcy+gr*Math.sin(Math.PI+Math.PI*pct);
   const glf=pct>0.5?1:0;
+  const sc = migrationScore >= 70 ? "#16a34a" : migrationScore >= 40 ? "#d97706" : "#dc2626";
+  const sl = migrationScore >= 70 ? "COMPLIANT" : migrationScore >= 40 ? "AT RISK" : "CRITICAL";
   const gaugeSVG=`<svg width="140" height="82" viewBox="0 0 140 82" xmlns="http://www.w3.org/2000/svg">
-    <path d="M ${gcx-gr} ${gcy} A ${gr} ${gr} 0 0 1 ${gcx+gr} ${gcy}"
-      fill="none" stroke="#e5e7eb" stroke-width="10" stroke-linecap="round"/>
-    <path d="M ${gx1.toFixed(2)} ${gy1.toFixed(2)} A ${gr} ${gr} 0 ${glf} 1 ${gx2.toFixed(2)} ${gy2.toFixed(2)}"
-      fill="none" stroke="${sc}" stroke-width="10" stroke-linecap="round"/>
-    <text x="${gcx}" y="${gcy-4}" text-anchor="middle"
-      font-family="Arial" font-size="22" font-weight="bold" fill="${sc}">${weightedScore}</text>
-    <text x="${gcx}" y="${gcy+13}" text-anchor="middle"
-      font-family="Arial" font-size="7" fill="#6b7280" letter-spacing="1">${sl}</text>
+    <path d="M ${gcx-gr} ${gcy} A ${gr} ${gr} 0 0 1 ${gcx+gr} ${gcy}" fill="none" stroke="#e5e7eb" stroke-width="10" stroke-linecap="round"/>
+    <path d="M ${gx1.toFixed(2)} ${gy1.toFixed(2)} A ${gr} ${gr} 0 ${glf} 1 ${gx2.toFixed(2)} ${gy2.toFixed(2)}" fill="none" stroke="${sc}" stroke-width="10" stroke-linecap="round"/>
+    <text x="${gcx}" y="${gcy-4}" text-anchor="middle" font-family="Arial" font-size="22" font-weight="bold" fill="${sc}">${migrationScore}</text>
+    <text x="${gcx}" y="${gcy+13}" text-anchor="middle" font-family="Arial" font-size="7" fill="#6b7280" letter-spacing="1">${sl}</text>
   </svg>`;
 
   const scoreDist = milestoneData.map(m => {
@@ -228,8 +385,7 @@ function exportAuditPDF(
     return `<div style="margin-bottom:9px;">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;">
         <span style="display:flex;align-items:center;gap:6px;font-size:9px;color:#374151;">
-          <span style="font-size:10px;color:${m.done?"#16a34a":"#ef4444"};">${m.done?"✓":"✗"}</span>
-          ${m.label}
+          <span style="font-size:10px;color:${m.done?"#16a34a":"#ef4444"};">${m.done?"✓":"✗"}</span>${m.label}
         </span>
         <span style="font-size:9px;color:${color};font-weight:700;">${m.pct}%</span>
       </div>
@@ -259,10 +415,7 @@ function exportAuditPDF(
       <td style="padding:5px 7px;font-size:7px;color:#6b7280;max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${a.cipher??"—"}</td>
       <td style="padding:5px 7px;text-align:center;font-size:8px;color:${tc};font-weight:500;">TLS ${a.tls??"—"}</td>
       <td style="padding:5px 7px;font-size:8px;color:#6b7280;">${a.ca??"—"}</td>
-      <td style="padding:5px 7px;text-align:center;">
-        <div style="font-size:9px;font-weight:700;color:${psc};">${psl}</div>
-        <div style="margin-top:3px;">${dots}</div>
-      </td>
+      <td style="padding:5px 7px;text-align:center;"><div style="font-size:9px;font-weight:700;color:${psc};">${psl}</div><div style="margin-top:3px;">${dots}</div></td>
       <td style="padding:5px 7px;font-size:8px;color:#0891b2;text-align:center;">${a.days}d</td>
       <td style="padding:5px 7px;font-size:8px;color:#ea580c;text-align:right;font-weight:600;">${fmtINRFull(a.cost)}</td>
     </tr>`;
@@ -275,11 +428,10 @@ function exportAuditPDF(
     {label:"X25519 or P-384 KX",      max: 2,color:"#d97706"},
     {label:"TLS 1.3 (hygiene)",       max: 0,color:"#9ca3af"},
     {label:"No CBC mode (hygiene)",   max: 0,color:"#9ca3af"},
-  ].map(c=>`
-    <div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid #f3f4f6;font-size:9px;">
-      <span style="color:#374151;">${c.label}</span>
-      <span style="color:${c.color};font-weight:700;min-width:30px;text-align:right;">${c.max>0?`${c.max}pts`:"info"}</span>
-    </div>`).join("");
+  ].map(c=>`<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid #f3f4f6;font-size:9px;">
+    <span style="color:#374151;">${c.label}</span>
+    <span style="color:${c.color};font-weight:700;min-width:30px;text-align:right;">${c.max>0?`${c.max}pts`:"info"}</span>
+  </div>`).join("");
 
   const doraRows=[
     {art:"Art. 9.2", title:"ICT Asset Register",      desc:"Maintain an up-to-date register of all ICT assets including cryptographic configurations.", status:total>0?"COVERED":"PENDING"},
@@ -297,203 +449,50 @@ function exportAuditPDF(
   }).join("");
 
   const remCards=[
-    {title:"Upgrade Certificate Key",  color:"#dc2626",bg:"#fef2f2",border:"#fecaca",
-     count:enriched.filter(a=>!(a.pqcScore?.criteria?.certKey4096?.pass)).length,
-     action:"Deploy RSA-4096 or EC P-384 certificates.",
-     detail:"Worth 70/100 pts — the primary bank infrastructure gate.",
-     items:enriched.filter(a=>!(a.pqcScore?.criteria?.certKey4096?.pass)).map(a=>`${a.app} (${a.keylen??"?"})`).slice(0,5)},
-    {title:"Remove Wildcard Certs",    color:"#ea580c",bg:"#fff7ed",border:"#fed7aa",
-     count:enriched.filter(a=>a.is_wildcard).length,
-     action:"Replace wildcards with dedicated per-service certificates.",
-     detail:"Worth 20/100 pts — bank services must not share certificates.",
-     items:enriched.filter(a=>a.is_wildcard).map(a=>a.app).slice(0,5)},
-    {title:"Enable Kyber Hybrid",      color:"#0891b2",bg:"#f0f9ff",border:"#bae6fd",
-     count:enriched.filter(a=>!a.pqc).length,
-     action:"Implement CRYSTALS-Kyber (FIPS 203) hybrid key exchange.",
-     detail:"Deploy X25519+Kyber768 — the only path to ACTIVE status.",
-     items:enriched.filter(a=>!a.pqc).map(a=>a.app).slice(0,5)},
-  ].map(s=>`
-    <div style="border:1px solid ${s.border};border-radius:6px;padding:14px;background:${s.bg};">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-        <span style="font-size:10px;font-weight:700;color:${s.color};">${s.title}</span>
-        <span style="font-size:18px;font-weight:700;color:${s.color};">${s.count}</span>
-      </div>
-      <div style="font-size:9px;color:#374151;font-weight:500;margin-bottom:3px;">${s.action}</div>
-      <div style="font-size:8px;color:#6b7280;margin-bottom:10px;line-height:1.5;">${s.detail}</div>
-      ${s.items.map(app=>`<div style="font-size:8px;color:#374151;padding:3px 0;border-top:1px solid ${s.border};">▸ ${app}</div>`).join("")}
-      ${s.items.length===0?`<div style="font-size:8px;color:#16a34a;font-weight:500;">✓ All clear</div>`:""}
-    </div>`).join("");
+    {title:"Upgrade Certificate Key",color:"#dc2626",bg:"#fef2f2",border:"#fecaca",count:enriched.filter(a=>!(a.pqcScore?.criteria?.certKey4096?.pass)).length,action:"Deploy RSA-4096 or EC P-384 certificates.",detail:"Worth 70/100 pts — the primary bank infrastructure gate.",items:enriched.filter(a=>!(a.pqcScore?.criteria?.certKey4096?.pass)).map(a=>`${a.app} (${a.keylen??"?"})`).slice(0,5)},
+    {title:"Remove Wildcard Certs",color:"#ea580c",bg:"#fff7ed",border:"#fed7aa",count:enriched.filter(a=>a.is_wildcard).length,action:"Replace wildcards with dedicated per-service certificates.",detail:"Worth 20/100 pts — bank services must not share certificates.",items:enriched.filter(a=>a.is_wildcard).map(a=>a.app).slice(0,5)},
+    {title:"Enable Kyber Hybrid",color:"#0891b2",bg:"#f0f9ff",border:"#bae6fd",count:enriched.filter(a=>!a.pqc).length,action:"Implement CRYSTALS-Kyber (FIPS 203) hybrid key exchange.",detail:"Deploy X25519+Kyber768 — the only path to ACTIVE status.",items:enriched.filter(a=>!a.pqc).map(a=>a.app).slice(0,5)},
+  ].map(s=>`<div style="border:1px solid ${s.border};border-radius:6px;padding:14px;background:${s.bg};">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+      <span style="font-size:10px;font-weight:700;color:${s.color};">${s.title}</span>
+      <span style="font-size:18px;font-weight:700;color:${s.color};">${s.count}</span>
+    </div>
+    <div style="font-size:9px;color:#374151;font-weight:500;margin-bottom:3px;">${s.action}</div>
+    <div style="font-size:8px;color:#6b7280;margin-bottom:10px;line-height:1.5;">${s.detail}</div>
+    ${s.items.map(app=>`<div style="font-size:8px;color:#374151;padding:3px 0;border-top:1px solid ${s.border};">▸ ${app}</div>`).join("")}
+    ${s.items.length===0?`<div style="font-size:8px;color:#16a34a;font-weight:500;">✓ All clear</div>`:""}
+  </div>`).join("");
 
-  const html=`<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8"/>
+  const html=`<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"/>
   <title>REBEL — PQC Audit — ${displayName} — ${scanDate}</title>
-  <style>
-    *{box-sizing:border-box;margin:0;padding:0;}
-    body{font-family:Arial,Helvetica,sans-serif;color:#111827;background:#fff;font-size:11px;}
-    @media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact;}.no-print{display:none!important;}.page-break{page-break-before:always;}}
-    .page{max-width:980px;margin:0 auto;padding:32px 40px;}
-    h2{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#374151;margin-bottom:12px;}
-    table{width:100%;border-collapse:collapse;}
-    th{background:#f3f4f6;padding:6px 7px;font-size:8px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#6b7280;text-align:left;border-bottom:2px solid #e5e7eb;}
-    hr{border:none;border-top:1px solid #e5e7eb;margin:22px 0;}
-    .section{margin-bottom:26px;}
-    .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px;}
-    .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;}
-    .card{border:1px solid #e5e7eb;border-radius:6px;padding:14px 16px;}
-    .lbl{font-size:8px;color:#9ca3af;text-transform:uppercase;letter-spacing:.1em;margin-bottom:5px;}
-    .val{font-size:20px;font-weight:700;line-height:1;}
-    .sub{font-size:8px;color:#6b7280;margin-top:4px;}
-    .print-btn{position:fixed;top:20px;right:20px;background:#1e40af;color:#fff;border:none;padding:10px 22px;border-radius:5px;cursor:pointer;font-size:13px;font-weight:600;z-index:99;box-shadow:0 2px 8px rgba(30,64,175,.35);}
-    .confidential{background:#fef9c3;border:1px solid #fde047;border-radius:4px;padding:6px 12px;font-size:8px;color:#854d0e;margin-bottom:20px;}
-    .footer{font-size:8px;color:#d1d5db;text-align:center;margin-top:28px;padding-top:14px;border-top:1px solid #f3f4f6;line-height:1.7;}
-  </style>
-</head>
-<body>
-<button class="print-btn no-print" onclick="window.print()">⬇ Save as PDF</button>
-<div class="page">
-
-  <!-- HEADER -->
+  <style>*{box-sizing:border-box;margin:0;padding:0;}body{font-family:Arial,Helvetica,sans-serif;color:#111827;background:#fff;font-size:11px;}@media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact;}.no-print{display:none!important;}.page-break{page-break-before:always;}}.page{max-width:980px;margin:0 auto;padding:32px 40px;}h2{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#374151;margin-bottom:12px;}table{width:100%;border-collapse:collapse;}th{background:#f3f4f6;padding:6px 7px;font-size:8px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#6b7280;text-align:left;border-bottom:2px solid #e5e7eb;}hr{border:none;border-top:1px solid #e5e7eb;margin:22px 0;}.section{margin-bottom:26px;}.grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px;}.grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;}.card{border:1px solid #e5e7eb;border-radius:6px;padding:14px 16px;}.lbl{font-size:8px;color:#9ca3af;text-transform:uppercase;letter-spacing:.1em;margin-bottom:5px;}.val{font-size:20px;font-weight:700;line-height:1;}.sub{font-size:8px;color:#6b7280;margin-top:4px;}.print-btn{position:fixed;top:20px;right:20px;background:#1e40af;color:#fff;border:none;padding:10px 22px;border-radius:5px;cursor:pointer;font-size:13px;font-weight:600;z-index:99;box-shadow:0 2px 8px rgba(30,64,175,.35);}.confidential{background:#fef9c3;border:1px solid #fde047;border-radius:4px;padding:6px 12px;font-size:8px;color:#854d0e;margin-bottom:20px;}.footer{font-size:8px;color:#d1d5db;text-align:center;margin-top:28px;padding-top:14px;border-top:1px solid #f3f4f6;line-height:1.7;}</style>
+  </head><body>
+  <button class="print-btn no-print" onclick="window.print()">⬇ Save as PDF</button>
+  <div class="page">
   <div style="display:flex;justify-content:space-between;align-items:flex-start;padding-bottom:20px;border-bottom:3px solid #1e40af;margin-bottom:22px;">
     <div style="display:flex;align-items:center;gap:10px;">
-      <svg width="32" height="32" viewBox="0 0 28 28" xmlns="http://www.w3.org/2000/svg">
-        <polygon points="14,2 26,8 26,20 14,26 2,20 2,8" fill="none" stroke="#1e40af" stroke-width="1.8"/>
-        <polygon points="14,7 21,11 21,17 14,21 7,17 7,11" fill="#dbeafe" stroke="#3b82f6" stroke-width="1"/>
-        <circle cx="14" cy="14" r="3" fill="#1e40af"/>
-      </svg>
-      <div>
-        <div style="font-size:18px;font-weight:900;letter-spacing:.2em;color:#111827;">REBEL</div>
-        <div style="font-size:7px;color:#9ca3af;letter-spacing:.14em;margin-top:1px;">THREAT INTELLIGENCE PLATFORM</div>
-      </div>
+      <svg width="32" height="32" viewBox="0 0 28 28" xmlns="http://www.w3.org/2000/svg"><polygon points="14,2 26,8 26,20 14,26 2,20 2,8" fill="none" stroke="#1e40af" stroke-width="1.8"/><polygon points="14,7 21,11 21,17 14,21 7,17 7,11" fill="#dbeafe" stroke="#3b82f6" stroke-width="1"/><circle cx="14" cy="14" r="3" fill="#1e40af"/></svg>
+      <div><div style="font-size:18px;font-weight:900;letter-spacing:.2em;color:#111827;">REBEL</div><div style="font-size:7px;color:#9ca3af;letter-spacing:.14em;margin-top:1px;">THREAT INTELLIGENCE PLATFORM</div></div>
     </div>
-    <div style="text-align:right;">
-      <div style="font-size:8px;color:#9ca3af;text-transform:uppercase;letter-spacing:.1em;margin-bottom:4px;">Prepared for</div>
-      <div style="font-size:20px;font-weight:800;color:#111827;">${displayName}</div>
-      ${clientDomain?`<div style="font-size:9px;color:#6b7280;margin-top:3px;">${normaliseDomain(clientDomain)}</div>`:""}
-    </div>
+    <div style="text-align:right;"><div style="font-size:8px;color:#9ca3af;text-transform:uppercase;letter-spacing:.1em;margin-bottom:4px;">Prepared for</div><div style="font-size:20px;font-weight:800;color:#111827;">${displayName}</div>${clientDomain?`<div style="font-size:9px;color:#6b7280;margin-top:3px;">${normaliseDomain(clientDomain)}</div>`:""}</div>
   </div>
-
   <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:22px;">
-    <div>
-      <div style="font-size:22px;font-weight:700;color:#111827;line-height:1.25;">Post-Quantum Cryptography<br/>Audit Report</div>
-      <div style="font-size:9px;color:#6b7280;margin-top:7px;line-height:1.9;">DORA Art. 9 · NIST FIPS 203/204/205 · PCI-DSS 4.0 · SWIFT CSP</div>
-    </div>
-    <div style="text-align:right;min-width:200px;">
-      <div style="font-size:8px;color:#9ca3af;text-transform:uppercase;letter-spacing:.08em;">Generated</div>
-      <div style="font-size:9px;color:#374151;font-weight:500;margin-top:2px;">${timestamp}</div>
-      <div style="font-size:8px;color:#9ca3af;margin-top:8px;text-transform:uppercase;letter-spacing:.08em;">Report ID</div>
-      <div style="font-size:9px;color:#374151;font-family:monospace;margin-top:2px;">${reportId}</div>
-      ${clientDomain?`<div style="font-size:8px;color:#9ca3af;margin-top:8px;text-transform:uppercase;letter-spacing:.08em;">Scope</div><div style="font-size:9px;color:#1e40af;font-weight:500;margin-top:2px;">*.${normaliseDomain(clientDomain)}</div>`:""}
-    </div>
+    <div><div style="font-size:22px;font-weight:700;color:#111827;line-height:1.25;">Post-Quantum Cryptography<br/>Audit Report</div><div style="font-size:9px;color:#6b7280;margin-top:7px;line-height:1.9;">DORA Art. 9 · NIST FIPS 203/204/205 · PCI-DSS 4.0 · SWIFT CSP</div></div>
+    <div style="text-align:right;min-width:200px;"><div style="font-size:8px;color:#9ca3af;text-transform:uppercase;letter-spacing:.08em;">Generated</div><div style="font-size:9px;color:#374151;font-weight:500;margin-top:2px;">${timestamp}</div><div style="font-size:8px;color:#9ca3af;margin-top:8px;text-transform:uppercase;letter-spacing:.08em;">Report ID</div><div style="font-size:9px;color:#374151;font-family:monospace;margin-top:2px;">${reportId}</div>${clientDomain?`<div style="font-size:8px;color:#9ca3af;margin-top:8px;text-transform:uppercase;letter-spacing:.08em;">Scope</div><div style="font-size:9px;color:#1e40af;font-weight:500;margin-top:2px;">*.${normaliseDomain(clientDomain)}</div>`:""}</div>
   </div>
-  <div class="confidential">⚠ CONFIDENTIAL — Sensitive cryptographic posture data. Not for external distribution.</div>
-  <hr/>
-
-  <!-- EXECUTIVE SUMMARY -->
-  <div class="section">
-    <h2>Executive Summary</h2>
-    <div class="grid2" style="align-items:start;">
-      <div class="card" style="display:flex;flex-direction:column;align-items:center;padding:22px;">
-        ${gaugeSVG}
-        <div style="margin-top:12px;width:100%;">
-          <div style="font-size:9px;color:#374151;font-weight:600;text-align:center;margin-bottom:8px;">${total} Applications Assessed · PQC Migration Progress</div>
-          <div style="font-size:8px;color:#6b7280;line-height:1.6;background:#f9fafb;border-radius:4px;padding:8px;border:1px solid #e5e7eb;">
-            Score = 5 milestones × 20pts each.<br/>
-            All certs RSA-4096/EC P-384 · Zero wildcards · AES-256 everywhere · TLS 1.2 eliminated · Kyber deployed.<br/>
-            A bank that has done no PQC work scores 0–20. Full Kyber deployment = 100.
-          </div>
-        </div>
-      </div>
-      <div style="display:flex;flex-direction:column;gap:10px;">
-        <div class="grid2">
-          <div class="card"><div class="lbl">Assessed</div><div class="val" style="color:#1e40af;">${total}</div><div class="sub">In scope</div></div>
-          <div class="card"><div class="lbl">Need Action</div><div class="val" style="color:#dc2626;">${enriched.length}</div><div class="sub">Weak assets</div></div>
-        </div>
-        <div class="grid2">
-          <div class="card"><div class="lbl">Est. Timeline</div><div class="val" style="color:#0891b2;">${calDays}d</div><div class="sub">${teamSize} dev · ${totalDays} dev-days</div></div>
-          <div class="card"><div class="lbl">Est. Cost</div><div class="val" style="color:#ea580c;">${fmtINR(totalCostUSD)}</div><div class="sub">At ${fmtINR(devRateUSD)}/dev/day</div></div>
-        </div>
-        <div class="card" style="background:#f8fafc;"><div class="lbl">Projected Completion</div><div style="font-size:16px;font-weight:700;color:#0891b2;margin-top:4px;">${dateStr}</div><div class="sub">${teamSize}-dev team</div></div>
-      </div>
-    </div>
-  </div>
-
-  <!-- SCORE DISTRIBUTION -->
-  <div class="section">
-    <h2>PQC Migration Progress — 5 Milestones</h2>
-    <div class="grid2">
-      <div class="card">${scoreDist}</div>
-      <div class="card">
-        <div style="font-size:10px;color:#374151;font-weight:600;margin-bottom:10px;">Scoring Criteria (per application)</div>
-        ${criteriaLegend}
-        <div style="margin-top:8px;font-size:8px;color:#9ca3af;line-height:1.6;">
-          Cert key strength dominates the score (70pts) — the primary differentiator between public CDN infrastructure and hardened bank assets.
-        </div>
-      </div>
-    </div>
-  </div>
-
+  <div class="confidential">⚠ CONFIDENTIAL — Sensitive cryptographic posture data. Not for external distribution.</div><hr/>
+  <div class="section"><h2>Executive Summary</h2><div class="grid2" style="align-items:start;"><div class="card" style="display:flex;flex-direction:column;align-items:center;padding:22px;">${gaugeSVG}<div style="margin-top:12px;width:100%;"><div style="font-size:9px;color:#374151;font-weight:600;text-align:center;margin-bottom:8px;">${total} Applications Assessed · PQC Migration Progress</div><div style="font-size:8px;color:#6b7280;line-height:1.6;background:#f9fafb;border-radius:4px;padding:8px;border:1px solid #e5e7eb;">Score = 5 milestones × 20pts each.<br/>All certs RSA-4096/EC P-384 · Zero wildcards · AES-256 everywhere · TLS 1.2 eliminated · Kyber deployed.</div></div></div><div style="display:flex;flex-direction:column;gap:10px;"><div class="grid2"><div class="card"><div class="lbl">Assessed</div><div class="val" style="color:#1e40af;">${total}</div><div class="sub">In scope</div></div><div class="card"><div class="lbl">Need Action</div><div class="val" style="color:#dc2626;">${enriched.length}</div><div class="sub">Weak assets</div></div></div><div class="grid2"><div class="card"><div class="lbl">Est. Timeline</div><div class="val" style="color:#0891b2;">${calDays}d</div><div class="sub">${teamSize} dev · ${totalDays} dev-days</div></div><div class="card"><div class="lbl">Est. Cost</div><div class="val" style="color:#ea580c;">${fmtINR(totalCostUSD)}</div><div class="sub">At ${fmtINR(devRateUSD)}/dev/day</div></div></div><div class="card" style="background:#f8fafc;"><div class="lbl">Projected Completion</div><div style="font-size:16px;font-weight:700;color:#0891b2;margin-top:4px;">${dateStr}</div><div class="sub">${teamSize}-dev team</div></div></div></div></div>
+  <div class="section"><h2>PQC Migration Progress — 5 Milestones</h2><div class="grid2"><div class="card">${scoreDist}</div><div class="card"><div style="font-size:10px;color:#374151;font-weight:600;margin-bottom:10px;">Scoring Criteria (per application)</div>${criteriaLegend}</div></div></div>
   <hr class="page-break"/>
-
-  <!-- DORA -->
-  <div class="section">
-    <h2>DORA Regulatory Mapping</h2>
-    <table><thead><tr><th>Article</th><th>Requirement</th><th>Description</th><th>Status</th></tr></thead><tbody>${doraRows}</tbody></table>
-  </div>
-
+  <div class="section"><h2>DORA Regulatory Mapping</h2><table><thead><tr><th>Article</th><th>Requirement</th><th>Description</th><th>Status</th></tr></thead><tbody>${doraRows}</tbody></table></div>
   <hr/>
-
-  <!-- ASSET TABLE -->
-  <div class="section">
-    <h2>Application Cryptographic Inventory — Ranked by Risk Priority</h2>
-    <table>
-      <thead><tr>
-        <th style="width:22px;">#</th><th>Application</th><th>Type</th><th>Risk</th>
-        <th>Key Len</th><th>Cipher Suite</th><th>TLS</th><th>CA</th>
-        <th style="text-align:center;">PQC Score</th><th>Days</th><th>Cost (INR)</th>
-      </tr></thead>
-      <tbody>${assetRows}</tbody>
-      <tfoot><tr style="background:#f8fafc;border-top:2px solid #e5e7eb;">
-        <td colspan="9" style="padding:7px 10px;font-size:9px;color:#374151;font-weight:700;">TOTALS</td>
-        <td style="padding:7px 10px;font-size:9px;color:#0891b2;font-weight:700;text-align:center;">${totalDays}d</td>
-        <td style="padding:7px 10px;font-size:9px;color:#ea580c;font-weight:700;text-align:right;">${fmtINRFull(totalCostUSD)}</td>
-      </tr></tfoot>
-    </table>
-    <div style="margin-top:6px;font-size:7px;color:#9ca3af;">
-      Score dots (left→right): Cert key · No wildcard · AES-256 · KX group · TLS 1.3 · No CBC &nbsp;|&nbsp; 🟢 pass · 🟡 partial · 🔴 fail
-    </div>
-  </div>
-
+  <div class="section"><h2>Application Cryptographic Inventory — Ranked by Risk Priority</h2><table><thead><tr><th style="width:22px;">#</th><th>Application</th><th>Type</th><th>Risk</th><th>Key Len</th><th>Cipher Suite</th><th>TLS</th><th>CA</th><th style="text-align:center;">PQC Score</th><th>Days</th><th>Cost (INR)</th></tr></thead><tbody>${assetRows}</tbody><tfoot><tr style="background:#f8fafc;border-top:2px solid #e5e7eb;"><td colspan="9" style="padding:7px 10px;font-size:9px;color:#374151;font-weight:700;">TOTALS</td><td style="padding:7px 10px;font-size:9px;color:#0891b2;font-weight:700;text-align:center;">${totalDays}d</td><td style="padding:7px 10px;font-size:9px;color:#ea580c;font-weight:700;text-align:right;">${fmtINRFull(totalCostUSD)}</td></tr></tfoot></table></div>
   <hr/>
-
-  <!-- REMEDIATION -->
-  <div class="section">
-    <h2>Remediation Actions — Priority Order</h2>
-    <div class="grid3">${remCards}</div>
-  </div>
-
+  <div class="section"><h2>Remediation Actions — Priority Order</h2><div class="grid3">${remCards}</div></div>
   <hr/>
-
-  <!-- SIGN-OFF -->
-  <div class="grid3" style="margin-bottom:28px;">
-    ${["Prepared by","Reviewed by","Approved by"].map(role=>`
-      <div>
-        <div style="font-size:8px;color:#9ca3af;text-transform:uppercase;letter-spacing:.1em;margin-bottom:22px;">${role}</div>
-        <div style="border-bottom:1px solid #374151;margin-bottom:5px;"></div>
-        <div style="font-size:8px;color:#9ca3af;">Signature &amp; Date</div>
-      </div>`).join("")}
-  </div>
-
-  <div class="footer">
-    REBEL Threat Intelligence Platform · r3bel-production.up.railway.app · Report ID: ${reportId} · ${displayName}
-    ${clientDomain?`· Scope: *.${normaliseDomain(clientDomain)}`:""}
-    <br/>Confidential — intended solely for the named organisation. · Costs displayed in Indian Rupees (INR).
-  </div>
-
-</div>
-</body>
-</html>`;
+  <div class="grid3" style="margin-bottom:28px;">${["Prepared by","Reviewed by","Approved by"].map(role=>`<div><div style="font-size:8px;color:#9ca3af;text-transform:uppercase;letter-spacing:.1em;margin-bottom:22px;">${role}</div><div style="border-bottom:1px solid #374151;margin-bottom:5px;"></div><div style="font-size:8px;color:#9ca3af;">Signature &amp; Date</div></div>`).join("")}</div>
+  <div class="footer">REBEL Threat Intelligence Platform · ${new URL(API).hostname} · Report ID: ${reportId} · ${displayName}${clientDomain?`· Scope: *.${normaliseDomain(clientDomain)}`:""}<br/>Confidential — intended solely for the named organisation. · Costs displayed in Indian Rupees (INR).</div>
+  </div></body></html>`;
 
   const blob=new Blob([html],{type:"text/html"});
   const url=URL.createObjectURL(blob);
@@ -515,7 +514,6 @@ function ScoreGauge({ score, size=200 }: { score:number; size?:number }) {
     const ctx=c.getContext("2d")!;
     const W=size,H=Math.round(size*0.6),cx=W/2,cy=H+5,r=Math.round(size*0.4);
     c.width=W; c.height=H; ctx.clearRect(0,0,W,H);
-    // Track background
     ctx.beginPath(); ctx.arc(cx,cy,r,Math.PI,0,false);
     ctx.lineWidth=Math.round(size*0.06); ctx.strokeStyle="#e2e8f0"; ctx.stroke();
     const col=shown>=70?L.green:shown>=40?L.yellow:L.red;
@@ -523,7 +521,6 @@ function ScoreGauge({ score, size=200 }: { score:number; size?:number }) {
     ctx.beginPath(); ctx.arc(cx,cy,r,Math.PI,Math.PI+Math.PI*safePct,false);
     ctx.lineWidth=Math.round(size*0.06); ctx.strokeStyle=col; ctx.lineCap="round";
     ctx.shadowColor=col; ctx.shadowBlur=8; ctx.stroke(); ctx.shadowBlur=0;
-    // Tick marks
     for(let i=0;i<=10;i++){
       const a=Math.PI+(Math.PI*i)/10;
       ctx.beginPath();
@@ -552,11 +549,8 @@ function RoadmapCard({ a, i }: { a:any; i:number }) {
   const ps = a.pqcScore as PQCScoreBreakdown|undefined;
   return (
     <div style={{
-      borderBottom:`1px solid ${L.borderLight}`,
-      background: L.panelBg,
-      animation:`fadeIn 0.3s ease both`,
-      animationDelay:`${i*0.04}s`,
-      transition: "background 0.15s",
+      borderBottom:`1px solid ${L.borderLight}`, background: L.panelBg,
+      animation:`fadeIn 0.3s ease both`, animationDelay:`${i*0.04}s`, transition: "background 0.15s",
     }}
       onMouseEnter={e=>(e.currentTarget.style.background=L.subtleBg)}
       onMouseLeave={e=>(e.currentTarget.style.background=L.panelBg)}
@@ -601,62 +595,98 @@ function RoadmapCard({ a, i }: { a:any; i:number }) {
 export default function PQCReadinessPage() {
   const [cbomData,     setCbomData]     = useState<any[]>([]);
   const [assets,       setAssets]       = useState<any[]>([]);
+  const [loading,      setLoading]      = useState(true);
+  const [fetchError,   setFetchError]   = useState(false);
+  const [fromCache,    setFromCache]    = useState(false);
+  const [cacheAge,     setCacheAge]     = useState<string|null>(null);
   const [teamSize,     setTeamSize]     = useState(2);
-  const [devRate,      setDevRate]      = useState(DEV_RATE_USD); // stored in USD internally
+  const [devRate,      setDevRate]      = useState(DEV_RATE_USD);
   const [domainInput,  setDomainInput]  = useState("");
   const [activeDomain, setActiveDomain] = useState("");
   const [clientName,   setClientName]   = useState("");
 
   const bp=useBreakpoint(), isMobile=bp==="mobile", isTablet=bp==="tablet", isDesktop=bp==="desktop";
 
-  useEffect(() => {
-    Promise.all([
-      fetch(`${API}/cbom`).then(r => r.json()).catch(() => ({})),
-      fetch(`${API}/assets`).then(r => r.json()).catch(() => ({ assets: [] })),
-    ]).then(([cbom, assetsData]) => {
-      const registeredMap: Record<string, any> = {};
-      (assetsData?.assets ?? []).forEach((a: any) => {
-        if (a.name) registeredMap[a.name] = a;
-      });
+  // ── Data fetch with cache ───────────────────────────────────────────────────
+  const loadData = async (forceRefresh = false) => {
+    setLoading(true);
+    setFetchError(false);
 
-      const cbomApps: any[] = (cbom.apps ?? []).map((app: any) => {
-        const reg = registeredMap[app.app];
-        if (!reg) return app;
-        return {
-          ...app,
-          is_wildcard:        reg.is_wildcard        ?? app.is_wildcard,
-          criticality:        reg.criticality,
-          owner:              reg.owner,
-          compliance_scope:   reg.compliance_scope,
-          financial_exposure: reg.financial_exposure,
-        };
-      });
+    // Try cache first (unless force-refreshing)
+    if (!forceRefresh) {
+      const cachedCbom   = cacheGet<any>(CACHE_KEY_CBOM);
+      const cachedAssets = cacheGet<any>(CACHE_KEY_ASSETS);
+      if (cachedCbom && cachedAssets) {
+        const merged = buildMerged(cachedCbom, cachedAssets);
+        if (merged.length) setCbomData(merged);
+        if (cachedAssets?.assets?.length) setAssets(cachedAssets.assets);
+        setFromCache(true);
+        setCacheAge(cacheAge => cacheAge); // will be read fresh below
+        setLoading(false);
+        return;
+      }
+    }
 
-      const cbomDomains = new Set(cbomApps.map((a: any) => a.app));
-      const registeredOnly = (assetsData?.assets ?? [])
-        .filter((a: any) => a.id && !cbomDomains.has(a.name))
-        .map((a: any) => ({
-          app:                a.name,
-          keylen:             a.keylen             || "—",
-          cipher:             a.cipher             || "—",
-          tls:                a.tls                || "—",
-          ca:                 a.ca                 || "—",
-          status:             a.risk === "weak" ? "weak" : "ok",
-          pqc:                false,
-          pqc_support:        "none",
-          key_exchange_group: a.key_exchange_group || null,
-          is_wildcard:        a.is_wildcard        ?? null,
-          criticality:        a.criticality,
-          owner:              a.owner,
-          compliance_scope:   a.compliance_scope,
-          financial_exposure: a.financial_exposure,
-        }));
-
-      const merged = [...cbomApps, ...registeredOnly];
+    // Fetch from API
+    try {
+      const [cbom, assetsData] = await Promise.all([
+        fetch(`${API}/cbom`).then(r => { if (!r.ok) throw new Error(); return r.json(); }),
+        fetch(`${API}/assets`).then(r => { if (!r.ok) throw new Error(); return r.json(); }),
+      ]);
+      cacheSet(CACHE_KEY_CBOM,   cbom);
+      cacheSet(CACHE_KEY_ASSETS, assetsData);
+      const merged = buildMerged(cbom, assetsData);
       if (merged.length) setCbomData(merged);
       if (assetsData?.assets?.length) setAssets(assetsData.assets);
+      setFromCache(false);
+    } catch {
+      setFetchError(true);
+      // fall through — displayCbom/displayAssets will use MOCK below
+    }
+    setLoading(false);
+  };
+
+  function buildMerged(cbom: any, assetsData: any): any[] {
+    const registeredMap: Record<string, any> = {};
+    (assetsData?.assets ?? []).forEach((a: any) => { if (a.name) registeredMap[a.name] = a; });
+    const cbomApps: any[] = (cbom.apps ?? []).map((app: any) => {
+      const reg = registeredMap[app.app];
+      if (!reg) return app;
+      return { ...app, is_wildcard: reg.is_wildcard ?? app.is_wildcard, criticality: reg.criticality, owner: reg.owner, compliance_scope: reg.compliance_scope, financial_exposure: reg.financial_exposure };
     });
-  }, []);
+    const cbomDomains = new Set(cbomApps.map((a: any) => a.app));
+    const registeredOnly = (assetsData?.assets ?? [])
+      .filter((a: any) => a.id && !cbomDomains.has(a.name))
+      .map((a: any) => ({ app: a.name, keylen: a.keylen||"—", cipher: a.cipher||"—", tls: a.tls||"—", ca: a.ca||"—", status: a.risk==="weak"?"weak":"ok", pqc: false, pqc_support: "none", key_exchange_group: a.key_exchange_group||null, is_wildcard: a.is_wildcard??null, criticality: a.criticality, owner: a.owner, compliance_scope: a.compliance_scope, financial_exposure: a.financial_exposure }));
+    return [...cbomApps, ...registeredOnly];
+  }
+
+  useEffect(() => { loadData(); }, []);
+
+  // Update cache age display after load
+  useEffect(() => {
+    if (fromCache) {
+      setCacheAge(cacheAge_(CACHE_KEY_CBOM));
+    }
+  }, [fromCache]);
+
+  function cacheAge_(key: string): string | null {
+    try {
+      const raw = localStorage.getItem(key);
+      if (!raw) return null;
+      const entry = JSON.parse(raw);
+      const mins = Math.round((Date.now() - entry.ts) / 60000);
+      if (mins < 60) return `${mins}m ago`;
+      return `${Math.round(mins / 60)}h ago`;
+    } catch { return null; }
+  }
+
+  function handleForceRefresh() {
+    cacheClear();
+    setFromCache(false);
+    setCacheAge(null);
+    loadData(true);
+  }
 
   const displayCbom   = cbomData.length ? cbomData   : MOCK_CBOM;
   const displayAssets = assets.length   ? assets     : MOCK_ASSETS;
@@ -670,33 +700,22 @@ export default function PQCReadinessPage() {
     return {...app, analysis, pqcScore:ps};
   });
 
-  // ── Migration Progress Score ──────────────────────────────────────────────
   const n = withPQCScore.length || 1;
 
-  const allCertsStrong = withPQCScore.every((a: any) => {
-    const bits = parseInt(String(a.keylen ?? "0").match(/(\d+)/)?.[1] ?? "0", 10);
-    return bits >= 4096 || bits === 384;
-  });
+  const allCertsStrong = withPQCScore.every((a: any) => { const bits = parseInt(String(a.keylen ?? "0").match(/(\d+)/)?.[1] ?? "0", 10); return bits >= 4096 || bits === 384; });
   const noWildcards = withPQCScore.every((a: any) => a.is_wildcard === false);
-  const allAES256 = withPQCScore.every((a: any) => {
-    const bulk = a.analysis?.components?.bulkCipher ?? "";
-    return bulk === "AES-256-GCM" || bulk === "ChaCha20-Poly1305";
-  });
+  const allAES256 = withPQCScore.every((a: any) => { const bulk = a.analysis?.components?.bulkCipher ?? ""; return bulk === "AES-256-GCM" || bulk === "ChaCha20-Poly1305"; });
   const allTLS13 = withPQCScore.every((a: any) => normaliseTLS(a.tls) === "1.3");
   const anyKyber = withPQCScore.some((a: any) => a.pqcScore?.active);
 
   const migrationScore = Math.round(
-    (allCertsStrong ? 20 : 0) +
-    (noWildcards    ? 20 : 0) +
-    (allAES256      ? 20 : 0) +
-    (allTLS13       ? 20 : 0) +
-    (anyKyber       ? 20 : 0)
+    (allCertsStrong ? 20 : 0) + (noWildcards ? 20 : 0) + (allAES256 ? 20 : 0) + (allTLS13 ? 20 : 0) + (anyKyber ? 20 : 0)
   );
 
-  const certStrongPct  = Math.round(withPQCScore.filter((a:any)=>{ const b=parseInt(String(a.keylen??"0").match(/(\d+)/)?.[1]??"0",10); return b>=4096||b===384; }).length/n*100);
-  const noWildPct      = Math.round(withPQCScore.filter((a:any)=>a.is_wildcard===false).length/n*100);
-  const aes256Pct      = Math.round(withPQCScore.filter((a:any)=>{ const bulk=a.analysis?.components?.bulkCipher??""; return bulk==="AES-256-GCM"||bulk==="ChaCha20-Poly1305"; }).length/n*100);
-  const tls13Pct       = Math.round(withPQCScore.filter((a:any)=>normaliseTLS(a.tls)==="1.3").length/n*100);
+  const certStrongPct = Math.round(withPQCScore.filter((a:any)=>{ const b=parseInt(String(a.keylen??"0").match(/(\d+)/)?.[1]??"0",10); return b>=4096||b===384; }).length/n*100);
+  const noWildPct     = Math.round(withPQCScore.filter((a:any)=>a.is_wildcard===false).length/n*100);
+  const aes256Pct     = Math.round(withPQCScore.filter((a:any)=>{ const bulk=a.analysis?.components?.bulkCipher??""; return bulk==="AES-256-GCM"||bulk==="ChaCha20-Poly1305"; }).length/n*100);
+  const tls13Pct      = Math.round(withPQCScore.filter((a:any)=>normaliseTLS(a.tls)==="1.3").length/n*100);
 
   const milestones = [
     { label:"All certs RSA-4096 / EC P-384", pct: certStrongPct,  done: allCertsStrong },
@@ -712,20 +731,20 @@ export default function PQCReadinessPage() {
     const asset=matchAsset(app.app,displayAssets);
     const assetType=asset?.type??"Other";
     const days=EFFORT[assetType]??3;
-    const cost=days*devRate; // USD internally
+    const cost=days*devRate;
     const weight=riskWeight(app,asset);
     const risk=riskLabel(weight);
     const isPublic=asset?.type==="Web Apps"||asset?.type==="Web App";
     return {...app,asset,assetType,days,cost,weight,risk,isPublic};
   }).sort((a:any,b:any)=>b.weight-a.weight);
 
-  const total       = withPQCScore.length;
-  const pqcReady    = withPQCScore.filter((a:any)=>a.pqc&&a.status!=="weak"&&a.status!=="WEAK").length;
-  const totalDays   = enriched.reduce((s:number,a:any)=>s+a.days,0);
-  const calDays     = Math.ceil(totalDays/Math.max(teamSize,1));
-  const totalCost   = enriched.reduce((s:number,a:any)=>s+a.cost,0); // USD
-  const critCount   = enriched.filter((a:any)=>a.risk==="Critical").length;
-  const highCount   = enriched.filter((a:any)=>a.risk==="High").length;
+  const total     = withPQCScore.length;
+  const pqcReady  = withPQCScore.filter((a:any)=>a.pqc&&a.status!=="weak"&&a.status!=="WEAK").length;
+  const totalDays = enriched.reduce((s:number,a:any)=>s+a.days,0);
+  const calDays   = Math.ceil(totalDays/Math.max(teamSize,1));
+  const totalCost = enriched.reduce((s:number,a:any)=>s+a.cost,0);
+  const critCount = enriched.filter((a:any)=>a.risk==="Critical").length;
+  const highCount = enriched.filter((a:any)=>a.risk==="High").length;
   const unmatchedCount = enriched.filter((a:any)=>!a.asset).length;
 
   const completionDate=new Date(); completionDate.setDate(completionDate.getDate()+calDays);
@@ -746,8 +765,6 @@ export default function PQCReadinessPage() {
 
   const gaugeSize=isMobile?160:200;
   const metricCols=isMobile?"1fr 1fr":isTablet?"repeat(3,1fr)":"repeat(5,1fr)";
-
-  // Light-mode badge helper
   const scoreColor = migrationScore>=70?L.green:migrationScore>=40?L.yellow:L.red;
 
   return (
@@ -755,6 +772,7 @@ export default function PQCReadinessPage() {
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=DM+Mono:wght@400;500;600&display=swap');
         @keyframes fadeIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+        @keyframes shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
         input[type=range]{accent-color:${L.blue};}
         input[type=range]::-webkit-slider-thumb{background:${L.blue};}
         * { box-sizing: border-box; }
@@ -765,19 +783,16 @@ export default function PQCReadinessPage() {
 
       {/* DOMAIN FILTER */}
       <LPanel>
-        <LPanelHeader left="REPORT SCOPE — CLIENT DOMAIN FILTER" />
+        <LPanelHeader
+          left="REPORT SCOPE — CLIENT DOMAIN FILTER"
+          right={fromCache ? <CacheBadge age={cacheAge} onRefresh={handleForceRefresh}/> : undefined}
+        />
         <div style={{padding:14,display:"flex",flexDirection:"column",gap:12}}>
           <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"1fr 1fr",gap:10}}>
             <div>
               <div style={{fontSize:8,color:L.text3,letterSpacing:".12em",marginBottom:5,textTransform:"uppercase",fontWeight:600}}>CLIENT DOMAIN</div>
               <div style={{display:"flex",gap:6}}>
-                <input
-                  value={domainInput}
-                  onChange={e=>setDomainInput(e.target.value)}
-                  onKeyDown={e=>e.key==="Enter"&&applyDomain()}
-                  placeholder="e.g. barclays.com"
-                  style={{...LS.input,flex:1}}
-                />
+                <input value={domainInput} onChange={e=>setDomainInput(e.target.value)} onKeyDown={e=>e.key==="Enter"&&applyDomain()} placeholder="e.g. barclays.com" style={{...LS.input,flex:1}}/>
                 <button style={{...LS.btn,background:`${L.blue}15`,borderColor:`${L.blue}40`,color:L.blue}} onClick={applyDomain}>APPLY</button>
                 {activeDomain&&<button style={{...LS.btn}} onClick={clearFilter}>CLEAR</button>}
               </div>
@@ -787,6 +802,17 @@ export default function PQCReadinessPage() {
               <input value={clientName} onChange={e=>setClientName(e.target.value)} placeholder="e.g. Barclays Bank PLC" style={{...LS.input,width:"100%"}}/>
             </div>
           </div>
+
+          {/* API endpoint indicator */}
+          <div style={{display:"flex",alignItems:"center",gap:8}}>
+            <span style={{fontSize:7,fontFamily:"'DM Mono',monospace",color:L.text4,letterSpacing:".08em"}}>API</span>
+            <span style={{fontSize:8,fontFamily:"'DM Mono',monospace",color:fetchError?L.red:L.green,fontWeight:600}}>
+              {fetchError?"✗":"✓"} {API}
+            </span>
+            {fetchError&&<span style={{fontSize:8,color:L.red}}>— showing demo data</span>}
+            {loading&&<span style={{fontSize:8,color:L.blue,animation:"fadeIn 0.3s ease"}}>fetching…</span>}
+          </div>
+
           {activeDomain&&(
             <div style={{display:"flex",alignItems:"center",gap:10,background:`${L.blue}0a`,border:`1px solid ${L.blue}25`,borderRadius:5,padding:"7px 12px"}}>
               <span style={{fontSize:9,color:L.text3,fontWeight:600}}>ACTIVE SCOPE</span>
@@ -796,7 +822,7 @@ export default function PQCReadinessPage() {
               </span>
             </div>
           )}
-          {activeDomain&&uniqueCbom.length===0&&(
+          {activeDomain&&uniqueCbom.length===0&&!loading&&(
             <div style={{background:`${L.red}0a`,border:`1px solid ${L.red}25`,borderRadius:5,padding:"8px 12px",fontSize:10,color:L.text2}}>
               ⚠ No assets found for <b style={{color:L.red}}>*.{normaliseDomain(activeDomain)}</b>
             </div>
@@ -804,165 +830,168 @@ export default function PQCReadinessPage() {
         </div>
       </LPanel>
 
-      {unmatchedCount>0&&(
+      {unmatchedCount>0&&!loading&&(
         <div style={{background:`${L.yellow}10`,border:`1px solid ${L.yellow}40`,borderRadius:5,padding:"8px 14px",display:"flex",alignItems:"center",gap:10}}>
           <span style={{color:L.yellow,fontSize:14}}>⚠</span>
-          <span style={{fontSize:10,color:L.text2}}>
-            <b style={{color:L.yellow}}>{unmatchedCount}</b> asset{unmatchedCount>1?"s":""} unmatched — defaulted to "Other".
-          </span>
+          <span style={{fontSize:10,color:L.text2}}><b style={{color:L.yellow}}>{unmatchedCount}</b> asset{unmatchedCount>1?"s":""} unmatched — defaulted to "Other".</span>
         </div>
       )}
 
       {/* METRICS */}
       <div style={{display:"grid",gridTemplateColumns:metricCols,gap:isMobile?8:9}}>
-        <LMetricCard label="MIGRATION SCORE" value={`${migrationScore}/100`} sub="Migration progress" color={scoreColor}/>
-        <LMetricCard label="NEED MIGRATION" value={enriched.length} sub="Weak assets" color={L.red}/>
-        <LMetricCard label="CRITICAL" value={critCount} sub="Immediate action" color={L.red}/>
-        <LMetricCard label="EST. DAYS" value={calDays} sub={`${teamSize} dev team`} color={L.cyan}/>
-        <div style={isMobile?{gridColumn:"1/-1"}:{}}>
-          <LMetricCard label="EST. COST (INR)" value={fmtINR(totalCost)} sub={`At ${fmtINR(devRate)}/day`} color={L.orange}/>
-        </div>
+        {loading
+          ? Array.from({length:5}).map((_,i)=><SkeletonMetricCard key={i}/>)
+          : <>
+              <LMetricCard label="MIGRATION SCORE" value={`${migrationScore}/100`} sub="Migration progress" color={scoreColor}/>
+              <LMetricCard label="NEED MIGRATION" value={enriched.length} sub="Weak assets" color={L.red}/>
+              <LMetricCard label="CRITICAL" value={critCount} sub="Immediate action" color={L.red}/>
+              <LMetricCard label="EST. DAYS" value={calDays} sub={`${teamSize} dev team`} color={L.cyan}/>
+              <div style={isMobile?{gridColumn:"1/-1"}:{}}>
+                <LMetricCard label="EST. COST (INR)" value={fmtINR(totalCost)} sub={`At ${fmtINR(devRate)}/day`} color={L.orange}/>
+              </div>
+            </>
+        }
       </div>
 
       {/* SCORE + PLAN */}
       <div style={{display:"grid",gridTemplateColumns:isDesktop?"1fr 1fr":"1fr",gap:isMobile?8:10}}>
-        <LPanel>
-          <LPanelHeader left="PQC MIGRATION PROGRESS" />
-          <div style={{padding:14,display:"flex",flexDirection:"column",alignItems:"center",gap:16}}>
-            <div style={{width:"100%",maxWidth:gaugeSize+40,margin:"0 auto"}}><ScoreGauge score={migrationScore} size={gaugeSize}/></div>
-            {/* Milestone bars */}
-            <div style={{width:"100%",display:"flex",flexDirection:"column",gap:8}}>
-              {milestones.map(m=>(
-                <div key={m.label}>
-                  <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
-                    <span style={{fontSize:9,color:m.done?L.green:L.text2,display:"flex",alignItems:"center",gap:5,fontWeight:m.done?600:400}}>
-                      <span style={{fontSize:10,color:m.done?L.green:L.text4}}>{m.done?"✓":"○"}</span>{m.label}
-                    </span>
-                    <span style={{fontSize:9,fontFamily:"'DM Mono',monospace",color:m.done?L.green:L.text3,fontWeight:600}}>{m.pct}%</span>
+        {loading
+          ? <><SkeletonGaugePanel/><SkeletonGaugePanel/></>
+          : <>
+              <LPanel>
+                <LPanelHeader left="PQC MIGRATION PROGRESS" />
+                <div style={{padding:14,display:"flex",flexDirection:"column",alignItems:"center",gap:16}}>
+                  <div style={{width:"100%",maxWidth:gaugeSize+40,margin:"0 auto"}}><ScoreGauge score={migrationScore} size={gaugeSize}/></div>
+                  <div style={{width:"100%",display:"flex",flexDirection:"column",gap:8}}>
+                    {milestones.map(m=>(
+                      <div key={m.label}>
+                        <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
+                          <span style={{fontSize:9,color:m.done?L.green:L.text2,display:"flex",alignItems:"center",gap:5,fontWeight:m.done?600:400}}>
+                            <span style={{fontSize:10,color:m.done?L.green:L.text4}}>{m.done?"✓":"○"}</span>{m.label}
+                          </span>
+                          <span style={{fontSize:9,fontFamily:"'DM Mono',monospace",color:m.done?L.green:L.text3,fontWeight:600}}>{m.pct}%</span>
+                        </div>
+                        <div style={{height:4,background:L.insetBg,borderRadius:2,border:`1px solid ${L.border}`}}>
+                          <div style={{height:"100%",width:`${m.pct}%`,background:m.done?L.green:m.pct>50?L.yellow:L.orange,borderRadius:2,transition:"width 0.8s ease"}}/>
+                        </div>
+                      </div>
+                    ))}
                   </div>
-                  <div style={{height:4,background:L.insetBg,borderRadius:2,border:`1px solid ${L.border}`}}>
-                    <div style={{height:"100%",width:`${m.pct}%`,background:m.done?L.green:m.pct>50?L.yellow:L.orange,borderRadius:2,transition:"width 0.8s ease"}}/>
+                  <div style={{width:"100%",display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
+                    {[
+                      {label:"PQC ACTIVE",val:withPQCScore.filter((a:any)=>a.pqcScore?.active).length,color:L.green},
+                      {label:"WEAK",      val:enriched.length,                                         color:L.red},
+                      {label:"IN SCOPE",  val:total,                                                   color:L.blue},
+                    ].map(item=>(
+                      <div key={item.label} style={{background:L.subtleBg,border:`1px solid ${L.border}`,borderRadius:5,padding:isMobile?"6px 4px":"8px 6px",textAlign:"center"}}>
+                        <div style={{fontFamily:"'DM Mono',monospace",fontSize:isMobile?16:20,color:item.color,fontWeight:700}}>{item.val}</div>
+                        <div style={{fontSize:isMobile?7:8,color:L.text3,marginTop:3,letterSpacing:".08em",fontWeight:600}}>{item.label}</div>
+                      </div>
+                    ))}
                   </div>
                 </div>
-              ))}
-            </div>
-            <div style={{width:"100%",display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
-              {[
-                {label:"PQC ACTIVE",val:withPQCScore.filter((a:any)=>a.pqcScore?.active).length,color:L.green},
-                {label:"WEAK",      val:enriched.length,                                         color:L.red},
-                {label:"IN SCOPE",  val:total,                                                   color:L.blue},
-              ].map(item=>(
-                <div key={item.label} style={{background:L.subtleBg,border:`1px solid ${L.border}`,borderRadius:5,padding:isMobile?"6px 4px":"8px 6px",textAlign:"center"}}>
-                  <div style={{fontFamily:"'DM Mono',monospace",fontSize:isMobile?16:20,color:item.color,fontWeight:700}}>{item.val}</div>
-                  <div style={{fontSize:isMobile?7:8,color:L.text3,marginTop:3,letterSpacing:".08em",fontWeight:600}}>{item.label}</div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </LPanel>
+              </LPanel>
 
-        <LPanel>
-          <LPanelHeader left="MIGRATION PLAN SUMMARY" />
-          <div style={{padding:14,display:"flex",flexDirection:"column",gap:12}}>
-            <div style={{display:"grid",gridTemplateColumns:(isTablet||isDesktop)?"1fr 1fr":"1fr",gap:10}}>
-              <div style={{background:L.subtleBg,border:`1px solid ${L.border}`,borderRadius:5,padding:12}}>
-                <div style={{fontSize:8,color:L.text3,marginBottom:5,letterSpacing:".12em",textTransform:"uppercase",fontWeight:600}}>ESTIMATED COMPLETION</div>
-                <div style={{fontFamily:"'DM Mono',monospace",fontSize:isMobile?13:17,color:L.cyan,fontWeight:700}}>{dateStr}</div>
-                <div style={{fontSize:9,color:L.text2,marginTop:4}}>{calDays}d · {totalDays} dev days · {enriched.length} assets</div>
-              </div>
-              <div style={{background:"#fff5f5",border:`1px solid ${L.red}22`,borderRadius:5,padding:12}}>
-                <div style={{fontSize:8,color:L.text3,marginBottom:5,letterSpacing:".12em",textTransform:"uppercase",fontWeight:600}}>TOTAL MIGRATION COST</div>
-                <div style={{fontFamily:"'DM Mono',monospace",fontSize:isMobile?13:17,color:L.orange,fontWeight:700}}>{fmtINR(totalCost)}</div>
-                <div style={{fontSize:9,color:L.text2,marginTop:4}}>{critCount} critical · {highCount} high · {fmtINR(devRate)}/day</div>
-              </div>
-            </div>
-            <div style={{display:"grid",gridTemplateColumns:(isTablet||isDesktop)?"1fr 1fr":"1fr",gap:12}}>
-              {[
-                {
-                  label:"TEAM SIZE",
-                  display:`${teamSize} devs`,
-                  min:1, max:10, step:1,
-                  val:teamSize,
-                  set:(v:number)=>setTeamSize(v),
-                  l:"1", r:"10",
-                },
-                {
-                  label:"DEV RATE / DAY (INR)",
-                  display:fmtINR(devRate),
-                  min:200, max:2000, step:100,
-                  val:devRate,
-                  set:(v:number)=>setDevRate(v),
-                  l:fmtINR(200), r:fmtINR(2000),
-                },
-              ].map(sl=>(
-                <div key={sl.label}>
-                  <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}>
-                    <span style={{fontSize:9,color:L.text3,letterSpacing:".1em",textTransform:"uppercase",fontWeight:600}}>{sl.label}</span>
-                    <span style={{fontFamily:"'DM Mono',monospace",fontSize:11,color:L.blue,fontWeight:700}}>{sl.display}</span>
+              <LPanel>
+                <LPanelHeader left="MIGRATION PLAN SUMMARY" />
+                <div style={{padding:14,display:"flex",flexDirection:"column",gap:12}}>
+                  <div style={{display:"grid",gridTemplateColumns:(isTablet||isDesktop)?"1fr 1fr":"1fr",gap:10}}>
+                    <div style={{background:L.subtleBg,border:`1px solid ${L.border}`,borderRadius:5,padding:12}}>
+                      <div style={{fontSize:8,color:L.text3,marginBottom:5,letterSpacing:".12em",textTransform:"uppercase",fontWeight:600}}>ESTIMATED COMPLETION</div>
+                      <div style={{fontFamily:"'DM Mono',monospace",fontSize:isMobile?13:17,color:L.cyan,fontWeight:700}}>{dateStr}</div>
+                      <div style={{fontSize:9,color:L.text2,marginTop:4}}>{calDays}d · {totalDays} dev days · {enriched.length} assets</div>
+                    </div>
+                    <div style={{background:"#fff5f5",border:`1px solid ${L.red}22`,borderRadius:5,padding:12}}>
+                      <div style={{fontSize:8,color:L.text3,marginBottom:5,letterSpacing:".12em",textTransform:"uppercase",fontWeight:600}}>TOTAL MIGRATION COST</div>
+                      <div style={{fontFamily:"'DM Mono',monospace",fontSize:isMobile?13:17,color:L.orange,fontWeight:700}}>{fmtINR(totalCost)}</div>
+                      <div style={{fontSize:9,color:L.text2,marginTop:4}}>{critCount} critical · {highCount} high · {fmtINR(devRate)}/day</div>
+                    </div>
                   </div>
-                  <input type="range" min={sl.min} max={sl.max} step={sl.step} value={sl.val}
-                    onChange={e=>sl.set(Number(e.target.value))}
-                    style={{width:"100%",cursor:"pointer"}}
-                  />
-                  <div style={{display:"flex",justifyContent:"space-between"}}>
-                    <span style={{fontSize:8,color:L.text4}}>{sl.l}</span>
-                    <span style={{fontSize:8,color:L.text4}}>{sl.r}</span>
+                  <div style={{display:"grid",gridTemplateColumns:(isTablet||isDesktop)?"1fr 1fr":"1fr",gap:12}}>
+                    {[
+                      { label:"TEAM SIZE", display:`${teamSize} devs`, min:1, max:10, step:1, val:teamSize, set:(v:number)=>setTeamSize(v), l:"1", r:"10" },
+                      { label:"DEV RATE / DAY (INR)", display:fmtINR(devRate), min:200, max:2000, step:100, val:devRate, set:(v:number)=>setDevRate(v), l:fmtINR(200), r:fmtINR(2000) },
+                    ].map(sl=>(
+                      <div key={sl.label}>
+                        <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}>
+                          <span style={{fontSize:9,color:L.text3,letterSpacing:".1em",textTransform:"uppercase",fontWeight:600}}>{sl.label}</span>
+                          <span style={{fontFamily:"'DM Mono',monospace",fontSize:11,color:L.blue,fontWeight:700}}>{sl.display}</span>
+                        </div>
+                        <input type="range" min={sl.min} max={sl.max} step={sl.step} value={sl.val} onChange={e=>sl.set(Number(e.target.value))} style={{width:"100%",cursor:"pointer"}}/>
+                        <div style={{display:"flex",justifyContent:"space-between"}}>
+                          <span style={{fontSize:8,color:L.text4}}>{sl.l}</span>
+                          <span style={{fontSize:8,color:L.text4}}>{sl.r}</span>
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 </div>
-              ))}
-            </div>
-          </div>
-        </LPanel>
+              </LPanel>
+            </>
+        }
       </div>
 
       {/* RISK DISTRIBUTION */}
       <LPanel>
         <LPanelHeader left="RISK DISTRIBUTION" />
         <div style={{padding:14,display:"grid",gridTemplateColumns:isMobile?"1fr 1fr":"repeat(4,1fr)",gap:10}}>
-          {(["Critical","High","Medium","Low"] as const).map(level=>{
-            const count=enriched.filter((a:any)=>a.risk===level).length;
-            const pct=enriched.length?Math.round(count/enriched.length*100):0;
-            const color=level==="Critical"?L.red:level==="High"?L.orange:level==="Medium"?L.yellow:L.green;
-            const bg=level==="Critical"?"#fff5f5":level==="High"?"#fff7ed":level==="Medium"?"#fffbeb":"#f0fdf4";
-            return (
-              <div key={level} style={{background:bg,border:`1px solid ${color}22`,borderRadius:6,padding:12}}>
-                <div style={{display:"flex",justifyContent:"space-between",marginBottom:8}}>
-                  <span style={{fontSize:9,color,letterSpacing:".12em",fontWeight:700,textTransform:"uppercase"}}>{level}</span>
-                  <span style={{fontFamily:"'DM Mono',monospace",fontSize:15,color,fontWeight:800}}>{count}</span>
+          {loading
+            ? Array.from({length:4}).map((_,i)=>(
+                <div key={i} style={{borderRadius:6,padding:12,border:`1px solid ${L.border}`,background:L.subtleBg}}>
+                  <div style={{display:"flex",justifyContent:"space-between",marginBottom:8}}><Shimmer w={55} h={9}/><Shimmer w={24} h={20}/></div>
+                  <Shimmer w="100%" h={4} radius={2} style={{marginBottom:8}}/>
+                  <Shimmer w={60} h={8}/>
                 </div>
-                <div style={{height:4,background:`${color}20`,borderRadius:2}}>
-                  <div style={{height:"100%",width:`${pct}%`,background:color,borderRadius:2,transition:"width 0.8s ease"}}/>
-                </div>
-                <div style={{fontSize:8,color:L.text3,marginTop:6,fontWeight:500}}>
-                  {enriched.filter((a:any)=>a.risk===level).reduce((s:number,a:any)=>s+a.days,0)} dev days
-                </div>
-              </div>
-            );
-          })}
+              ))
+            : (["Critical","High","Medium","Low"] as const).map(level=>{
+                const count=enriched.filter((a:any)=>a.risk===level).length;
+                const pct=enriched.length?Math.round(count/enriched.length*100):0;
+                const color=level==="Critical"?L.red:level==="High"?L.orange:level==="Medium"?L.yellow:L.green;
+                const bg=level==="Critical"?"#fff5f5":level==="High"?"#fff7ed":level==="Medium"?"#fffbeb":"#f0fdf4";
+                return (
+                  <div key={level} style={{background:bg,border:`1px solid ${color}22`,borderRadius:6,padding:12}}>
+                    <div style={{display:"flex",justifyContent:"space-between",marginBottom:8}}>
+                      <span style={{fontSize:9,color,letterSpacing:".12em",fontWeight:700,textTransform:"uppercase"}}>{level}</span>
+                      <span style={{fontFamily:"'DM Mono',monospace",fontSize:15,color,fontWeight:800}}>{count}</span>
+                    </div>
+                    <div style={{height:4,background:`${color}20`,borderRadius:2}}>
+                      <div style={{height:"100%",width:`${pct}%`,background:color,borderRadius:2,transition:"width 0.8s ease"}}/>
+                    </div>
+                    <div style={{fontSize:8,color:L.text3,marginTop:6,fontWeight:500}}>
+                      {enriched.filter((a:any)=>a.risk===level).reduce((s:number,a:any)=>s+a.days,0)} dev days
+                    </div>
+                  </div>
+                );
+              })
+          }
         </div>
       </LPanel>
 
       {/* ROADMAP */}
       <LPanel>
         <LPanelHeader left="MIGRATION ROADMAP" right={
-          <div style={{display:"flex",gap:6}}>
+          !loading&&<div style={{display:"flex",gap:6}}>
             <button style={{...LS.btn,fontSize:isMobile?9:11}} onClick={exportCSV}>↓ CSV</button>
             <button
               style={{...LS.btn,fontSize:isMobile?9:11,background:`${L.blue}15`,borderColor:`${L.blue}40`,color:L.blue,fontWeight:700}}
               onClick={()=>exportAuditPDF(enriched,migrationScore,pqcReady,total,totalDays,calDays,totalCost,teamSize,devRate,dateStr,clientName,activeDomain,milestones)}
-            >
-              {isMobile?"⬡ PDF":"⬡ AUDIT PDF"}
-            </button>
+            >{isMobile?"⬡ PDF":"⬡ AUDIT PDF"}</button>
           </div>
         }/>
+
         {/* Mobile card view */}
         <div style={{display:"block"}} className="pqc-show-cards">
           <style>{`@media(min-width:900px){.pqc-show-cards{display:none!important;}}`}</style>
           <div style={{maxHeight:isMobile?400:520,overflowY:"auto"}}>
-            {enriched.map((a:any,i:number)=><RoadmapCard key={i} a={a} i={i}/>)}
-            {enriched.length===0&&<div style={{padding:24,textAlign:"center",fontSize:10,color:L.green,fontWeight:600}}>✓ No weak assets</div>}
+            {loading
+              ? <SkeletonRoadmapCards count={5}/>
+              : enriched.length
+                ? enriched.map((a:any,i:number)=><RoadmapCard key={i} a={a} i={i}/>)
+                : <div style={{padding:24,textAlign:"center",fontSize:10,color:L.green,fontWeight:600}}>✓ No weak assets</div>
+            }
           </div>
         </div>
+
         {/* Desktop table view */}
         <div style={{display:"none"}} className="pqc-show-table">
           <style>{`@media(min-width:900px){.pqc-show-table{display:block!important;}}`}</style>
@@ -976,45 +1005,45 @@ export default function PQCReadinessPage() {
                 </tr>
               </thead>
               <tbody>
-                {enriched.map((a:any,i:number)=>{
-                  const ps=a.pqcScore as PQCScoreBreakdown|undefined;
-                  return (
-                    <tr key={i} style={{borderBottom:`1px solid ${L.borderLight}`,background:i%2===0?L.panelBg:L.subtleBg}}>
-                      <td style={{padding:"7px 8px",fontFamily:"'DM Mono',monospace",fontSize:9,color:L.text4}}>{i+1}</td>
-                      <td style={{padding:"7px 8px",color:L.blue,fontSize:10,fontWeight:500}}>{a.app}</td>
-                      <td style={{padding:"7px 8px"}}>
-                        <span style={{fontSize:8,color:L.text3,background:L.insetBg,border:`1px solid ${L.border}`,borderRadius:3,padding:"1px 5px",fontWeight:600}}>{a.assetType}</span>
-                      </td>
-                      <td style={{padding:"7px 8px"}}>
-                        <span style={{fontSize:8,fontWeight:700,color:a.risk==="Critical"?L.red:a.risk==="High"?L.orange:a.risk==="Medium"?L.yellow:L.green,background:a.risk==="Critical"?"#fef2f2":a.risk==="High"?"#fff7ed":a.risk==="Medium"?"#fffbeb":"#f0fdf4",border:`1px solid ${a.risk==="Critical"?L.red:a.risk==="High"?L.orange:a.risk==="Medium"?L.yellow:L.green}33`,borderRadius:3,padding:"1px 6px"}}>{a.risk}</span>
-                      </td>
-                      <td style={{padding:"7px 8px",fontSize:10,fontWeight:600,fontFamily:"'DM Mono',monospace",color:a.keylen?.startsWith("1024")?L.red:a.keylen?.startsWith("2048")?L.yellow:L.green}}>{a.keylen}</td>
-                      <td style={{padding:"7px 8px",fontSize:9,color:L.text3,maxWidth:140,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{a.cipher}</td>
-                      <td style={{padding:"7px 8px"}}>
-                        <span style={{fontSize:8,fontWeight:600,color:a.tls==="1.0"?L.red:a.tls==="1.2"?L.yellow:L.green}}>TLS {a.tls}</span>
-                      </td>
-                      <td style={{padding:"7px 8px",fontSize:9,color:L.text3}}>{a.ca}</td>
-                      <td style={{padding:"7px 8px",textAlign:"center"}}>
-                        {ps&&<span style={{fontSize:8,fontWeight:700,color:ps.color,border:`1px solid ${ps.color}44`,borderRadius:3,padding:"1px 5px",background:`${ps.color}10`}}>{ps.active?"ACTIVE":`${ps.score}/100`}</span>}
-                      </td>
-                      <td style={{padding:"7px 8px",fontFamily:"'DM Mono',monospace",fontSize:10,color:L.cyan,fontWeight:600}}>{a.days}d</td>
-                      <td style={{padding:"7px 8px",fontFamily:"'DM Mono',monospace",fontSize:10,color:L.orange,fontWeight:700}}>{fmtINR(a.cost)}</td>
-                      <td style={{padding:"7px 8px",textAlign:"center",fontSize:13}}>{a.isPublic?<span style={{color:L.cyan}}>●</span>:<span style={{color:L.text4}}>○</span>}</td>
-                      <td style={{padding:"7px 8px",textAlign:"center",fontSize:13}}>{a.pqc?<span style={{color:L.green}}>✓</span>:<span style={{color:L.red}}>✗</span>}</td>
-                    </tr>
-                  );
-                })}
+                {loading
+                  ? <SkeletonTableRows count={7}/>
+                  : enriched.map((a:any,i:number)=>{
+                      const ps=a.pqcScore as PQCScoreBreakdown|undefined;
+                      return (
+                        <tr key={i} style={{borderBottom:`1px solid ${L.borderLight}`,background:i%2===0?L.panelBg:L.subtleBg}}>
+                          <td style={{padding:"7px 8px",fontFamily:"'DM Mono',monospace",fontSize:9,color:L.text4}}>{i+1}</td>
+                          <td style={{padding:"7px 8px",color:L.blue,fontSize:10,fontWeight:500}}>{a.app}</td>
+                          <td style={{padding:"7px 8px"}}><span style={{fontSize:8,color:L.text3,background:L.insetBg,border:`1px solid ${L.border}`,borderRadius:3,padding:"1px 5px",fontWeight:600}}>{a.assetType}</span></td>
+                          <td style={{padding:"7px 8px"}}><span style={{fontSize:8,fontWeight:700,color:a.risk==="Critical"?L.red:a.risk==="High"?L.orange:a.risk==="Medium"?L.yellow:L.green,background:a.risk==="Critical"?"#fef2f2":a.risk==="High"?"#fff7ed":a.risk==="Medium"?"#fffbeb":"#f0fdf4",border:`1px solid ${a.risk==="Critical"?L.red:a.risk==="High"?L.orange:a.risk==="Medium"?L.yellow:L.green}33`,borderRadius:3,padding:"1px 6px"}}>{a.risk}</span></td>
+                          <td style={{padding:"7px 8px",fontSize:10,fontWeight:600,fontFamily:"'DM Mono',monospace",color:a.keylen?.startsWith("1024")?L.red:a.keylen?.startsWith("2048")?L.yellow:L.green}}>{a.keylen}</td>
+                          <td style={{padding:"7px 8px",fontSize:9,color:L.text3,maxWidth:140,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{a.cipher}</td>
+                          <td style={{padding:"7px 8px"}}><span style={{fontSize:8,fontWeight:600,color:a.tls==="1.0"?L.red:a.tls==="1.2"?L.yellow:L.green}}>TLS {a.tls}</span></td>
+                          <td style={{padding:"7px 8px",fontSize:9,color:L.text3}}>{a.ca}</td>
+                          <td style={{padding:"7px 8px",textAlign:"center"}}>{ps&&<span style={{fontSize:8,fontWeight:700,color:ps.color,border:`1px solid ${ps.color}44`,borderRadius:3,padding:"1px 5px",background:`${ps.color}10`}}>{ps.active?"ACTIVE":`${ps.score}/100`}</span>}</td>
+                          <td style={{padding:"7px 8px",fontFamily:"'DM Mono',monospace",fontSize:10,color:L.cyan,fontWeight:600}}>{a.days}d</td>
+                          <td style={{padding:"7px 8px",fontFamily:"'DM Mono',monospace",fontSize:10,color:L.orange,fontWeight:700}}>{fmtINR(a.cost)}</td>
+                          <td style={{padding:"7px 8px",textAlign:"center",fontSize:13}}>{a.isPublic?<span style={{color:L.cyan}}>●</span>:<span style={{color:L.text4}}>○</span>}</td>
+                          <td style={{padding:"7px 8px",textAlign:"center",fontSize:13}}>{a.pqc?<span style={{color:L.green}}>✓</span>:<span style={{color:L.red}}>✗</span>}</td>
+                        </tr>
+                      );
+                    })
+                }
               </tbody>
             </table>
           </div>
         </div>
         <div style={{padding:"8px 14px",borderTop:`1px solid ${L.borderLight}`,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8,background:L.subtleBg,borderRadius:"0 0 8px 8px"}}>
-          <span style={{fontSize:10,color:L.text2}}>
-            <b style={{color:L.text1}}>{enriched.length}</b> to migrate ·{" "}
-            <b style={{color:L.cyan}}>{totalDays}d</b> dev ·{" "}
-            <b style={{color:L.orange}}>{fmtINR(totalCost)}</b>
-          </span>
-          {!isMobile&&<span style={{fontSize:9,color:L.text3}}>Ranked: public-facing → risk → cost</span>}
+          {loading
+            ? <Shimmer w={220} h={10}/>
+            : <>
+                <span style={{fontSize:10,color:L.text2}}>
+                  <b style={{color:L.text1}}>{enriched.length}</b> to migrate ·{" "}
+                  <b style={{color:L.cyan}}>{totalDays}d</b> dev ·{" "}
+                  <b style={{color:L.orange}}>{fmtINR(totalCost)}</b>
+                </span>
+                {!isMobile&&<span style={{fontSize:9,color:L.text3}}>Ranked: public-facing → risk → cost</span>}
+              </>
+          }
         </div>
       </LPanel>
 
@@ -1022,47 +1051,39 @@ export default function PQCReadinessPage() {
       <LPanel>
         <LPanelHeader left="REMEDIATION GUIDE" />
         <div style={{padding:14,display:"grid",gridTemplateColumns:isMobile?"1fr":isTablet?"1fr 1fr":"repeat(3,1fr)",gap:10}}>
-          {[
-            {
-              title:"Upgrade cert key",
-              color:L.red, bg:"#fff5f5", border:`${L.red}25`,
-              icon:"⬡",
-              items:enriched.filter((a:any)=>!(a.pqcScore?.criteria?.certKey4096?.pass)).map((a:any)=>a.app),
-              fix:"Deploy RSA-4096 or EC P-384 — 70/100 pts",
-            },
-            {
-              title:"Remove wildcard certs",
-              color:L.orange, bg:"#fff7ed", border:`${L.orange}25`,
-              icon:"◈",
-              items:enriched.filter((a:any)=>a.is_wildcard).map((a:any)=>a.app),
-              fix:"Dedicated per-service certificates — 20/100 pts",
-            },
-            {
-              title:"Enable Kyber hybrid",
-              color:L.cyan, bg:"#f0f9ff", border:`${L.cyan}25`,
-              icon:"◉",
-              items:enriched.filter((a:any)=>!a.pqc).map((a:any)=>a.app),
-              fix:"X25519+Kyber768 (FIPS 203) → ACTIVE status",
-            },
-          ].map(section=>(
-            <div key={section.title} style={{background:section.bg,border:`1px solid ${section.border}`,borderRadius:6,padding:12}}>
-              <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
-                <span style={{fontFamily:"'DM Mono',monospace",color:section.color,fontSize:14,flexShrink:0}}>{section.icon}</span>
-                <span style={{fontSize:9,color:section.color,letterSpacing:".1em",textTransform:"uppercase",fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{section.title}</span>
-                <span style={{marginLeft:"auto",fontFamily:"'DM Mono',monospace",fontSize:14,color:section.color,flexShrink:0,fontWeight:800}}>{section.items.length}</span>
-              </div>
-              <div style={{fontSize:9,color:L.text2,marginBottom:8,lineHeight:1.6,fontWeight:500}}>{section.fix}</div>
-              <div style={{display:"flex",flexDirection:"column",gap:4}}>
-                {section.items.slice(0,5).map((app:string,i:number)=>(
-                  <div key={i} style={{fontSize:9,color:L.text2,display:"flex",alignItems:"center",gap:6,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",padding:"3px 0",borderTop:`1px solid ${section.border}`}}>
-                    <span style={{color:section.color,fontSize:8,flexShrink:0,fontWeight:700}}>▸</span> {app}
+          {loading
+            ? Array.from({length:3}).map((_,i)=>(
+                <div key={i} style={{border:`1px solid ${L.border}`,borderRadius:6,padding:12,background:L.subtleBg}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}><Shimmer w={120} h={10}/><Shimmer w={20} h={20}/></div>
+                  <Shimmer w="90%" h={9} style={{marginBottom:6}}/>
+                  <Shimmer w="75%" h={8} style={{marginBottom:12}}/>
+                  {[80,65,90,70,55].map((w,j)=><Shimmer key={j} w={`${w}%`} h={8} style={{marginBottom:5}}/>)}
+                </div>
+              ))
+            : [
+                { title:"Upgrade cert key", color:L.red, bg:"#fff5f5", border:`${L.red}25`, icon:"⬡", items:enriched.filter((a:any)=>!(a.pqcScore?.criteria?.certKey4096?.pass)).map((a:any)=>a.app), fix:"Deploy RSA-4096 or EC P-384 — 70/100 pts" },
+                { title:"Remove wildcard certs", color:L.orange, bg:"#fff7ed", border:`${L.orange}25`, icon:"◈", items:enriched.filter((a:any)=>a.is_wildcard).map((a:any)=>a.app), fix:"Dedicated per-service certificates — 20/100 pts" },
+                { title:"Enable Kyber hybrid", color:L.cyan, bg:"#f0f9ff", border:`${L.cyan}25`, icon:"◉", items:enriched.filter((a:any)=>!a.pqc).map((a:any)=>a.app), fix:"X25519+Kyber768 (FIPS 203) → ACTIVE status" },
+              ].map(section=>(
+                <div key={section.title} style={{background:section.bg,border:`1px solid ${section.border}`,borderRadius:6,padding:12}}>
+                  <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
+                    <span style={{fontFamily:"'DM Mono',monospace",color:section.color,fontSize:14,flexShrink:0}}>{section.icon}</span>
+                    <span style={{fontSize:9,color:section.color,letterSpacing:".1em",textTransform:"uppercase",fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{section.title}</span>
+                    <span style={{marginLeft:"auto",fontFamily:"'DM Mono',monospace",fontSize:14,color:section.color,flexShrink:0,fontWeight:800}}>{section.items.length}</span>
                   </div>
-                ))}
-                {section.items.length>5&&<div style={{fontSize:9,color:L.text3,fontStyle:"italic"}}>+{section.items.length-5} more</div>}
-                {section.items.length===0&&<div style={{fontSize:9,color:L.green,fontWeight:600}}>✓ All clear</div>}
-              </div>
-            </div>
-          ))}
+                  <div style={{fontSize:9,color:L.text2,marginBottom:8,lineHeight:1.6,fontWeight:500}}>{section.fix}</div>
+                  <div style={{display:"flex",flexDirection:"column",gap:4}}>
+                    {section.items.slice(0,5).map((app:string,i:number)=>(
+                      <div key={i} style={{fontSize:9,color:L.text2,display:"flex",alignItems:"center",gap:6,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",padding:"3px 0",borderTop:`1px solid ${section.border}`}}>
+                        <span style={{color:section.color,fontSize:8,flexShrink:0,fontWeight:700}}>▸</span> {app}
+                      </div>
+                    ))}
+                    {section.items.length>5&&<div style={{fontSize:9,color:L.text3,fontStyle:"italic"}}>+{section.items.length-5} more</div>}
+                    {section.items.length===0&&<div style={{fontSize:9,color:L.green,fontWeight:600}}>✓ All clear</div>}
+                  </div>
+                </div>
+              ))
+          }
         </div>
       </LPanel>
     </div>
