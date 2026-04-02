@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { useThemeContext } from '../context/ThemeContext.js'
-import { exportAuditPDF, type ExportPDFOptions } from "./exportPDF";
+import { exportAuditPDF, type ExportPDFOptions } from "./exportPDF.js";
 import {
   T, S, Panel, PanelHeader, MetricCard, Badge,
   Table, TR, TD, MOCK_CBOM, MOCK_ASSETS,
