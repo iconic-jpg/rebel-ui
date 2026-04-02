@@ -98,7 +98,7 @@ export default function Login() {
     const [googleLoading, setGoogleLoading] = useState(false);
     const [checkingSession, setCheckingSession] = useState(true);
     const googleInitialized = useRef(false);
-    // ── Auto-login from refresh token ──
+    // ── Auto-login from refresh token ─────────────────────────────────────────
     useEffect(() => {
         const refresh = localStorage.getItem("refresh");
         if (!refresh) {
@@ -124,7 +124,7 @@ export default function Login() {
             setCheckingSession(false);
         });
     }, [navigate]);
-    // ── Google response handler ──
+    // ── Google response handler ───────────────────────────────────────────────
     const handleGoogleResponse = async (response) => {
         setGoogleLoading(true);
         setError("");
@@ -150,11 +150,13 @@ export default function Login() {
             setGoogleLoading(false);
         }
     };
-    // ── Google SDK init ──
+    // ── Google SDK init ───────────────────────────────────────────────────────
     useEffect(() => {
         if (googleInitialized.current)
             return;
         const initGoogle = () => {
+            if (!import.meta.env.VITE_GOOGLE_CLIENT_ID)
+                return; // skip if not configured
             window.google?.accounts.id.initialize({
                 client_id: import.meta.env.VITE_GOOGLE_CLIENT_ID,
                 callback: handleGoogleResponse,
@@ -178,8 +180,12 @@ export default function Login() {
         document.head.appendChild(script);
         return () => { window.google?.accounts.id.cancel(); };
     }, []);
-    // ── Trigger Google One Tap ──
+    // ── Trigger Google One Tap ────────────────────────────────────────────────
     const triggerGoogle = () => {
+        if (!import.meta.env.VITE_GOOGLE_CLIENT_ID) {
+            setError("Google login is not configured.");
+            return;
+        }
         if (!googleInitialized.current) {
             setError("Google not loaded yet, please wait...");
             return;
@@ -190,25 +196,26 @@ export default function Login() {
             }
         });
     };
-    // ── Email/password login ──
+    // ── Email / password login ────────────────────────────────────────────────
+    // Django SimpleJWT expects { username, password } — we use email as username
     const handleLogin = async (e) => {
         e.preventDefault();
         setError("");
         setLoading(true);
         try {
-            const response = await fetch(`${API}/api/login`, {
+            const response = await fetch(`${API}/api/token/`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ email, password }),
+                body: JSON.stringify({ username: email, password }),
             });
             const data = await response.json();
             if (!response.ok) {
+                // SimpleJWT returns { detail: "No active account found..." } on failure
                 setError(data.detail || data.error || "Invalid credentials");
                 return;
             }
             localStorage.setItem("access", data.access);
-            if (data.refresh)
-                localStorage.setItem("refresh", data.refresh);
+            localStorage.setItem("refresh", data.refresh);
             navigate("/");
         }
         catch {

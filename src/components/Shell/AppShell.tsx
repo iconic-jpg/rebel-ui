@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useThemeContext } from "../context/ThemeContext.js";
-import SecureModePanel, { SecureModeBadge } from "./SecureModePanel.js";
+import SecureModePanel, { SecureModeBadge } from "../Modules/SecureModePanel.js";
 
 const NAV_ITEMS = [
   { path: "/", label: "Dashboard", icon: "⬡", section: "CORE" },

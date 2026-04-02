@@ -53,13 +53,108 @@ export default function PQCPosturePage() {
     });
     const mobile = useMobile();
     useEffect(() => {
-        fetch(`${API}/pqc`)
-            .then(r => r.json())
-            .then(d => { if (d.assets?.length) {
-            setAssets(d.assets);
-            setStats(d.stats);
-        } })
-            .catch(() => { });
+        // Same hybrid fetch as CBOMPage and PQCReadinessPage
+        Promise.all([
+            fetch(`${API}/cbom`).then(r => r.json()).catch(() => ({})),
+            fetch(`${API}/assets`).then(r => r.json()).catch(() => ({ assets: [] })),
+        ]).then(([cbom, assetsData]) => {
+            // Registry map keyed by domain
+            const registeredMap = {};
+            (assetsData?.assets ?? []).forEach((a) => {
+                if (a.name)
+                    registeredMap[a.name] = a;
+            });
+            // Enrich CBOM apps with registry context
+            const cbomApps = (cbom.apps ?? []).map((app) => {
+                const reg = registeredMap[app.app];
+                if (!reg)
+                    return app;
+                return {
+                    ...app,
+                    is_wildcard: reg.is_wildcard ?? app.is_wildcard,
+                    criticality: reg.criticality,
+                    owner: reg.owner,
+                    compliance_scope: reg.compliance_scope,
+                    financial_exposure: reg.financial_exposure,
+                };
+            });
+            // Append registry assets not in CBOM
+            const cbomDomains = new Set(cbomApps.map((a) => a.app));
+            const registeredOnly = (assetsData?.assets ?? [])
+                .filter((a) => a.id && !cbomDomains.has(a.name))
+                .map((a) => ({
+                app: a.name,
+                keylen: a.keylen || "—",
+                cipher: a.cipher || "—",
+                tls: a.tls || "—",
+                ca: a.ca || "—",
+                status: a.risk === "weak" ? "weak" : "ok",
+                pqc: false,
+                pqc_support: "none",
+                key_exchange_group: a.key_exchange_group || null,
+                is_wildcard: a.is_wildcard ?? null,
+                criticality: a.criticality,
+                owner: a.owner,
+                compliance_scope: a.compliance_scope,
+                financial_exposure: a.financial_exposure,
+            }));
+            const merged = [...cbomApps, ...registeredOnly];
+            if (merged.length) {
+                // Convert merged CBOM shape → PQC posture asset shape
+                const pqcAssets = merged.map((a) => {
+                    const score = (() => {
+                        let s = 500;
+                        const tls = (a.tls || "").replace(/^TLSv?/i, "");
+                        if (tls === "1.3")
+                            s += 200;
+                        else if (tls === "1.2")
+                            s += 100;
+                        else if (tls === "1.1")
+                            s -= 100;
+                        else if (tls === "1.0")
+                            s -= 200;
+                        const bits = parseInt(String(a.keylen || "0").match(/(\d+)/)?.[1] ?? "0", 10);
+                        if (bits >= 4096)
+                            s += 200;
+                        else if (bits >= 2048)
+                            s += 100;
+                        else if (bits === 1024)
+                            s -= 150;
+                        else if (bits > 0)
+                            s -= 200;
+                        if (a.pqc)
+                            s += 100;
+                        return Math.max(0, Math.min(1000, s));
+                    })();
+                    const status = score >= 700 ? "Elite" : score >= 400 ? "Standard" : score >= 200 ? "Legacy" : "Critical";
+                    return {
+                        name: a.app,
+                        ip: a.ip || "—",
+                        tls: (a.tls || "—").replace(/^TLSv?/i, ""),
+                        pqc: !!a.pqc,
+                        score,
+                        status,
+                        owner: a.owner || a.ca || "—",
+                    };
+                });
+                setAssets(pqcAssets);
+                const total = pqcAssets.length;
+                const elite = pqcAssets.filter(a => a.status === "Elite").length;
+                const standard = pqcAssets.filter(a => a.status === "Standard").length;
+                const legacy = pqcAssets.filter(a => a.status === "Legacy").length;
+                const critical = pqcAssets.filter(a => a.status === "Critical").length;
+                const pqc_ready = pqcAssets.filter(a => a.pqc).length;
+                const avg_score = total ? Math.round(pqcAssets.reduce((s, a) => s + a.score, 0) / total) : 0;
+                setStats({
+                    avg_score, total,
+                    elite, standard, legacy, critical, pqc_ready,
+                    elite_pct: Math.round(elite / Math.max(total, 1) * 100),
+                    standard_pct: Math.round(standard / Math.max(total, 1) * 100),
+                    legacy_pct: Math.round(legacy / Math.max(total, 1) * 100),
+                    critical_pct: Math.round(critical / Math.max(total, 1) * 100),
+                });
+            }
+        });
     }, []);
     const scoreColor = (s) => s >= 700 ? T.green : s >= 400 ? T.yellow : T.red;
     const statusVariant = (s) => s === "Elite" ? "green" : s === "Standard" ? "yellow" : s === "Critical" ? "red" : "orange";
@@ -97,7 +192,7 @@ export default function PQCPosturePage() {
                                             { color: T.orange, label: "Medium Risk" },
                                             { color: T.green, label: "Safe / No Risk" },
                                         ].map(row => (_jsxs("div", { style: { display: "flex", alignItems: "center", gap: 8 }, children: [_jsx("div", { style: { width: 12, height: 12, borderRadius: 1,
-                                                        background: row.color + "22", border: `1px solid ${row.color}44` } }), _jsx("span", { style: { fontSize: 10, color: T.text2 }, children: row.label })] }, row.label))) })] })] })] }), _jsxs(Panel, { children: [_jsx(PanelHeader, { left: "PQC ASSET STATUS", right: _jsxs("span", { style: { fontSize: 8, color: T.text3, fontFamily: "'Orbitron',monospace" }, children: ["CRITICAL: ", stats.critical || 8] }) }), mobile ? (_jsx("div", { style: { maxHeight: 360, overflowY: "auto" }, children: displayAssets.map((a, i) => (_jsxs("div", { style: { padding: "10px 14px", borderBottom: `1px solid rgba(59,130,246,0.05)` }, children: [_jsxs("div", { style: { display: "flex", justifyContent: "space-between", marginBottom: 4 }, children: [_jsx("span", { style: { fontSize: 11, color: T.blue }, children: a.name }), _jsx(Badge, { v: statusVariant(a.status), children: a.status.toUpperCase() })] }), _jsxs("div", { style: { display: "flex", gap: 8, alignItems: "center", marginBottom: 4 }, children: [_jsxs(Badge, { v: a.tls === "1.0" ? "red" : a.tls === "1.2" ? "yellow" : "green", children: ["TLS ", a.tls] }), _jsx("span", { style: { fontSize: 14, color: a.pqc ? T.green : T.red }, children: a.pqc ? "✓" : "✗" }), _jsx("span", { style: { fontSize: 9, color: T.text3 }, children: a.ip })] }), _jsxs("div", { style: { display: "flex", alignItems: "center", gap: 8 }, children: [_jsx("div", { style: { flex: 1 }, children: _jsx(ProgBar, { pct: Math.round(a.score / 10), color: scoreColor(a.score) }) }), _jsx("span", { style: { fontFamily: "'Orbitron',monospace", fontSize: 11, color: scoreColor(a.score) }, children: a.score })] })] }, i))) })) : (_jsx(Table, { cols: ["ASSET NAME", "IP ADDRESS", "PQC SUPPORT", "TLS", "SCORE", "STATUS", "OWNER"], children: displayAssets.map((a, i) => (_jsxs(TR, { children: [_jsx(TD, { style: { fontSize: 10, color: T.blue }, children: a.name }), _jsx(TD, { style: { fontSize: 10, color: T.text3 }, children: a.ip }), _jsx(TD, { style: { textAlign: "center", fontSize: 16 }, children: a.pqc ? _jsx("span", { style: { color: T.green }, children: "\u2713" }) : _jsx("span", { style: { color: T.red }, children: "\u2717" }) }), _jsx(TD, { children: _jsxs(Badge, { v: a.tls === "1.0" ? "red" : a.tls === "1.2" ? "yellow" : "green", children: ["TLS ", a.tls] }) }), _jsx(TD, { children: _jsxs("div", { style: { display: "flex", alignItems: "center", gap: 8 }, children: [_jsx("div", { style: { width: 60 }, children: _jsx(ProgBar, { pct: Math.round(a.score / 10), color: scoreColor(a.score) }) }), _jsx("span", { style: { fontFamily: "'Orbitron',monospace", fontSize: 11, color: scoreColor(a.score) }, children: a.score })] }) }), _jsx(TD, { children: _jsx(Badge, { v: statusVariant(a.status), children: a.status.toUpperCase() }) }), _jsx(TD, { style: { fontSize: 10, color: T.text3 }, children: a.owner })] }, i))) }))] }), _jsxs(Panel, { children: [_jsx(PanelHeader, { left: "PQC COMPLIANCE TIERS" }), mobile ? (_jsx("div", { children: TIERS.map((t, i) => (_jsxs("div", { style: { padding: "12px 14px", borderBottom: `1px solid rgba(59,130,246,0.05)` }, children: [_jsxs("div", { style: { display: "flex", justifyContent: "space-between", marginBottom: 6 }, children: [_jsx(Badge, { v: t.v, children: t.tier }), _jsx("span", { style: { fontSize: 10, color: scoreColor(i === 0 ? 800 : i === 1 ? 500 : i === 2 ? 350 : 0) }, children: t.level })] }), _jsx("div", { style: { fontSize: 9, color: T.text2, marginBottom: 4, lineHeight: 1.5 }, children: t.criteria }), _jsx("div", { style: { fontSize: 9, color: T.text3, lineHeight: 1.5 }, children: t.action })] }, i))) })) : (_jsx(Table, { cols: ["TIER", "SECURITY LEVEL", "COMPLIANCE CRITERIA", "PRIORITY / ACTION"], children: TIERS.map((t, i) => (_jsxs(TR, { children: [_jsx(TD, { children: _jsx(Badge, { v: t.v, children: t.tier }) }), _jsx(TD, { style: { fontSize: 10, color: scoreColor(i === 0 ? 800 : i === 1 ? 500 : i === 2 ? 350 : 0) }, children: t.level }), _jsx(TD, { style: { fontSize: 10, color: T.text2, maxWidth: 280 }, children: t.criteria }), _jsx(TD, { style: { fontSize: 10, color: T.text3 }, children: t.action })] }, i))) }))] }), _jsxs("div", { style: { display: "grid", gridTemplateColumns: mobile ? "1fr" : "1fr 1fr", gap: mobile ? 8 : 10 }, children: [_jsxs(Panel, { children: [_jsx(PanelHeader, { left: "IMPROVEMENT RECOMMENDATIONS" }), _jsx("div", { children: RECS.map((r, i) => (_jsxs("div", { style: { display: "flex", alignItems: "center", gap: 10, padding: "9px 14px",
+                                                        background: row.color + "22", border: `1px solid ${row.color}44` } }), _jsx("span", { style: { fontSize: 10, color: T.text2 }, children: row.label })] }, row.label))) })] })] })] }), _jsxs(Panel, { children: [_jsx(PanelHeader, { left: "PQC ASSET STATUS", right: _jsxs("span", { style: { fontSize: 8, color: T.text3, fontFamily: "'Orbitron',monospace" }, children: ["CRITICAL: ", stats.critical || 0] }) }), mobile ? (_jsx("div", { style: { maxHeight: 360, overflowY: "auto" }, children: displayAssets.map((a, i) => (_jsxs("div", { style: { padding: "10px 14px", borderBottom: `1px solid rgba(59,130,246,0.05)` }, children: [_jsxs("div", { style: { display: "flex", justifyContent: "space-between", marginBottom: 4 }, children: [_jsx("span", { style: { fontSize: 11, color: T.blue }, children: a.name }), _jsx(Badge, { v: statusVariant(a.status), children: a.status.toUpperCase() })] }), _jsxs("div", { style: { display: "flex", gap: 8, alignItems: "center", marginBottom: 4 }, children: [_jsxs(Badge, { v: a.tls === "1.0" ? "red" : a.tls === "1.2" ? "yellow" : "green", children: ["TLS ", a.tls] }), _jsx("span", { style: { fontSize: 14, color: a.pqc ? T.green : T.red }, children: a.pqc ? "✓" : "✗" }), _jsx("span", { style: { fontSize: 9, color: T.text3 }, children: a.ip })] }), _jsxs("div", { style: { display: "flex", alignItems: "center", gap: 8 }, children: [_jsx("div", { style: { flex: 1 }, children: _jsx(ProgBar, { pct: Math.round(a.score / 10), color: scoreColor(a.score) }) }), _jsx("span", { style: { fontFamily: "'Orbitron',monospace", fontSize: 11, color: scoreColor(a.score) }, children: a.score })] })] }, i))) })) : (_jsx(Table, { cols: ["ASSET NAME", "IP ADDRESS", "PQC SUPPORT", "TLS", "SCORE", "STATUS", "OWNER"], children: displayAssets.map((a, i) => (_jsxs(TR, { children: [_jsx(TD, { style: { fontSize: 10, color: T.blue }, children: a.name }), _jsx(TD, { style: { fontSize: 10, color: T.text3 }, children: a.ip }), _jsx(TD, { style: { textAlign: "center", fontSize: 16 }, children: a.pqc ? _jsx("span", { style: { color: T.green }, children: "\u2713" }) : _jsx("span", { style: { color: T.red }, children: "\u2717" }) }), _jsx(TD, { children: _jsxs(Badge, { v: a.tls === "1.0" ? "red" : a.tls === "1.2" ? "yellow" : "green", children: ["TLS ", a.tls] }) }), _jsx(TD, { children: _jsxs("div", { style: { display: "flex", alignItems: "center", gap: 8 }, children: [_jsx("div", { style: { width: 60 }, children: _jsx(ProgBar, { pct: Math.round(a.score / 10), color: scoreColor(a.score) }) }), _jsx("span", { style: { fontFamily: "'Orbitron',monospace", fontSize: 11, color: scoreColor(a.score) }, children: a.score })] }) }), _jsx(TD, { children: _jsx(Badge, { v: statusVariant(a.status), children: a.status.toUpperCase() }) }), _jsx(TD, { style: { fontSize: 10, color: T.text3 }, children: a.owner })] }, i))) }))] }), _jsxs(Panel, { children: [_jsx(PanelHeader, { left: "PQC COMPLIANCE TIERS" }), mobile ? (_jsx("div", { children: TIERS.map((t, i) => (_jsxs("div", { style: { padding: "12px 14px", borderBottom: `1px solid rgba(59,130,246,0.05)` }, children: [_jsxs("div", { style: { display: "flex", justifyContent: "space-between", marginBottom: 6 }, children: [_jsx(Badge, { v: t.v, children: t.tier }), _jsx("span", { style: { fontSize: 10, color: scoreColor(i === 0 ? 800 : i === 1 ? 500 : i === 2 ? 350 : 0) }, children: t.level })] }), _jsx("div", { style: { fontSize: 9, color: T.text2, marginBottom: 4, lineHeight: 1.5 }, children: t.criteria }), _jsx("div", { style: { fontSize: 9, color: T.text3, lineHeight: 1.5 }, children: t.action })] }, i))) })) : (_jsx(Table, { cols: ["TIER", "SECURITY LEVEL", "COMPLIANCE CRITERIA", "PRIORITY / ACTION"], children: TIERS.map((t, i) => (_jsxs(TR, { children: [_jsx(TD, { children: _jsx(Badge, { v: t.v, children: t.tier }) }), _jsx(TD, { style: { fontSize: 10, color: scoreColor(i === 0 ? 800 : i === 1 ? 500 : i === 2 ? 350 : 0) }, children: t.level }), _jsx(TD, { style: { fontSize: 10, color: T.text2, maxWidth: 280 }, children: t.criteria }), _jsx(TD, { style: { fontSize: 10, color: T.text3 }, children: t.action })] }, i))) }))] }), _jsxs("div", { style: { display: "grid", gridTemplateColumns: mobile ? "1fr" : "1fr 1fr", gap: mobile ? 8 : 10 }, children: [_jsxs(Panel, { children: [_jsx(PanelHeader, { left: "IMPROVEMENT RECOMMENDATIONS" }), _jsx("div", { children: RECS.map((r, i) => (_jsxs("div", { style: { display: "flex", alignItems: "center", gap: 10, padding: "9px 14px",
                                         borderBottom: `1px solid rgba(59,130,246,0.04)` }, children: [_jsx("div", { style: { width: 24, height: 24, borderRadius: 2,
                                                 background: `${r.color}22`, border: `1px solid ${r.color}44`,
                                                 display: "flex", alignItems: "center", justifyContent: "center",

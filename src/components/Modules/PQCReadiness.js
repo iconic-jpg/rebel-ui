@@ -1,15 +1,135 @@
-import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
+import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-runtime";
 import { useState, useEffect, useRef } from "react";
-import { T, S, Panel, PanelHeader, MetricCard, Badge, Table, TR, TD, MOCK_CBOM, MOCK_ASSETS, } from "./shared.js";
+import { Badge, MOCK_CBOM, MOCK_ASSETS, } from "./shared.js";
 import { fullAnalysis, normaliseTLS, pqcReadinessScore, } from "./cipherAnalysis.js";
-const API = "https://r3bel-production.up.railway.app";
+// ── API Base: VITE_API_BASE env var → Docker/airgap → cloud fallback ──────────
+const API = (typeof import.meta !== "undefined" && import.meta.env?.VITE_API_BASE) ||
+    "https://r3bel-production.up.railway.app";
+// ── Cache config ──────────────────────────────────────────────────────────────
+const CACHE_TTL_MS = 12 * 60 * 60 * 1000; // 12 hours
+const CACHE_KEY_CBOM = "rebel_cache_cbom";
+const CACHE_KEY_ASSETS = "rebel_cache_assets";
+function cacheGet(key) {
+    try {
+        const raw = localStorage.getItem(key);
+        if (!raw)
+            return null;
+        const entry = JSON.parse(raw);
+        if (Date.now() - entry.ts > CACHE_TTL_MS) {
+            localStorage.removeItem(key);
+            return null;
+        }
+        return entry.data;
+    }
+    catch {
+        return null;
+    }
+}
+function cacheSet(key, data) {
+    try {
+        localStorage.setItem(key, JSON.stringify({ ts: Date.now(), data }));
+    }
+    catch { }
+}
+function cacheClear() {
+    localStorage.removeItem(CACHE_KEY_CBOM);
+    localStorage.removeItem(CACHE_KEY_ASSETS);
+}
+function cacheAge(key) {
+    try {
+        const raw = localStorage.getItem(key);
+        if (!raw)
+            return null;
+        const entry = JSON.parse(raw);
+        const mins = Math.round((Date.now() - entry.ts) / 60000);
+        if (mins < 60)
+            return `${mins}m ago`;
+        return `${Math.round(mins / 60)}h ago`;
+    }
+    catch {
+        return null;
+    }
+}
+// ── Light Theme Palette ───────────────────────────────────────────────────────
+const L = {
+    pageBg: "#f5f7fa",
+    panelBg: "#ffffff",
+    panelBorder: "#e2e8f0",
+    rowHover: "rgba(59,130,246,0.04)",
+    subtleBg: "#f8fafc",
+    insetBg: "#f1f5f9",
+    text1: "#0f172a",
+    text2: "#334155",
+    text3: "#64748b",
+    text4: "#94a3b8",
+    blue: "#1d4ed8",
+    cyan: "#0284c7",
+    green: "#16a34a",
+    yellow: "#b45309",
+    orange: "#c2410c",
+    red: "#dc2626",
+    border: "#e2e8f0",
+    borderLight: "#f1f5f9",
+};
+const LS = {
+    page: {
+        background: L.pageBg,
+        minHeight: "100vh",
+        padding: "20px 16px",
+        display: "flex",
+        flexDirection: "column",
+        gap: 12,
+        fontFamily: "'DM Sans', system-ui, sans-serif",
+        color: L.text1,
+    },
+    panel: {
+        background: L.panelBg,
+        border: `1px solid ${L.panelBorder}`,
+        borderRadius: 8,
+        boxShadow: "0 1px 4px rgba(0,0,0,0.06)",
+    },
+    input: {
+        background: L.insetBg,
+        border: `1px solid ${L.border}`,
+        borderRadius: 5,
+        color: L.text1,
+        padding: "7px 10px",
+        fontSize: 12,
+        outline: "none",
+    },
+    btn: {
+        background: L.subtleBg,
+        border: `1px solid ${L.border}`,
+        borderRadius: 4,
+        color: L.text2,
+        padding: "5px 11px",
+        cursor: "pointer",
+        fontSize: 11,
+        fontWeight: 600,
+        letterSpacing: ".06em",
+    },
+};
+// ── INR Formatter ─────────────────────────────────────────────────────────────
+const INR_RATE = 83;
+function toINR(usd) { return Math.round(usd * INR_RATE); }
+function fmtINR(usd) {
+    const inr = toINR(usd);
+    if (inr >= 10000000)
+        return `₹${(inr / 10000000).toFixed(2)}Cr`;
+    if (inr >= 100000)
+        return `₹${(inr / 100000).toFixed(1)}L`;
+    return `₹${inr.toLocaleString("en-IN")}`;
+}
+function fmtINRFull(usd) {
+    return `₹${toINR(usd).toLocaleString("en-IN")}`;
+}
 const EFFORT = {
     "Web App": 2, "Web Apps": 2,
     "API": 3, "APIs": 3,
     "Server": 5, "Servers": 5,
     "LB": 1, "Other": 3,
 };
-const DEV_RATE = 800;
+const DEV_RATE_USD = 800;
 function normaliseDomain(raw) {
     return raw.trim().toLowerCase()
         .replace(/^https?:\/\//, "").replace(/^www\./, "").replace(/\/.*$/, "");
@@ -67,34 +187,93 @@ function useBreakpoint() {
     useEffect(() => { const h = () => setBp(get()); window.addEventListener("resize", h); return () => window.removeEventListener("resize", h); }, []);
     return bp;
 }
+// ── Skeleton Components ───────────────────────────────────────────────────────
+function Shimmer({ w = "100%", h = 16, radius = 4, style = {} }) {
+    return (_jsx("div", { style: {
+            width: w, height: h, borderRadius: radius,
+            background: "linear-gradient(90deg, #e2e8f0 25%, #f1f5f9 50%, #e2e8f0 75%)",
+            backgroundSize: "200% 100%",
+            animation: "shimmer 1.4s ease infinite",
+            flexShrink: 0,
+            ...style,
+        } }));
+}
+function SkeletonMetricCard() {
+    return (_jsxs("div", { style: { background: L.panelBg, border: `1px solid ${L.panelBorder}`, borderRadius: 8, padding: "14px 16px", boxShadow: "0 1px 3px rgba(0,0,0,0.05)" }, children: [_jsx(Shimmer, { w: "55%", h: 8, style: { marginBottom: 10 } }), _jsx(Shimmer, { w: "70%", h: 26, style: { marginBottom: 8 } }), _jsx(Shimmer, { w: "45%", h: 8 })] }));
+}
+function SkeletonGaugePanel() {
+    return (_jsxs("div", { style: { ...LS.panel }, children: [_jsx("div", { style: { padding: "10px 14px", borderBottom: `1px solid ${L.borderLight}`, background: L.subtleBg, borderRadius: "8px 8px 0 0" }, children: _jsx(Shimmer, { w: 160, h: 9 }) }), _jsxs("div", { style: { padding: 14, display: "flex", flexDirection: "column", alignItems: "center", gap: 16 }, children: [_jsxs("div", { style: { width: 200, height: 120, display: "flex", alignItems: "flex-end", justifyContent: "center", position: "relative" }, children: [_jsx("div", { style: {
+                                    width: 180, height: 90,
+                                    borderRadius: "90px 90px 0 0",
+                                    border: "14px solid #e2e8f0",
+                                    borderBottom: "none",
+                                    background: "transparent",
+                                    animation: "shimmer 1.4s ease infinite",
+                                } }), _jsxs("div", { style: { position: "absolute", bottom: 0, textAlign: "center" }, children: [_jsx(Shimmer, { w: 60, h: 32, radius: 6, style: { margin: "0 auto 6px" } }), _jsx(Shimmer, { w: 80, h: 9, radius: 4, style: { margin: "0 auto" } })] })] }), [100, 80, 65, 90, 40].map((w, i) => (_jsxs("div", { style: { width: "100%" }, children: [_jsxs("div", { style: { display: "flex", justifyContent: "space-between", marginBottom: 4 }, children: [_jsx(Shimmer, { w: `${w}%`, h: 9 }), _jsx(Shimmer, { w: 30, h: 9, style: { marginLeft: 8 } })] }), _jsx(Shimmer, { w: "100%", h: 4, radius: 2 })] }, i)))] })] }));
+}
+function SkeletonTableRows({ count = 6 }) {
+    return (_jsx(_Fragment, { children: Array.from({ length: count }).map((_, i) => (_jsxs("tr", { style: { borderBottom: `1px solid ${L.borderLight}`, background: i % 2 === 0 ? L.panelBg : L.subtleBg }, children: [_jsx("td", { style: { padding: "10px 8px" }, children: _jsx(Shimmer, { w: 18, h: 9 }) }), _jsx("td", { style: { padding: "10px 8px" }, children: _jsx(Shimmer, { w: 140, h: 10 }) }), _jsx("td", { style: { padding: "10px 8px" }, children: _jsx(Shimmer, { w: 60, h: 18, radius: 3 }) }), _jsx("td", { style: { padding: "10px 8px" }, children: _jsx(Shimmer, { w: 55, h: 18, radius: 3 }) }), _jsx("td", { style: { padding: "10px 8px" }, children: _jsx(Shimmer, { w: 50, h: 10 }) }), _jsx("td", { style: { padding: "10px 8px" }, children: _jsx(Shimmer, { w: 120, h: 9 }) }), _jsx("td", { style: { padding: "10px 8px" }, children: _jsx(Shimmer, { w: 45, h: 10 }) }), _jsx("td", { style: { padding: "10px 8px" }, children: _jsx(Shimmer, { w: 70, h: 9 }) }), _jsx("td", { style: { padding: "10px 8px", textAlign: "center" }, children: _jsx(Shimmer, { w: 52, h: 18, radius: 3, style: { margin: "0 auto" } }) }), _jsx("td", { style: { padding: "10px 8px" }, children: _jsx(Shimmer, { w: 30, h: 10 }) }), _jsx("td", { style: { padding: "10px 8px" }, children: _jsx(Shimmer, { w: 65, h: 10 }) }), _jsx("td", { style: { padding: "10px 8px", textAlign: "center" }, children: _jsx(Shimmer, { w: 12, h: 12, radius: 6, style: { margin: "0 auto" } }) }), _jsx("td", { style: { padding: "10px 8px", textAlign: "center" }, children: _jsx(Shimmer, { w: 12, h: 12, radius: 6, style: { margin: "0 auto" } }) })] }, i))) }));
+}
+function SkeletonRoadmapCards({ count = 5 }) {
+    return (_jsx(_Fragment, { children: Array.from({ length: count }).map((_, i) => (_jsxs("div", { style: { borderBottom: `1px solid ${L.borderLight}`, padding: "12px 14px" }, children: [_jsxs("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }, children: [_jsxs("div", { style: { display: "flex", gap: 8, alignItems: "center" }, children: [_jsx(Shimmer, { w: 24, h: 9 }), _jsx(Shimmer, { w: 160, h: 11 })] }), _jsxs("div", { style: { display: "flex", gap: 6 }, children: [_jsx(Shimmer, { w: 52, h: 18, radius: 3 }), _jsx(Shimmer, { w: 52, h: 18, radius: 3 })] })] }), _jsxs("div", { style: { display: "flex", gap: 10 }, children: [_jsx(Shimmer, { w: 50, h: 9 }), _jsx(Shimmer, { w: 30, h: 9 }), _jsx(Shimmer, { w: 55, h: 9 }), _jsx(Shimmer, { w: 40, h: 9 })] })] }, i))) }));
+}
+// ── Cache status badge ────────────────────────────────────────────────────────
+function CacheBadge({ age, onRefresh }) {
+    if (!age)
+        return null;
+    return (_jsxs("div", { style: { display: "flex", alignItems: "center", gap: 8 }, children: [_jsxs("span", { style: {
+                    fontSize: 8, fontWeight: 600, color: L.text3,
+                    background: L.insetBg, border: `1px solid ${L.border}`,
+                    borderRadius: 3, padding: "2px 7px", letterSpacing: ".06em",
+                }, children: ["CACHED \u00B7 ", age] }), _jsx("button", { onClick: onRefresh, title: "Force re-fetch from API", style: {
+                    ...LS.btn, fontSize: 9, padding: "3px 8px",
+                    color: L.blue, borderColor: `${L.blue}40`,
+                    background: `${L.blue}0d`,
+                }, children: "\u21BA REFRESH" })] }));
+}
+// ── Light Panel Components ────────────────────────────────────────────────────
+function LPanel({ children, style = {} }) {
+    return _jsx("div", { style: { ...LS.panel, ...style }, children: children });
+}
+function LPanelHeader({ left, right }) {
+    return (_jsxs("div", { style: {
+            display: "flex", justifyContent: "space-between", alignItems: "center",
+            padding: "10px 14px", borderBottom: `1px solid ${L.borderLight}`,
+            background: L.subtleBg, borderRadius: "8px 8px 0 0",
+        }, children: [_jsx("span", { style: { fontSize: 9, fontWeight: 700, color: L.text3, letterSpacing: ".14em", textTransform: "uppercase" }, children: left }), right] }));
+}
+function LMetricCard({ label, value, sub, color }) {
+    return (_jsxs("div", { style: {
+            background: L.panelBg, border: `1px solid ${L.panelBorder}`, borderRadius: 8,
+            padding: "14px 16px", boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
+        }, children: [_jsx("div", { style: { fontSize: 8, color: L.text4, textTransform: "uppercase", letterSpacing: ".12em", marginBottom: 6 }, children: label }), _jsx("div", { style: { fontSize: 22, fontWeight: 800, color, lineHeight: 1 }, children: value }), _jsx("div", { style: { fontSize: 9, color: L.text3, marginTop: 5 }, children: sub })] }));
+}
 // ── PDF Export ────────────────────────────────────────────────────────────────
-function exportAuditPDF(enriched, migrationScore, pqcReady, total, totalDays, calDays, totalCost, teamSize, devRate, dateStr, clientName, clientDomain, milestoneData) {
+function exportAuditPDF(enriched, migrationScore, pqcReady, total, totalDays, calDays, totalCostUSD, teamSize, devRateUSD, dateStr, clientName, clientDomain, milestoneData) {
     const now = new Date();
-    const timestamp = now.toLocaleString("en-US", { year: "numeric", month: "long", day: "numeric", hour: "2-digit", minute: "2-digit", timeZoneName: "short" });
+    const timestamp = now.toLocaleString("en-IN", { year: "numeric", month: "long", day: "numeric", hour: "2-digit", minute: "2-digit", timeZoneName: "short" });
     const scanDate = now.toISOString().split("T")[0];
     const reportId = `REBEL-${scanDate.replace(/-/g, "")}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
-    const scoreColor = migrationScore >= 70 ? "#16a34a" : migrationScore >= 40 ? "#d97706" : "#dc2626";
-    const scoreLabel = migrationScore >= 70 ? "COMPLIANT" : migrationScore >= 40 ? "AT RISK" : "CRITICAL";
     const displayName = clientName.trim() || (clientDomain ? normaliseDomain(clientDomain) : "All Assets");
-    // Gauge SVG
-    const pct = migrationScore / 100, gr = 54, gcx = 70, gcy = 76;
+    const pct = migrationScore / 100, gr = 54, gcx = 70, gcy = 75;
     const gx1 = gcx + gr * Math.cos(Math.PI), gy1 = gcy + gr * Math.sin(Math.PI);
-    const gx2 = gcx + gr * Math.cos(Math.PI + Math.PI * pct), gy2 = gcy + gr * Math.sin(Math.PI + Math.PI * pct);
+    const gx2 = gcx + gr * Math.cos(Math.PI + Math.PI * pct);
+    const gy2 = gcy + gr * Math.sin(Math.PI + Math.PI * pct);
     const glf = pct > 0.5 ? 1 : 0;
-    const gaugeSVG = `<svg width="140" height="84" viewBox="0 0 140 84" xmlns="http://www.w3.org/2000/svg">
+    const sc = migrationScore >= 70 ? "#16a34a" : migrationScore >= 40 ? "#d97706" : "#dc2626";
+    const sl = migrationScore >= 70 ? "COMPLIANT" : migrationScore >= 40 ? "AT RISK" : "CRITICAL";
+    const gaugeSVG = `<svg width="140" height="82" viewBox="0 0 140 82" xmlns="http://www.w3.org/2000/svg">
     <path d="M ${gcx - gr} ${gcy} A ${gr} ${gr} 0 0 1 ${gcx + gr} ${gcy}" fill="none" stroke="#e5e7eb" stroke-width="10" stroke-linecap="round"/>
-    <path d="M ${gx1.toFixed(2)} ${gy1.toFixed(2)} A ${gr} ${gr} 0 ${glf} 1 ${gx2.toFixed(2)} ${gy2.toFixed(2)}" fill="none" stroke="${scoreColor}" stroke-width="10" stroke-linecap="round"/>
-    <text x="${gcx}" y="${gcy - 5}" text-anchor="middle" font-family="Arial" font-size="22" font-weight="bold" fill="${scoreColor}">${migrationScore}</text>
-    <text x="${gcx}" y="${gcy + 13}" text-anchor="middle" font-family="Arial" font-size="7" fill="#6b7280" letter-spacing="1">${scoreLabel}</text>
+    <path d="M ${gx1.toFixed(2)} ${gy1.toFixed(2)} A ${gr} ${gr} 0 ${glf} 1 ${gx2.toFixed(2)} ${gy2.toFixed(2)}" fill="none" stroke="${sc}" stroke-width="10" stroke-linecap="round"/>
+    <text x="${gcx}" y="${gcy - 4}" text-anchor="middle" font-family="Arial" font-size="22" font-weight="bold" fill="${sc}">${migrationScore}</text>
+    <text x="${gcx}" y="${gcy + 13}" text-anchor="middle" font-family="Arial" font-size="7" fill="#6b7280" letter-spacing="1">${sl}</text>
   </svg>`;
-    // Score distribution — milestone pass/fail for PDF
     const scoreDist = milestoneData.map(m => {
         const color = m.done ? "#16a34a" : m.pct > 50 ? "#eab308" : "#ef4444";
         return `<div style="margin-bottom:9px;">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;">
         <span style="display:flex;align-items:center;gap:6px;font-size:9px;color:#374151;">
-          <span style="font-size:10px;color:${m.done ? "#16a34a" : "#ef4444"};">${m.done ? "✓" : "✗"}</span>
-          ${m.label}
+          <span style="font-size:10px;color:${m.done ? "#16a34a" : "#ef4444"};">${m.done ? "✓" : "✗"}</span>${m.label}
         </span>
         <span style="font-size:9px;color:${color};font-weight:700;">${m.pct}%</span>
       </div>
@@ -103,7 +282,6 @@ function exportAuditPDF(enriched, migrationScore, pqcReady, total, totalDays, ca
       </div>
     </div>`;
     }).join("");
-    // Asset table
     const assetRows = enriched.map((a, i) => {
         const rc = a.risk === "Critical" ? "#dc2626" : a.risk === "High" ? "#ea580c" : a.risk === "Medium" ? "#d97706" : "#16a34a";
         const kc = a.keylen?.startsWith("1024") ? "#dc2626" : a.keylen?.startsWith("2048") ? "#d97706" : "#16a34a";
@@ -112,7 +290,6 @@ function exportAuditPDF(enriched, migrationScore, pqcReady, total, totalDays, ca
         const ps = a.pqcScore;
         const psc = ps?.active ? "#16a34a" : ps?.color ?? "#ef4444";
         const psl = ps?.active ? "ACTIVE" : ps ? `${ps.score}/100` : "—";
-        // criterion dots
         const dots = ps ? Object.values(ps.criteria).map((c) => `<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${c.pass ? "#16a34a" : c.pts > 0 ? "#eab308" : "#ef4444"};margin-right:2px;" title="${c.label}: ${c.pts}/${c.max}"></span>`).join("") : "";
         return `<tr style="background:${bg};">
       <td style="padding:5px 7px;font-size:8px;color:#9ca3af;text-align:center;">${i + 1}</td>
@@ -123,15 +300,11 @@ function exportAuditPDF(enriched, migrationScore, pqcReady, total, totalDays, ca
       <td style="padding:5px 7px;font-size:7px;color:#6b7280;max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${a.cipher ?? "—"}</td>
       <td style="padding:5px 7px;text-align:center;font-size:8px;color:${tc};font-weight:500;">TLS ${a.tls ?? "—"}</td>
       <td style="padding:5px 7px;font-size:8px;color:#6b7280;">${a.ca ?? "—"}</td>
-      <td style="padding:5px 7px;text-align:center;">
-        <div style="font-size:9px;font-weight:700;color:${psc};">${psl}</div>
-        <div style="margin-top:3px;">${dots}</div>
-      </td>
+      <td style="padding:5px 7px;text-align:center;"><div style="font-size:9px;font-weight:700;color:${psc};">${psl}</div><div style="margin-top:3px;">${dots}</div></td>
       <td style="padding:5px 7px;font-size:8px;color:#0891b2;text-align:center;">${a.days}d</td>
-      <td style="padding:5px 7px;font-size:8px;color:#ea580c;text-align:right;font-weight:600;">$${a.cost.toLocaleString()}</td>
+      <td style="padding:5px 7px;font-size:8px;color:#ea580c;text-align:right;font-weight:600;">${fmtINRFull(a.cost)}</td>
     </tr>`;
     }).join("");
-    // Criteria legend
     const criteriaLegend = [
         { label: "Cert RSA-4096 / EC P-384", max: 70, color: "#1e40af" },
         { label: "No wildcard certificate", max: 20, color: "#0891b2" },
@@ -139,12 +312,10 @@ function exportAuditPDF(enriched, migrationScore, pqcReady, total, totalDays, ca
         { label: "X25519 or P-384 KX", max: 2, color: "#d97706" },
         { label: "TLS 1.3 (hygiene)", max: 0, color: "#9ca3af" },
         { label: "No CBC mode (hygiene)", max: 0, color: "#9ca3af" },
-    ].map(c => `
-    <div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid #f3f4f6;font-size:9px;">
-      <span style="color:#374151;">${c.label}</span>
-      <span style="color:${c.color};font-weight:700;min-width:30px;text-align:right;">${c.max > 0 ? `${c.max}pts` : "info"}</span>
-    </div>`).join("");
-    // DORA
+    ].map(c => `<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid #f3f4f6;font-size:9px;">
+    <span style="color:#374151;">${c.label}</span>
+    <span style="color:${c.color};font-weight:700;min-width:30px;text-align:right;">${c.max > 0 ? `${c.max}pts` : "info"}</span>
+  </div>`).join("");
     const doraRows = [
         { art: "Art. 9.2", title: "ICT Asset Register", desc: "Maintain an up-to-date register of all ICT assets including cryptographic configurations.", status: total > 0 ? "COVERED" : "PENDING" },
         { art: "Art. 9.4", title: "Cryptographic Controls", desc: "Implement cryptographic controls protecting data in transit and at rest.", status: enriched.filter(a => a.status !== "weak" && a.status !== "WEAK").length > 0 ? "PARTIAL" : "PENDING" },
@@ -159,204 +330,50 @@ function exportAuditPDF(enriched, migrationScore, pqcReady, total, totalDays, ca
       <td style="padding:7px 10px;text-align:center;"><span style="font-size:8px;font-weight:700;color:${sc};background:${sc}18;padding:2px 8px;border-radius:3px;white-space:nowrap;">${d.status}</span></td>
     </tr>`;
     }).join("");
-    // Remediation
     const remCards = [
-        { title: "Upgrade Certificate Key", color: "#dc2626", bg: "#fef2f2", border: "#fecaca",
-            count: enriched.filter(a => !(a.pqcScore?.criteria?.certKey4096?.pass)).length,
-            action: "Deploy RSA-4096 or EC P-384 certificates.",
-            detail: "Worth 70/100 pts — the primary bank infrastructure gate.",
-            items: enriched.filter(a => !(a.pqcScore?.criteria?.certKey4096?.pass)).map(a => `${a.app} (${a.keylen ?? "?"})`).slice(0, 5) },
-        { title: "Remove Wildcard Certs", color: "#ea580c", bg: "#fff7ed", border: "#fed7aa",
-            count: enriched.filter(a => a.is_wildcard).length,
-            action: "Replace wildcards with dedicated per-service certificates.",
-            detail: "Worth 20/100 pts — bank services must not share certificates.",
-            items: enriched.filter(a => a.is_wildcard).map(a => a.app).slice(0, 5) },
-        { title: "Enable Kyber Hybrid", color: "#0891b2", bg: "#f0f9ff", border: "#bae6fd",
-            count: enriched.filter(a => !a.pqc).length,
-            action: "Implement CRYSTALS-Kyber (FIPS 203) hybrid key exchange.",
-            detail: "Deploy X25519+Kyber768 — the only path to ACTIVE status.",
-            items: enriched.filter(a => !a.pqc).map(a => a.app).slice(0, 5) },
-    ].map(s => `
-    <div style="border:1px solid ${s.border};border-radius:6px;padding:14px;background:${s.bg};">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-        <span style="font-size:10px;font-weight:700;color:${s.color};">${s.title}</span>
-        <span style="font-size:18px;font-weight:700;color:${s.color};">${s.count}</span>
-      </div>
-      <div style="font-size:9px;color:#374151;font-weight:500;margin-bottom:3px;">${s.action}</div>
-      <div style="font-size:8px;color:#6b7280;margin-bottom:10px;line-height:1.5;">${s.detail}</div>
-      ${s.items.map(app => `<div style="font-size:8px;color:#374151;padding:3px 0;border-top:1px solid ${s.border};">▸ ${app}</div>`).join("")}
-      ${s.items.length === 0 ? `<div style="font-size:8px;color:#16a34a;font-weight:500;">✓ All clear</div>` : ""}
-    </div>`).join("");
-    const html = `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8"/>
+        { title: "Upgrade Certificate Key", color: "#dc2626", bg: "#fef2f2", border: "#fecaca", count: enriched.filter(a => !(a.pqcScore?.criteria?.certKey4096?.pass)).length, action: "Deploy RSA-4096 or EC P-384 certificates.", detail: "Worth 70/100 pts — the primary bank infrastructure gate.", items: enriched.filter(a => !(a.pqcScore?.criteria?.certKey4096?.pass)).map(a => `${a.app} (${a.keylen ?? "?"})`).slice(0, 5) },
+        { title: "Remove Wildcard Certs", color: "#ea580c", bg: "#fff7ed", border: "#fed7aa", count: enriched.filter(a => a.is_wildcard).length, action: "Replace wildcards with dedicated per-service certificates.", detail: "Worth 20/100 pts — bank services must not share certificates.", items: enriched.filter(a => a.is_wildcard).map(a => a.app).slice(0, 5) },
+        { title: "Enable Kyber Hybrid", color: "#0891b2", bg: "#f0f9ff", border: "#bae6fd", count: enriched.filter(a => !a.pqc).length, action: "Implement CRYSTALS-Kyber (FIPS 203) hybrid key exchange.", detail: "Deploy X25519+Kyber768 — the only path to ACTIVE status.", items: enriched.filter(a => !a.pqc).map(a => a.app).slice(0, 5) },
+    ].map(s => `<div style="border:1px solid ${s.border};border-radius:6px;padding:14px;background:${s.bg};">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+      <span style="font-size:10px;font-weight:700;color:${s.color};">${s.title}</span>
+      <span style="font-size:18px;font-weight:700;color:${s.color};">${s.count}</span>
+    </div>
+    <div style="font-size:9px;color:#374151;font-weight:500;margin-bottom:3px;">${s.action}</div>
+    <div style="font-size:8px;color:#6b7280;margin-bottom:10px;line-height:1.5;">${s.detail}</div>
+    ${s.items.map(app => `<div style="font-size:8px;color:#374151;padding:3px 0;border-top:1px solid ${s.border};">▸ ${app}</div>`).join("")}
+    ${s.items.length === 0 ? `<div style="font-size:8px;color:#16a34a;font-weight:500;">✓ All clear</div>` : ""}
+  </div>`).join("");
+    const html = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"/>
   <title>REBEL — PQC Audit — ${displayName} — ${scanDate}</title>
-  <style>
-    *{box-sizing:border-box;margin:0;padding:0;}
-    body{font-family:Arial,Helvetica,sans-serif;color:#111827;background:#fff;font-size:11px;}
-    @media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact;}.no-print{display:none!important;}.page-break{page-break-before:always;}}
-    .page{max-width:980px;margin:0 auto;padding:32px 40px;}
-    h2{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#374151;margin-bottom:12px;}
-    table{width:100%;border-collapse:collapse;}
-    th{background:#f3f4f6;padding:6px 7px;font-size:8px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#6b7280;text-align:left;border-bottom:2px solid #e5e7eb;}
-    hr{border:none;border-top:1px solid #e5e7eb;margin:22px 0;}
-    .section{margin-bottom:26px;}
-    .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px;}
-    .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;}
-    .card{border:1px solid #e5e7eb;border-radius:6px;padding:14px 16px;}
-    .lbl{font-size:8px;color:#9ca3af;text-transform:uppercase;letter-spacing:.1em;margin-bottom:5px;}
-    .val{font-size:20px;font-weight:700;line-height:1;}
-    .sub{font-size:8px;color:#6b7280;margin-top:4px;}
-    .print-btn{position:fixed;top:20px;right:20px;background:#1e40af;color:#fff;border:none;padding:10px 22px;border-radius:5px;cursor:pointer;font-size:13px;font-weight:600;z-index:99;box-shadow:0 2px 8px rgba(30,64,175,.35);}
-    .confidential{background:#fef9c3;border:1px solid #fde047;border-radius:4px;padding:6px 12px;font-size:8px;color:#854d0e;margin-bottom:20px;}
-    .footer{font-size:8px;color:#d1d5db;text-align:center;margin-top:28px;padding-top:14px;border-top:1px solid #f3f4f6;line-height:1.7;}
-  </style>
-</head>
-<body>
-<button class="print-btn no-print" onclick="window.print()">⬇ Save as PDF</button>
-<div class="page">
-
-  <!-- HEADER -->
+  <style>*{box-sizing:border-box;margin:0;padding:0;}body{font-family:Arial,Helvetica,sans-serif;color:#111827;background:#fff;font-size:11px;}@media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact;}.no-print{display:none!important;}.page-break{page-break-before:always;}}.page{max-width:980px;margin:0 auto;padding:32px 40px;}h2{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#374151;margin-bottom:12px;}table{width:100%;border-collapse:collapse;}th{background:#f3f4f6;padding:6px 7px;font-size:8px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#6b7280;text-align:left;border-bottom:2px solid #e5e7eb;}hr{border:none;border-top:1px solid #e5e7eb;margin:22px 0;}.section{margin-bottom:26px;}.grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px;}.grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;}.card{border:1px solid #e5e7eb;border-radius:6px;padding:14px 16px;}.lbl{font-size:8px;color:#9ca3af;text-transform:uppercase;letter-spacing:.1em;margin-bottom:5px;}.val{font-size:20px;font-weight:700;line-height:1;}.sub{font-size:8px;color:#6b7280;margin-top:4px;}.print-btn{position:fixed;top:20px;right:20px;background:#1e40af;color:#fff;border:none;padding:10px 22px;border-radius:5px;cursor:pointer;font-size:13px;font-weight:600;z-index:99;box-shadow:0 2px 8px rgba(30,64,175,.35);}.confidential{background:#fef9c3;border:1px solid #fde047;border-radius:4px;padding:6px 12px;font-size:8px;color:#854d0e;margin-bottom:20px;}.footer{font-size:8px;color:#d1d5db;text-align:center;margin-top:28px;padding-top:14px;border-top:1px solid #f3f4f6;line-height:1.7;}</style>
+  </head><body>
+  <button class="print-btn no-print" onclick="window.print()">⬇ Save as PDF</button>
+  <div class="page">
   <div style="display:flex;justify-content:space-between;align-items:flex-start;padding-bottom:20px;border-bottom:3px solid #1e40af;margin-bottom:22px;">
     <div style="display:flex;align-items:center;gap:10px;">
-      <svg width="32" height="32" viewBox="0 0 28 28" xmlns="http://www.w3.org/2000/svg">
-        <polygon points="14,2 26,8 26,20 14,26 2,20 2,8" fill="none" stroke="#1e40af" stroke-width="1.8"/>
-        <polygon points="14,7 21,11 21,17 14,21 7,17 7,11" fill="#dbeafe" stroke="#3b82f6" stroke-width="1"/>
-        <circle cx="14" cy="14" r="3" fill="#1e40af"/>
-      </svg>
-      <div>
-        <div style="font-size:18px;font-weight:900;letter-spacing:.2em;color:#111827;">REBEL</div>
-        <div style="font-size:7px;color:#9ca3af;letter-spacing:.14em;margin-top:1px;">THREAT INTELLIGENCE PLATFORM</div>
-      </div>
+      <svg width="32" height="32" viewBox="0 0 28 28" xmlns="http://www.w3.org/2000/svg"><polygon points="14,2 26,8 26,20 14,26 2,20 2,8" fill="none" stroke="#1e40af" stroke-width="1.8"/><polygon points="14,7 21,11 21,17 14,21 7,17 7,11" fill="#dbeafe" stroke="#3b82f6" stroke-width="1"/><circle cx="14" cy="14" r="3" fill="#1e40af"/></svg>
+      <div><div style="font-size:18px;font-weight:900;letter-spacing:.2em;color:#111827;">REBEL</div><div style="font-size:7px;color:#9ca3af;letter-spacing:.14em;margin-top:1px;">THREAT INTELLIGENCE PLATFORM</div></div>
     </div>
-    <div style="text-align:right;">
-      <div style="font-size:8px;color:#9ca3af;text-transform:uppercase;letter-spacing:.1em;margin-bottom:4px;">Prepared for</div>
-      <div style="font-size:20px;font-weight:800;color:#111827;">${displayName}</div>
-      ${clientDomain ? `<div style="font-size:9px;color:#6b7280;margin-top:3px;">${normaliseDomain(clientDomain)}</div>` : ""}
-    </div>
+    <div style="text-align:right;"><div style="font-size:8px;color:#9ca3af;text-transform:uppercase;letter-spacing:.1em;margin-bottom:4px;">Prepared for</div><div style="font-size:20px;font-weight:800;color:#111827;">${displayName}</div>${clientDomain ? `<div style="font-size:9px;color:#6b7280;margin-top:3px;">${normaliseDomain(clientDomain)}</div>` : ""}</div>
   </div>
-
   <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:22px;">
-    <div>
-      <div style="font-size:22px;font-weight:700;color:#111827;line-height:1.25;">Post-Quantum Cryptography<br/>Audit Report</div>
-      <div style="font-size:9px;color:#6b7280;margin-top:7px;line-height:1.9;">DORA Art. 9 · NIST FIPS 203/204/205 · PCI-DSS 4.0 · SWIFT CSP</div>
-    </div>
-    <div style="text-align:right;min-width:200px;">
-      <div style="font-size:8px;color:#9ca3af;text-transform:uppercase;letter-spacing:.08em;">Generated</div>
-      <div style="font-size:9px;color:#374151;font-weight:500;margin-top:2px;">${timestamp}</div>
-      <div style="font-size:8px;color:#9ca3af;margin-top:8px;text-transform:uppercase;letter-spacing:.08em;">Report ID</div>
-      <div style="font-size:9px;color:#374151;font-family:monospace;margin-top:2px;">${reportId}</div>
-      ${clientDomain ? `<div style="font-size:8px;color:#9ca3af;margin-top:8px;text-transform:uppercase;letter-spacing:.08em;">Scope</div><div style="font-size:9px;color:#1e40af;font-weight:500;margin-top:2px;">*.${normaliseDomain(clientDomain)}</div>` : ""}
-    </div>
+    <div><div style="font-size:22px;font-weight:700;color:#111827;line-height:1.25;">Post-Quantum Cryptography<br/>Audit Report</div><div style="font-size:9px;color:#6b7280;margin-top:7px;line-height:1.9;">DORA Art. 9 · NIST FIPS 203/204/205 · PCI-DSS 4.0 · SWIFT CSP</div></div>
+    <div style="text-align:right;min-width:200px;"><div style="font-size:8px;color:#9ca3af;text-transform:uppercase;letter-spacing:.08em;">Generated</div><div style="font-size:9px;color:#374151;font-weight:500;margin-top:2px;">${timestamp}</div><div style="font-size:8px;color:#9ca3af;margin-top:8px;text-transform:uppercase;letter-spacing:.08em;">Report ID</div><div style="font-size:9px;color:#374151;font-family:monospace;margin-top:2px;">${reportId}</div>${clientDomain ? `<div style="font-size:8px;color:#9ca3af;margin-top:8px;text-transform:uppercase;letter-spacing:.08em;">Scope</div><div style="font-size:9px;color:#1e40af;font-weight:500;margin-top:2px;">*.${normaliseDomain(clientDomain)}</div>` : ""}</div>
   </div>
-  <div class="confidential">⚠ CONFIDENTIAL — Sensitive cryptographic posture data. Not for external distribution.</div>
-  <hr/>
-
-  <!-- EXECUTIVE SUMMARY -->
-  <div class="section">
-    <h2>Executive Summary</h2>
-    <div class="grid2" style="align-items:start;">
-      <div class="card" style="display:flex;flex-direction:column;align-items:center;padding:22px;">
-        ${gaugeSVG}
-        <div style="margin-top:12px;width:100%;">
-          <div style="font-size:9px;color:#374151;font-weight:600;text-align:center;margin-bottom:8px;">${total} Applications Assessed · PQC Migration Progress</div>
-          <div style="font-size:8px;color:#6b7280;line-height:1.6;background:#f9fafb;border-radius:4px;padding:8px;border:1px solid #e5e7eb;">
-            Score = 5 milestones × 20pts each.<br/>
-            All certs RSA-4096/EC P-384 · Zero wildcards · AES-256 everywhere · TLS 1.2 eliminated · Kyber deployed.<br/>
-            A bank that has done no PQC work scores 0–20. Full Kyber deployment = 100.
-          </div>
-        </div>
-      </div>
-      <div style="display:flex;flex-direction:column;gap:10px;">
-        <div class="grid2">
-          <div class="card"><div class="lbl">Assessed</div><div class="val" style="color:#1e40af;">${total}</div><div class="sub">In scope</div></div>
-          <div class="card"><div class="lbl">Need Action</div><div class="val" style="color:#dc2626;">${enriched.length}</div><div class="sub">Weak assets</div></div>
-        </div>
-        <div class="grid2">
-          <div class="card"><div class="lbl">Est. Timeline</div><div class="val" style="color:#0891b2;">${calDays}d</div><div class="sub">${teamSize} dev · ${totalDays} dev-days</div></div>
-          <div class="card"><div class="lbl">Est. Cost</div><div class="val" style="color:#ea580c;">$${(totalCost / 1000).toFixed(1)}k</div><div class="sub">At $${devRate}/dev/day</div></div>
-        </div>
-        <div class="card" style="background:#f8fafc;"><div class="lbl">Projected Completion</div><div style="font-size:16px;font-weight:700;color:#0891b2;margin-top:4px;">${dateStr}</div><div class="sub">${teamSize}-dev team</div></div>
-      </div>
-    </div>
-  </div>
-
-  <!-- SCORE DISTRIBUTION -->
-  <div class="section">
-    <h2>PQC Migration Progress — 5 Milestones</h2>
-    <div class="grid2">
-      <div class="card">${scoreDist}</div>
-      <div class="card">
-        <div style="font-size:10px;color:#374151;font-weight:600;margin-bottom:10px;">Scoring Criteria (per application)</div>
-        ${criteriaLegend}
-        <div style="margin-top:8px;font-size:8px;color:#9ca3af;line-height:1.6;">
-          Cert key strength dominates the score (70pts) — the primary differentiator between public CDN infrastructure and hardened bank assets.
-        </div>
-      </div>
-    </div>
-  </div>
-
+  <div class="confidential">⚠ CONFIDENTIAL — Sensitive cryptographic posture data. Not for external distribution.</div><hr/>
+  <div class="section"><h2>Executive Summary</h2><div class="grid2" style="align-items:start;"><div class="card" style="display:flex;flex-direction:column;align-items:center;padding:22px;">${gaugeSVG}<div style="margin-top:12px;width:100%;"><div style="font-size:9px;color:#374151;font-weight:600;text-align:center;margin-bottom:8px;">${total} Applications Assessed · PQC Migration Progress</div><div style="font-size:8px;color:#6b7280;line-height:1.6;background:#f9fafb;border-radius:4px;padding:8px;border:1px solid #e5e7eb;">Score = 5 milestones × 20pts each.<br/>All certs RSA-4096/EC P-384 · Zero wildcards · AES-256 everywhere · TLS 1.2 eliminated · Kyber deployed.</div></div></div><div style="display:flex;flex-direction:column;gap:10px;"><div class="grid2"><div class="card"><div class="lbl">Assessed</div><div class="val" style="color:#1e40af;">${total}</div><div class="sub">In scope</div></div><div class="card"><div class="lbl">Need Action</div><div class="val" style="color:#dc2626;">${enriched.length}</div><div class="sub">Weak assets</div></div></div><div class="grid2"><div class="card"><div class="lbl">Est. Timeline</div><div class="val" style="color:#0891b2;">${calDays}d</div><div class="sub">${teamSize} dev · ${totalDays} dev-days</div></div><div class="card"><div class="lbl">Est. Cost</div><div class="val" style="color:#ea580c;">${fmtINR(totalCostUSD)}</div><div class="sub">At ${fmtINR(devRateUSD)}/dev/day</div></div></div><div class="card" style="background:#f8fafc;"><div class="lbl">Projected Completion</div><div style="font-size:16px;font-weight:700;color:#0891b2;margin-top:4px;">${dateStr}</div><div class="sub">${teamSize}-dev team</div></div></div></div></div>
+  <div class="section"><h2>PQC Migration Progress — 5 Milestones</h2><div class="grid2"><div class="card">${scoreDist}</div><div class="card"><div style="font-size:10px;color:#374151;font-weight:600;margin-bottom:10px;">Scoring Criteria (per application)</div>${criteriaLegend}</div></div></div>
   <hr class="page-break"/>
-
-  <!-- DORA -->
-  <div class="section">
-    <h2>DORA Regulatory Mapping</h2>
-    <table><thead><tr><th>Article</th><th>Requirement</th><th>Description</th><th>Status</th></tr></thead><tbody>${doraRows}</tbody></table>
-  </div>
-
+  <div class="section"><h2>DORA Regulatory Mapping</h2><table><thead><tr><th>Article</th><th>Requirement</th><th>Description</th><th>Status</th></tr></thead><tbody>${doraRows}</tbody></table></div>
   <hr/>
-
-  <!-- ASSET TABLE -->
-  <div class="section">
-    <h2>Application Cryptographic Inventory — Ranked by Risk Priority</h2>
-    <table>
-      <thead><tr>
-        <th style="width:22px;">#</th><th>Application</th><th>Type</th><th>Risk</th>
-        <th>Key Len</th><th>Cipher Suite</th><th>TLS</th><th>CA</th>
-        <th style="text-align:center;">PQC Score</th><th>Days</th><th>Cost</th>
-      </tr></thead>
-      <tbody>${assetRows}</tbody>
-      <tfoot><tr style="background:#f8fafc;border-top:2px solid #e5e7eb;">
-        <td colspan="9" style="padding:7px 10px;font-size:9px;color:#374151;font-weight:700;">TOTALS</td>
-        <td style="padding:7px 10px;font-size:9px;color:#0891b2;font-weight:700;text-align:center;">${totalDays}d</td>
-        <td style="padding:7px 10px;font-size:9px;color:#ea580c;font-weight:700;text-align:right;">$${totalCost.toLocaleString()}</td>
-      </tr></tfoot>
-    </table>
-    <div style="margin-top:6px;font-size:7px;color:#9ca3af;">
-      Score dots (left→right): Cert key · No wildcard · AES-256 · KX group · TLS 1.3 · No CBC &nbsp;|&nbsp; 🟢 pass · 🟡 partial · 🔴 fail
-    </div>
-  </div>
-
+  <div class="section"><h2>Application Cryptographic Inventory — Ranked by Risk Priority</h2><table><thead><tr><th style="width:22px;">#</th><th>Application</th><th>Type</th><th>Risk</th><th>Key Len</th><th>Cipher Suite</th><th>TLS</th><th>CA</th><th style="text-align:center;">PQC Score</th><th>Days</th><th>Cost (INR)</th></tr></thead><tbody>${assetRows}</tbody><tfoot><tr style="background:#f8fafc;border-top:2px solid #e5e7eb;"><td colspan="9" style="padding:7px 10px;font-size:9px;color:#374151;font-weight:700;">TOTALS</td><td style="padding:7px 10px;font-size:9px;color:#0891b2;font-weight:700;text-align:center;">${totalDays}d</td><td style="padding:7px 10px;font-size:9px;color:#ea580c;font-weight:700;text-align:right;">${fmtINRFull(totalCostUSD)}</td></tr></tfoot></table></div>
   <hr/>
-
-  <!-- REMEDIATION -->
-  <div class="section">
-    <h2>Remediation Actions — Priority Order</h2>
-    <div class="grid3">${remCards}</div>
-  </div>
-
+  <div class="section"><h2>Remediation Actions — Priority Order</h2><div class="grid3">${remCards}</div></div>
   <hr/>
-
-  <!-- SIGN-OFF -->
-  <div class="grid3" style="margin-bottom:28px;">
-    ${["Prepared by", "Reviewed by", "Approved by"].map(role => `
-      <div>
-        <div style="font-size:8px;color:#9ca3af;text-transform:uppercase;letter-spacing:.1em;margin-bottom:22px;">${role}</div>
-        <div style="border-bottom:1px solid #374151;margin-bottom:5px;"></div>
-        <div style="font-size:8px;color:#9ca3af;">Signature &amp; Date</div>
-      </div>`).join("")}
-  </div>
-
-  <div class="footer">
-    REBEL Threat Intelligence Platform · r3bel-production.up.railway.app · Report ID: ${reportId} · ${displayName}
-    ${clientDomain ? `· Scope: *.${normaliseDomain(clientDomain)}` : ""}
-    <br/>Confidential — intended solely for the named organisation.
-  </div>
-
-</div>
-</body>
-</html>`;
+  <div class="grid3" style="margin-bottom:28px;">${["Prepared by", "Reviewed by", "Approved by"].map(role => `<div><div style="font-size:8px;color:#9ca3af;text-transform:uppercase;letter-spacing:.1em;margin-bottom:22px;">${role}</div><div style="border-bottom:1px solid #374151;margin-bottom:5px;"></div><div style="font-size:8px;color:#9ca3af;">Signature &amp; Date</div></div>`).join("")}</div>
+  <div class="footer">REBEL Threat Intelligence Platform · ${new URL(API).hostname} · Report ID: ${reportId} · ${displayName}${clientDomain ? `· Scope: *.${normaliseDomain(clientDomain)}` : ""}<br/>Confidential — intended solely for the named organisation. · Costs displayed in Indian Rupees (INR).</div>
+  </div></body></html>`;
     const blob = new Blob([html], { type: "text/html" });
     const url = URL.createObjectURL(blob);
     const win = window.open(url, "_blank");
@@ -387,16 +404,17 @@ function ScoreGauge({ score, size = 200 }) {
         ctx.beginPath();
         ctx.arc(cx, cy, r, Math.PI, 0, false);
         ctx.lineWidth = Math.round(size * 0.06);
-        ctx.strokeStyle = "rgba(59,130,246,0.1)";
+        ctx.strokeStyle = "#e2e8f0";
         ctx.stroke();
-        const col = shown >= 70 ? T.green : shown >= 40 ? T.yellow : T.red;
+        const col = shown >= 70 ? L.green : shown >= 40 ? L.yellow : L.red;
+        const safePct = Math.min(0.999, Math.max(0.001, shown / 100));
         ctx.beginPath();
-        ctx.arc(cx, cy, r, Math.PI, Math.PI + Math.PI * (shown / 100), false);
+        ctx.arc(cx, cy, r, Math.PI, Math.PI + Math.PI * safePct, false);
         ctx.lineWidth = Math.round(size * 0.06);
         ctx.strokeStyle = col;
         ctx.lineCap = "round";
         ctx.shadowColor = col;
-        ctx.shadowBlur = 10;
+        ctx.shadowBlur = 8;
         ctx.stroke();
         ctx.shadowBlur = 0;
         for (let i = 0; i <= 10; i++) {
@@ -404,87 +422,143 @@ function ScoreGauge({ score, size = 200 }) {
             ctx.beginPath();
             ctx.moveTo(cx + (r - size * 0.09) * Math.cos(a), cy + (r - size * 0.09) * Math.sin(a));
             ctx.lineTo(cx + (r - size * 0.05) * Math.cos(a), cy + (r - size * 0.05) * Math.sin(a));
-            ctx.strokeStyle = "rgba(200,220,255,0.15)";
+            ctx.strokeStyle = "#cbd5e1";
             ctx.lineWidth = 1;
             ctx.stroke();
         }
     }, [shown, size]);
-    const col = shown >= 70 ? T.green : shown >= 40 ? T.yellow : T.red;
+    const col = shown >= 70 ? L.green : shown >= 40 ? L.yellow : L.red;
     const label = shown >= 70 ? "GOOD" : shown >= 40 ? "AT RISK" : "CRITICAL";
-    return (_jsxs("div", { style: { display: "flex", flexDirection: "column", alignItems: "center", width: "100%" }, children: [_jsx("canvas", { ref: ref, style: { width: "100%", maxWidth: size, height: "auto" } }), _jsxs("div", { style: { marginTop: -6, textAlign: "center" }, children: [_jsx("div", { style: { fontFamily: "'Orbitron',monospace", fontSize: Math.round(size * 0.18), fontWeight: 900, color: col, textShadow: `0 0 20px ${col}44` }, children: shown }), _jsx("div", { style: { fontFamily: "'Orbitron',monospace", fontSize: 9, color: col, letterSpacing: ".2em", marginTop: 2 }, children: label }), _jsx("div", { style: { fontSize: 9, color: T.text3, marginTop: 4 }, children: "MIGRATION PROGRESS" })] })] }));
+    return (_jsxs("div", { style: { display: "flex", flexDirection: "column", alignItems: "center", width: "100%" }, children: [_jsx("canvas", { ref: ref, style: { width: "100%", maxWidth: size, height: "auto" } }), _jsxs("div", { style: { marginTop: -6, textAlign: "center" }, children: [_jsx("div", { style: { fontFamily: "'DM Mono',monospace", fontSize: Math.round(size * 0.18), fontWeight: 900, color: col }, children: shown }), _jsx("div", { style: { fontFamily: "'DM Mono',monospace", fontSize: 9, color: col, letterSpacing: ".2em", marginTop: 2 }, children: label }), _jsx("div", { style: { fontSize: 9, color: L.text3, marginTop: 4 }, children: "MIGRATION PROGRESS" })] })] }));
 }
 // ── Roadmap Card ──────────────────────────────────────────────────────────────
 function RoadmapCard({ a, i }) {
     const [open, setOpen] = useState(false);
     const ps = a.pqcScore;
-    return (_jsxs("div", { className: "pqc-row", style: { borderBottom: `1px solid rgba(59,130,246,0.05)`, animationDelay: `${i * 0.04}s` }, children: [_jsxs("div", { onClick: () => setOpen(o => !o), style: { padding: "10px 14px", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center" }, children: [_jsxs("div", { style: { display: "flex", alignItems: "center", gap: 8, minWidth: 0, flex: 1 }, children: [_jsxs("span", { style: { fontFamily: "'Orbitron',monospace", fontSize: 9, color: T.text3, flexShrink: 0 }, children: ["#", i + 1] }), _jsx("span", { style: { fontSize: 12, color: T.blue, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }, children: a.app }), a.isPublic && _jsx("span", { style: { fontSize: 7, color: T.cyan, border: `1px solid ${T.cyan}44`, borderRadius: 2, padding: "1px 4px", flexShrink: 0 }, children: "PUB" })] }), _jsxs("div", { style: { display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }, children: [ps && _jsx("span", { style: { fontSize: 8, fontWeight: 700, color: ps.color, border: `1px solid ${ps.color}44`, borderRadius: 2, padding: "1px 5px" }, children: ps.active ? "ACTIVE" : `${ps.score}/100` }), _jsx(Badge, { v: riskVariant(a.risk), children: a.risk }), _jsx("span", { style: { fontSize: 10, color: T.text3 }, children: open ? "▲" : "▼" })] })] }), _jsxs("div", { style: { padding: "0 14px 10px", display: "flex", gap: 10, flexWrap: "wrap" }, children: [_jsx("span", { style: { fontSize: 9, color: T.text3 }, children: a.assetType }), _jsxs("span", { style: { fontSize: 9, color: T.cyan }, children: [a.days, "d"] }), _jsxs("span", { style: { fontSize: 9, color: T.orange }, children: ["$", a.cost.toLocaleString()] }), _jsx("span", { style: { fontSize: 9, color: a.pqc ? T.green : T.red }, children: a.pqc ? "PQC ✓" : "PQC ✗" })] }), open && ps && (_jsxs("div", { style: { padding: "0 14px 12px", borderTop: `1px solid rgba(59,130,246,0.06)`, paddingTop: 10 }, children: [Object.values(ps.criteria).map((c) => (_jsxs("div", { style: { display: "flex", alignItems: "center", gap: 8, fontSize: 9, marginBottom: 4 }, children: [_jsx("span", { style: { color: c.pass ? "#22c55e" : c.pts > 0 ? "#eab308" : "#ef4444", width: 10 }, children: c.pass ? "✓" : c.pts > 0 ? "~" : "✗" }), _jsx("span", { style: { color: T.text3, flex: 1 }, children: c.label }), _jsxs("span", { style: { color: T.text2, fontFamily: "'Orbitron',monospace" }, children: [c.pts, "/", c.max] })] }, c.label))), _jsx("div", { style: { fontSize: 8, color: T.text3, marginTop: 6, fontStyle: "italic" }, children: ps.active ? "Kyber hybrid active — ACTIVE status confirmed." : ps.score >= 70 ? "Address remaining criteria then deploy Kyber hybrid." : "Significant gaps — fix cert key and wildcard first." })] }))] }));
+    return (_jsxs("div", { style: {
+            borderBottom: `1px solid ${L.borderLight}`, background: L.panelBg,
+            animation: `fadeIn 0.3s ease both`, animationDelay: `${i * 0.04}s`, transition: "background 0.15s",
+        }, onMouseEnter: e => (e.currentTarget.style.background = L.subtleBg), onMouseLeave: e => (e.currentTarget.style.background = L.panelBg), children: [_jsxs("div", { onClick: () => setOpen(o => !o), style: { padding: "10px 14px", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center" }, children: [_jsxs("div", { style: { display: "flex", alignItems: "center", gap: 8, minWidth: 0, flex: 1 }, children: [_jsxs("span", { style: { fontFamily: "'DM Mono',monospace", fontSize: 9, color: L.text4, flexShrink: 0 }, children: ["#", i + 1] }), _jsx("span", { style: { fontSize: 12, color: L.blue, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontWeight: 500 }, children: a.app }), a.isPublic && _jsx("span", { style: { fontSize: 7, color: L.cyan, border: `1px solid ${L.cyan}55`, borderRadius: 2, padding: "1px 4px", flexShrink: 0, background: `${L.cyan}10` }, children: "PUB" })] }), _jsxs("div", { style: { display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }, children: [ps && _jsx("span", { style: { fontSize: 8, fontWeight: 700, color: ps.color, border: `1px solid ${ps.color}55`, borderRadius: 2, padding: "1px 5px", background: `${ps.color}10` }, children: ps.active ? "ACTIVE" : `${ps.score}/100` }), _jsx(Badge, { v: riskVariant(a.risk), children: a.risk }), _jsx("span", { style: { fontSize: 10, color: L.text4 }, children: open ? "▲" : "▼" })] })] }), _jsxs("div", { style: { padding: "0 14px 10px", display: "flex", gap: 10, flexWrap: "wrap" }, children: [_jsx("span", { style: { fontSize: 9, color: L.text3 }, children: a.assetType }), _jsxs("span", { style: { fontSize: 9, color: L.cyan, fontWeight: 600 }, children: [a.days, "d"] }), _jsx("span", { style: { fontSize: 9, color: L.orange, fontWeight: 600 }, children: fmtINR(a.cost) }), _jsx("span", { style: { fontSize: 9, color: a.pqc ? L.green : L.red, fontWeight: 600 }, children: a.pqc ? "PQC ✓" : "PQC ✗" })] }), open && ps && (_jsxs("div", { style: { padding: "0 14px 12px", borderTop: `1px solid ${L.borderLight}`, paddingTop: 10, background: L.insetBg }, children: [Object.values(ps.criteria).map((c) => (_jsxs("div", { style: { display: "flex", alignItems: "center", gap: 8, fontSize: 9, marginBottom: 4 }, children: [_jsx("span", { style: { color: c.pass ? "#16a34a" : c.pts > 0 ? "#b45309" : "#dc2626", width: 10, fontWeight: 700 }, children: c.pass ? "✓" : c.pts > 0 ? "~" : "✗" }), _jsx("span", { style: { color: L.text2, flex: 1 }, children: c.label }), _jsxs("span", { style: { color: L.text1, fontFamily: "'DM Mono',monospace", fontWeight: 600 }, children: [c.pts, "/", c.max] })] }, c.label))), _jsx("div", { style: { fontSize: 8, color: L.text3, marginTop: 6, fontStyle: "italic" }, children: ps.active ? "Kyber hybrid active — ACTIVE status confirmed." : ps.score >= 70 ? "Address remaining criteria then deploy Kyber hybrid." : "Significant gaps — fix cert key and wildcard first." })] }))] }));
 }
 // ── Main Page ─────────────────────────────────────────────────────────────────
 export default function PQCReadinessPage() {
     const [cbomData, setCbomData] = useState([]);
     const [assets, setAssets] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [fetchError, setFetchError] = useState(false);
+    const [fromCache, setFromCache] = useState(false);
+    const [cacheAge, setCacheAge] = useState(null);
     const [teamSize, setTeamSize] = useState(2);
-    const [devRate, setDevRate] = useState(DEV_RATE);
+    const [devRate, setDevRate] = useState(DEV_RATE_USD);
     const [domainInput, setDomainInput] = useState("");
     const [activeDomain, setActiveDomain] = useState("");
     const [clientName, setClientName] = useState("");
     const bp = useBreakpoint(), isMobile = bp === "mobile", isTablet = bp === "tablet", isDesktop = bp === "desktop";
+    // ── Data fetch with cache ───────────────────────────────────────────────────
+    const loadData = async (forceRefresh = false) => {
+        setLoading(true);
+        setFetchError(false);
+        // Try cache first (unless force-refreshing)
+        if (!forceRefresh) {
+            const cachedCbom = cacheGet(CACHE_KEY_CBOM);
+            const cachedAssets = cacheGet(CACHE_KEY_ASSETS);
+            if (cachedCbom && cachedAssets) {
+                const merged = buildMerged(cachedCbom, cachedAssets);
+                if (merged.length)
+                    setCbomData(merged);
+                if (cachedAssets?.assets?.length)
+                    setAssets(cachedAssets.assets);
+                setFromCache(true);
+                setCacheAge(cacheAge => cacheAge); // will be read fresh below
+                setLoading(false);
+                return;
+            }
+        }
+        // Fetch from API
+        try {
+            const [cbom, assetsData] = await Promise.all([
+                fetch(`${API}/cbom`).then(r => { if (!r.ok)
+                    throw new Error(); return r.json(); }),
+                fetch(`${API}/assets`).then(r => { if (!r.ok)
+                    throw new Error(); return r.json(); }),
+            ]);
+            cacheSet(CACHE_KEY_CBOM, cbom);
+            cacheSet(CACHE_KEY_ASSETS, assetsData);
+            const merged = buildMerged(cbom, assetsData);
+            if (merged.length)
+                setCbomData(merged);
+            if (assetsData?.assets?.length)
+                setAssets(assetsData.assets);
+            setFromCache(false);
+        }
+        catch {
+            setFetchError(true);
+            // fall through — displayCbom/displayAssets will use MOCK below
+        }
+        setLoading(false);
+    };
+    function buildMerged(cbom, assetsData) {
+        const registeredMap = {};
+        (assetsData?.assets ?? []).forEach((a) => { if (a.name)
+            registeredMap[a.name] = a; });
+        const cbomApps = (cbom.apps ?? []).map((app) => {
+            const reg = registeredMap[app.app];
+            if (!reg)
+                return app;
+            return { ...app, is_wildcard: reg.is_wildcard ?? app.is_wildcard, criticality: reg.criticality, owner: reg.owner, compliance_scope: reg.compliance_scope, financial_exposure: reg.financial_exposure };
+        });
+        const cbomDomains = new Set(cbomApps.map((a) => a.app));
+        const registeredOnly = (assetsData?.assets ?? [])
+            .filter((a) => a.id && !cbomDomains.has(a.name))
+            .map((a) => ({ app: a.name, keylen: a.keylen || "—", cipher: a.cipher || "—", tls: a.tls || "—", ca: a.ca || "—", status: a.risk === "weak" ? "weak" : "ok", pqc: false, pqc_support: "none", key_exchange_group: a.key_exchange_group || null, is_wildcard: a.is_wildcard ?? null, criticality: a.criticality, owner: a.owner, compliance_scope: a.compliance_scope, financial_exposure: a.financial_exposure }));
+        return [...cbomApps, ...registeredOnly];
+    }
+    useEffect(() => { loadData(); }, []);
+    // Update cache age display after load
     useEffect(() => {
-        fetch(`${API}/cbom`).then(r => r.json()).then(d => { if (d.apps?.length)
-            setCbomData(d.apps); }).catch(() => { });
-        fetch(`${API}/assets`).then(r => r.json()).then(d => { if (d.assets?.length)
-            setAssets(d.assets); }).catch(() => { });
-    }, []);
+        if (fromCache) {
+            setCacheAge(cacheAge_(CACHE_KEY_CBOM));
+        }
+    }, [fromCache]);
+    function cacheAge_(key) {
+        try {
+            const raw = localStorage.getItem(key);
+            if (!raw)
+                return null;
+            const entry = JSON.parse(raw);
+            const mins = Math.round((Date.now() - entry.ts) / 60000);
+            if (mins < 60)
+                return `${mins}m ago`;
+            return `${Math.round(mins / 60)}h ago`;
+        }
+        catch {
+            return null;
+        }
+    }
+    function handleForceRefresh() {
+        cacheClear();
+        setFromCache(false);
+        setCacheAge(null);
+        loadData(true);
+    }
     const displayCbom = cbomData.length ? cbomData : MOCK_CBOM;
     const displayAssets = assets.length ? assets : MOCK_ASSETS;
     const scopedCbom = activeDomain ? displayCbom.filter((a) => appMatchesDomain(a.app ?? "", activeDomain)) : displayCbom;
     const uniqueCbom = scopedCbom.filter((a, i, arr) => arr.findIndex((b) => b.app === a.app) === i);
-    // Compute per-app PQC score
     const withPQCScore = uniqueCbom.map((app) => {
         const analysis = fullAnalysis(app.cipher ?? "", app.tls ?? "", app.key_exchange_group ?? null);
         const ps = pqcReadinessScore(analysis.components, app.tls, app.keylen, app.is_wildcard ?? false);
         return { ...app, analysis, pqcScore: ps };
     });
-    // ── Migration Progress Score ──────────────────────────────────────────────
-    // Scores the BANK'S ACTUAL PQC PROGRAMME PROGRESS — not TLS hygiene.
-    // TLS 1.3 and no-broken-ciphers are table stakes that every public site has.
-    // Real milestones are things only a bank actively working on PQC would pass.
-    //
-    // Five milestones × 20pts = 100:
-    //   1. All certs RSA-4096 or EC P-384      (20pts) — cert upgrade programme done
-    //   2. Zero wildcard certs in portfolio    (20pts) — cert discipline enforced
-    //   3. AES-256-GCM on 100% of apps        (20pts) — cipher policy enforced
-    //   4. TLS 1.2 completely eliminated       (20pts) — protocol policy enforced
-    //   5. At least one app running Kyber      (20pts) — active PQC deployment
-    //
-    // A bank that has done nothing PQC-specific scores 0–20.
-    // A bank that has done the cert work scores 40–60.
-    // Full marks requires Kyber deployed.
     const n = withPQCScore.length || 1;
-    // Milestone 1: ALL certs are RSA-4096 or EC P-384
-    const allCertsStrong = withPQCScore.every((a) => {
-        const bits = parseInt(String(a.keylen ?? "0").match(/(\d+)/)?.[1] ?? "0", 10);
-        return bits >= 4096 || bits === 384;
-    });
-    // Milestone 2: ZERO wildcard certs
-    const noWildcards = withPQCScore.every((a) => !a.is_wildcard);
-    // Milestone 3: AES-256-GCM or ChaCha20 on ALL apps (no AES-128 anywhere)
-    const allAES256 = withPQCScore.every((a) => {
-        const bulk = a.analysis?.components?.bulkCipher ?? "";
-        return bulk === "AES-256-GCM" || bulk === "ChaCha20-Poly1305";
-    });
-    // Milestone 4: TLS 1.2 completely eliminated (100% TLS 1.3)
+    const allCertsStrong = withPQCScore.every((a) => { const bits = parseInt(String(a.keylen ?? "0").match(/(\d+)/)?.[1] ?? "0", 10); return bits >= 4096 || bits === 384; });
+    const noWildcards = withPQCScore.every((a) => a.is_wildcard === false);
+    const allAES256 = withPQCScore.every((a) => { const bulk = a.analysis?.components?.bulkCipher ?? ""; return bulk === "AES-256-GCM" || bulk === "ChaCha20-Poly1305"; });
     const allTLS13 = withPQCScore.every((a) => normaliseTLS(a.tls) === "1.3");
-    // Milestone 5: At least one app with Kyber/ML-KEM hybrid
     const anyKyber = withPQCScore.some((a) => a.pqcScore?.active);
-    const migrationScore = Math.round((allCertsStrong ? 20 : 0) +
-        (noWildcards ? 20 : 0) +
-        (allAES256 ? 20 : 0) +
-        (allTLS13 ? 20 : 0) +
-        (anyKyber ? 20 : 0));
-    // Partial progress bars (% of apps passing each criterion)
+    const migrationScore = Math.round((allCertsStrong ? 20 : 0) + (noWildcards ? 20 : 0) + (allAES256 ? 20 : 0) + (allTLS13 ? 20 : 0) + (anyKyber ? 20 : 0));
     const certStrongPct = Math.round(withPQCScore.filter((a) => { const b = parseInt(String(a.keylen ?? "0").match(/(\d+)/)?.[1] ?? "0", 10); return b >= 4096 || b === 384; }).length / n * 100);
-    const noWildPct = Math.round(withPQCScore.filter((a) => !a.is_wildcard).length / n * 100);
+    const noWildPct = Math.round(withPQCScore.filter((a) => a.is_wildcard === false).length / n * 100);
     const aes256Pct = Math.round(withPQCScore.filter((a) => { const bulk = a.analysis?.components?.bulkCipher ?? ""; return bulk === "AES-256-GCM" || bulk === "ChaCha20-Poly1305"; }).length / n * 100);
     const tls13Pct = Math.round(withPQCScore.filter((a) => normaliseTLS(a.tls) === "1.3").length / n * 100);
     const milestones = [
@@ -515,13 +589,13 @@ export default function PQCReadinessPage() {
     const unmatchedCount = enriched.filter((a) => !a.asset).length;
     const completionDate = new Date();
     completionDate.setDate(completionDate.getDate() + calDays);
-    const dateStr = completionDate.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+    const dateStr = completionDate.toLocaleDateString("en-IN", { month: "short", day: "numeric", year: "numeric" });
     function applyDomain() { setActiveDomain(domainInput.trim()); }
     function clearFilter() { setDomainInput(""); setActiveDomain(""); setClientName(""); }
     function exportCSV() {
         const rows = [
-            ["Priority", "App", "Asset Type", "Risk", "Key Length", "Cipher", "TLS", "CA", "PQC Score", "PQC Label", "Days", "Cost ($)", "Public", "PQC Active"],
-            ...enriched.map((a, i) => [i + 1, a.app, a.assetType, a.risk, a.keylen, a.cipher, a.tls, a.ca, a.pqcScore?.score ?? 0, a.pqcScore?.active ? "ACTIVE" : a.pqcScore?.label ?? "—", a.days, a.cost, a.isPublic ? "Yes" : "No", a.pqc ? "Yes" : "No"])
+            ["Priority", "App", "Asset Type", "Risk", "Key Length", "Cipher", "TLS", "CA", "PQC Score", "PQC Label", "Days", "Cost (INR)", "Public", "PQC Active"],
+            ...enriched.map((a, i) => [i + 1, a.app, a.assetType, a.risk, a.keylen, a.cipher, a.tls, a.ca, a.pqcScore?.score ?? 0, a.pqcScore?.active ? "ACTIVE" : a.pqcScore?.label ?? "—", a.days, fmtINRFull(a.cost), a.isPublic ? "Yes" : "No", a.pqc ? "Yes" : "No"])
         ];
         const csv = rows.map((r) => r.join(",")).join("\n");
         const blob = new Blob([csv], { type: "text/csv" });
@@ -533,29 +607,52 @@ export default function PQCReadinessPage() {
     }
     const gaugeSize = isMobile ? 160 : 200;
     const metricCols = isMobile ? "1fr 1fr" : isTablet ? "repeat(3,1fr)" : "repeat(5,1fr)";
-    return (_jsxs("div", { style: S.page, children: [_jsx("style", { children: `
-        @keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
-        .pqc-row{animation:fadeIn 0.3s ease both;} .pqc-row:hover{background:rgba(59,130,246,0.04)!important;}
-        .pqc-show-cards{display:block;} .pqc-show-table{display:none;}
-        @media(min-width:900px){.pqc-show-cards{display:none!important;}.pqc-show-table{display:block!important;}}
-      ` }), _jsxs(Panel, { children: [_jsx(PanelHeader, { left: "REPORT SCOPE \u2014 CLIENT DOMAIN FILTER" }), _jsxs("div", { style: { padding: 14, display: "flex", flexDirection: "column", gap: 12 }, children: [_jsxs("div", { style: { display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 10 }, children: [_jsxs("div", { children: [_jsx("div", { style: { fontSize: 8, color: T.text3, letterSpacing: ".12em", marginBottom: 5 }, children: "CLIENT DOMAIN" }), _jsxs("div", { style: { display: "flex", gap: 6 }, children: [_jsx("input", { value: domainInput, onChange: e => setDomainInput(e.target.value), onKeyDown: e => e.key === "Enter" && applyDomain(), placeholder: "e.g. barclays.com", style: { ...S.input, flex: 1, fontSize: 12 } }), _jsx("button", { style: { ...S.btn, background: "rgba(59,130,246,0.15)", borderColor: "rgba(59,130,246,0.4)", fontSize: 11 }, onClick: applyDomain, children: "APPLY" }), activeDomain && _jsx("button", { style: { ...S.btn, fontSize: 11 }, onClick: clearFilter, children: "CLEAR" })] })] }), _jsxs("div", { children: [_jsx("div", { style: { fontSize: 8, color: T.text3, letterSpacing: ".12em", marginBottom: 5 }, children: "CLIENT NAME (for PDF)" }), _jsx("input", { value: clientName, onChange: e => setClientName(e.target.value), placeholder: "e.g. Barclays Bank PLC", style: { ...S.input, width: "100%", fontSize: 12 } })] })] }), activeDomain && (_jsxs("div", { style: { display: "flex", alignItems: "center", gap: 10, background: "rgba(59,130,246,0.06)", border: "1px solid rgba(59,130,246,0.2)", borderRadius: 4, padding: "7px 12px" }, children: [_jsx("span", { style: { fontSize: 9, color: T.text3 }, children: "ACTIVE SCOPE" }), _jsxs("span", { style: { fontFamily: "'Orbitron',monospace", fontSize: 10, color: T.blue }, children: ["*.", normaliseDomain(activeDomain)] }), _jsxs("span", { style: { fontSize: 9, color: T.text3, marginLeft: "auto" }, children: [_jsx("b", { style: { color: T.text2 }, children: uniqueCbom.length }), " apps \u00B7 ", _jsx("b", { style: { color: T.red }, children: enriched.length }), " need migration"] })] })), activeDomain && uniqueCbom.length === 0 && (_jsxs("div", { style: { background: "rgba(239,68,68,0.06)", border: "1px solid rgba(239,68,68,0.2)", borderRadius: 4, padding: "8px 12px", fontSize: 10, color: T.text2 }, children: ["\u26A0 No assets found for ", _jsxs("b", { style: { color: T.red }, children: ["*.", normaliseDomain(activeDomain)] })] }))] })] }), unmatchedCount > 0 && (_jsxs("div", { style: { background: "rgba(234,179,8,0.06)", border: "1px solid rgba(234,179,8,0.25)", borderRadius: 4, padding: "8px 14px", display: "flex", alignItems: "center", gap: 10 }, children: [_jsx("span", { style: { color: T.yellow, fontSize: 12 }, children: "\u26A0" }), _jsxs("span", { style: { fontSize: 10, color: T.text2 }, children: [_jsx("b", { style: { color: T.yellow }, children: unmatchedCount }), " asset", unmatchedCount > 1 ? "s" : "", " unmatched \u2014 defaulted to \"Other\"."] })] })), _jsxs("div", { style: { display: "grid", gridTemplateColumns: metricCols, gap: isMobile ? 8 : 9 }, children: [_jsx(MetricCard, { label: "MIGRATION SCORE", value: `${migrationScore}/100`, sub: "Migration progress", color: migrationScore >= 70 ? T.green : migrationScore >= 40 ? T.yellow : T.red }), _jsx(MetricCard, { label: "NEED MIGRATION", value: enriched.length, sub: "Weak assets", color: T.red }), _jsx(MetricCard, { label: "CRITICAL", value: critCount, sub: "Immediate action", color: T.red }), _jsx(MetricCard, { label: "EST. DAYS", value: calDays, sub: `${teamSize} dev team`, color: T.cyan }), _jsx("div", { style: isMobile ? { gridColumn: "1/-1" } : {}, children: _jsx(MetricCard, { label: "EST. COST", value: `$${(totalCost / 1000).toFixed(1)}k`, sub: "At $800/day", color: T.orange }) })] }), _jsxs("div", { style: { display: "grid", gridTemplateColumns: isDesktop ? "1fr 1fr" : "1fr", gap: isMobile ? 8 : 10 }, children: [_jsxs(Panel, { children: [_jsx(PanelHeader, { left: "PQC MIGRATION PROGRESS" }), _jsxs("div", { style: { padding: 14, display: "flex", flexDirection: "column", alignItems: "center", gap: 16 }, children: [_jsx("div", { style: { width: "100%", maxWidth: gaugeSize + 40, margin: "0 auto" }, children: _jsx(ScoreGauge, { score: migrationScore, size: gaugeSize }) }), _jsx("div", { style: { width: "100%", display: "flex", flexDirection: "column", gap: 6 }, children: milestones.map(m => (_jsxs("div", { children: [_jsxs("div", { style: { display: "flex", justifyContent: "space-between", marginBottom: 3 }, children: [_jsxs("span", { style: { fontSize: 8, color: m.done ? T.green : T.text3, display: "flex", alignItems: "center", gap: 5 }, children: [_jsx("span", { style: { fontSize: 9 }, children: m.done ? "✓" : "○" }), m.label] }), _jsxs("span", { style: { fontSize: 8, fontFamily: "'Orbitron',monospace", color: m.done ? T.green : T.text3 }, children: [m.pct, "%"] })] }), _jsx("div", { style: { height: 3, background: "rgba(255,255,255,0.06)", borderRadius: 2 }, children: _jsx("div", { style: { height: "100%", width: `${m.pct}%`, background: m.done ? T.green : m.pct > 50 ? T.yellow : T.orange, borderRadius: 2, transition: "width 0.8s ease" } }) })] }, m.label))) }), _jsx("div", { style: { width: "100%", display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }, children: [
-                                            { label: "PQC ACTIVE", val: withPQCScore.filter((a) => a.pqcScore?.active).length, color: T.green },
-                                            { label: "WEAK", val: enriched.length, color: T.red },
-                                            { label: "IN SCOPE", val: total, color: T.blue },
-                                        ].map(item => (_jsxs("div", { style: { background: "rgba(59,130,246,0.04)", border: "1px solid rgba(59,130,246,0.1)", borderRadius: 3, padding: isMobile ? "6px 4px" : "8px 6px", textAlign: "center" }, children: [_jsx("div", { style: { fontFamily: "'Orbitron',monospace", fontSize: isMobile ? 15 : 18, color: item.color }, children: item.val }), _jsx("div", { style: { fontSize: isMobile ? 7 : 8, color: T.text3, marginTop: 3, letterSpacing: ".08em" }, children: item.label })] }, item.label))) })] })] }), _jsxs(Panel, { children: [_jsx(PanelHeader, { left: "MIGRATION PLAN SUMMARY" }), _jsxs("div", { style: { padding: 14, display: "flex", flexDirection: "column", gap: 12 }, children: [_jsxs("div", { style: { display: "grid", gridTemplateColumns: (isTablet || isDesktop) ? "1fr 1fr" : "1fr", gap: 10 }, children: [_jsxs("div", { style: { background: "rgba(59,130,246,0.04)", border: "1px solid rgba(59,130,246,0.1)", borderRadius: 3, padding: 12 }, children: [_jsx("div", { style: { fontSize: 8, color: T.text3, marginBottom: 5, letterSpacing: ".12em" }, children: "ESTIMATED COMPLETION" }), _jsx("div", { style: { fontFamily: "'Orbitron',monospace", fontSize: isMobile ? 13 : 17, color: T.cyan }, children: dateStr }), _jsxs("div", { style: { fontSize: 9, color: T.text2, marginTop: 4 }, children: [calDays, "d \u00B7 ", totalDays, " dev days \u00B7 ", enriched.length, " assets"] })] }), _jsxs("div", { style: { background: "rgba(239,68,68,0.04)", border: "1px solid rgba(239,68,68,0.1)", borderRadius: 3, padding: 12 }, children: [_jsx("div", { style: { fontSize: 8, color: T.text3, marginBottom: 5, letterSpacing: ".12em" }, children: "TOTAL MIGRATION COST" }), _jsxs("div", { style: { fontFamily: "'Orbitron',monospace", fontSize: isMobile ? 13 : 17, color: T.orange }, children: ["$", totalCost.toLocaleString()] }), _jsxs("div", { style: { fontSize: 9, color: T.text2, marginTop: 4 }, children: [critCount, " critical \u00B7 ", highCount, " high \u00B7 $", devRate, "/day"] })] })] }), _jsx("div", { style: { display: "grid", gridTemplateColumns: (isTablet || isDesktop) ? "1fr 1fr" : "1fr", gap: 12 }, children: [
-                                            { label: "TEAM SIZE", display: `${teamSize} devs`, min: 1, max: 10, step: 1, val: teamSize, set: (v) => setTeamSize(v), l: "1", r: "10" },
-                                            { label: "DEV RATE / DAY", display: `$${devRate}`, min: 200, max: 2000, step: 100, val: devRate, set: (v) => setDevRate(v), l: "$200", r: "$2000" },
-                                        ].map(sl => (_jsxs("div", { children: [_jsxs("div", { style: { display: "flex", justifyContent: "space-between", marginBottom: 6 }, children: [_jsx("span", { style: { fontSize: 9, color: T.text3, letterSpacing: ".12em" }, children: sl.label }), _jsx("span", { style: { fontFamily: "'Orbitron',monospace", fontSize: 11, color: T.blue }, children: sl.display })] }), _jsx("input", { type: "range", min: sl.min, max: sl.max, step: sl.step, value: sl.val, onChange: e => sl.set(Number(e.target.value)), style: { width: "100%", accentColor: T.blue, cursor: "pointer" } }), _jsxs("div", { style: { display: "flex", justifyContent: "space-between" }, children: [_jsx("span", { style: { fontSize: 8, color: T.text3 }, children: sl.l }), _jsx("span", { style: { fontSize: 8, color: T.text3 }, children: sl.r })] })] }, sl.label))) })] })] })] }), _jsxs(Panel, { children: [_jsx(PanelHeader, { left: "RISK DISTRIBUTION" }), _jsx("div", { style: { padding: 14, display: "grid", gridTemplateColumns: isMobile ? "1fr 1fr" : "repeat(4,1fr)", gap: 10 }, children: ["Critical", "High", "Medium", "Low"].map(level => {
-                            const count = enriched.filter((a) => a.risk === level).length;
-                            const pct = enriched.length ? Math.round(count / enriched.length * 100) : 0;
-                            const color = level === "Critical" ? T.red : level === "High" ? T.orange : level === "Medium" ? T.yellow : T.green;
-                            return (_jsxs("div", { style: { background: "rgba(59,130,246,0.03)", border: `1px solid rgba(59,130,246,0.08)`, borderRadius: 3, padding: 12 }, children: [_jsxs("div", { style: { display: "flex", justifyContent: "space-between", marginBottom: 8 }, children: [_jsx("span", { style: { fontSize: 9, color, letterSpacing: ".12em" }, children: level.toUpperCase() }), _jsx("span", { style: { fontFamily: "'Orbitron',monospace", fontSize: 13, color }, children: count })] }), _jsx("div", { style: { height: 3, background: "rgba(255,255,255,0.05)", borderRadius: 2 }, children: _jsx("div", { style: { height: "100%", width: `${pct}%`, background: color, borderRadius: 2, transition: "width 0.8s ease" } }) }), _jsxs("div", { style: { fontSize: 8, color: T.text3, marginTop: 5 }, children: [enriched.filter((a) => a.risk === level).reduce((s, a) => s + a.days, 0), " dev days"] })] }, level));
-                        }) })] }), _jsxs(Panel, { children: [_jsx(PanelHeader, { left: "MIGRATION ROADMAP", right: _jsxs("div", { style: { display: "flex", gap: 6 }, children: [_jsx("button", { style: { ...S.btn, fontSize: isMobile ? 9 : 11 }, onClick: exportCSV, children: "\u2193 CSV" }), _jsx("button", { style: { ...S.btn, fontSize: isMobile ? 9 : 11, background: "rgba(59,130,246,0.12)", borderColor: "rgba(59,130,246,0.35)" }, onClick: () => exportAuditPDF(enriched, migrationScore, pqcReady, total, totalDays, calDays, totalCost, teamSize, devRate, dateStr, clientName, activeDomain, milestones), children: isMobile ? "⬡ PDF" : "⬡ AUDIT PDF" })] }) }), _jsx("div", { className: "pqc-show-cards", children: _jsxs("div", { style: { maxHeight: isMobile ? 400 : 520, overflowY: "auto" }, children: [enriched.map((a, i) => _jsx(RoadmapCard, { a: a, i: i }, i)), enriched.length === 0 && _jsx("div", { style: { padding: 24, textAlign: "center", fontSize: 10, color: T.text3 }, children: "\u2713 No weak assets" })] }) }), _jsx("div", { className: "pqc-show-table", children: _jsx(Table, { cols: ["#", "APPLICATION", "TYPE", "RISK", "KEY LEN", "CIPHER", "TLS", "CA", "PQC SCORE", "DAYS", "COST", "PUB", "PQC"], children: enriched.map((a, i) => {
-                                const ps = a.pqcScore;
-                                return (_jsxs(TR, { children: [_jsx(TD, { style: { fontFamily: "'Orbitron',monospace", fontSize: 9, color: T.text3 }, children: i + 1 }), _jsx(TD, { style: { color: T.blue, fontSize: 10 }, children: a.app }), _jsx(TD, { children: _jsx(Badge, { v: "gray", children: a.assetType }) }), _jsx(TD, { children: _jsx(Badge, { v: riskVariant(a.risk), children: a.risk }) }), _jsx(TD, { style: { fontSize: 10, color: a.keylen?.startsWith("1024") ? T.red : a.keylen?.startsWith("2048") ? T.yellow : T.green }, children: a.keylen }), _jsx(TD, { style: { fontSize: 9, color: T.text3, maxWidth: 140, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }, children: a.cipher }), _jsx(TD, { children: _jsxs(Badge, { v: a.tls === "1.0" ? "red" : a.tls === "1.2" ? "yellow" : "green", children: ["TLS ", a.tls] }) }), _jsx(TD, { style: { fontSize: 9, color: T.text3 }, children: a.ca }), _jsx(TD, { style: { textAlign: "center" }, children: ps && _jsx("span", { style: { fontSize: 8, fontWeight: 700, color: ps.color, border: `1px solid ${ps.color}44`, borderRadius: 2, padding: "1px 5px" }, children: ps.active ? "ACTIVE" : `${ps.score}/100` }) }), _jsxs(TD, { style: { fontFamily: "'Orbitron',monospace", fontSize: 10, color: T.cyan }, children: [a.days, "d"] }), _jsxs(TD, { style: { fontFamily: "'Orbitron',monospace", fontSize: 10, color: T.orange }, children: ["$", a.cost.toLocaleString()] }), _jsx(TD, { style: { textAlign: "center", fontSize: 12 }, children: a.isPublic ? _jsx("span", { style: { color: T.cyan }, children: "\u25CF" }) : _jsx("span", { style: { color: T.text3 }, children: "\u25CB" }) }), _jsx(TD, { style: { textAlign: "center", fontSize: 13 }, children: a.pqc ? _jsx("span", { style: { color: T.green }, children: "\u2713" }) : _jsx("span", { style: { color: T.red }, children: "\u2717" }) })] }, i));
-                            }) }) }), _jsxs("div", { style: { padding: "8px 12px", borderTop: `1px solid rgba(59,130,246,0.07)`, display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }, children: [_jsxs("span", { style: { fontSize: 10, color: T.text3 }, children: [_jsx("b", { style: { color: T.text2 }, children: enriched.length }), " to migrate \u00B7 ", _jsxs("b", { style: { color: T.cyan }, children: [totalDays, "d"] }), " dev \u00B7 ", _jsxs("b", { style: { color: T.orange }, children: ["$", totalCost.toLocaleString()] })] }), !isMobile && _jsx("span", { style: { fontSize: 9, color: T.text3 }, children: "Ranked: public-facing \u2192 risk \u2192 cost" })] })] }), _jsxs(Panel, { children: [_jsx(PanelHeader, { left: "REMEDIATION GUIDE" }), _jsx("div", { style: { padding: 14, display: "grid", gridTemplateColumns: isMobile ? "1fr" : isTablet ? "1fr 1fr" : "repeat(3,1fr)", gap: 10 }, children: [
-                            { title: "Upgrade cert key", color: T.red, icon: "⬡", items: enriched.filter((a) => !(a.pqcScore?.criteria?.certKey4096?.pass)).map((a) => a.app), fix: "Deploy RSA-4096 or EC P-384 — 70/100 pts" },
-                            { title: "Remove wildcard certs", color: T.orange, icon: "◈", items: enriched.filter((a) => a.is_wildcard).map((a) => a.app), fix: "Dedicated per-service certificates — 20/100 pts" },
-                            { title: "Enable Kyber hybrid", color: T.cyan, icon: "◉", items: enriched.filter((a) => !a.pqc).map((a) => a.app), fix: "X25519+Kyber768 (FIPS 203) → ACTIVE status" },
-                        ].map(section => (_jsxs("div", { style: { background: "rgba(59,130,246,0.03)", border: `1px solid ${section.color}22`, borderRadius: 3, padding: 12 }, children: [_jsxs("div", { style: { display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }, children: [_jsx("span", { style: { fontFamily: "'Orbitron',monospace", color: section.color, flexShrink: 0 }, children: section.icon }), _jsx("span", { style: { fontSize: 9, color: section.color, letterSpacing: ".1em", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }, children: section.title.toUpperCase() }), _jsx("span", { style: { marginLeft: "auto", fontFamily: "'Orbitron',monospace", fontSize: 11, color: section.color, flexShrink: 0 }, children: section.items.length })] }), _jsx("div", { style: { fontSize: 9, color: T.text2, marginBottom: 8, lineHeight: 1.5 }, children: section.fix }), _jsxs("div", { style: { display: "flex", flexDirection: "column", gap: 4 }, children: [section.items.slice(0, 5).map((app, i) => (_jsxs("div", { style: { fontSize: 9, color: T.text3, display: "flex", alignItems: "center", gap: 6, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }, children: [_jsx("span", { style: { color: section.color, fontSize: 7, flexShrink: 0 }, children: "\u25B8" }), " ", app] }, i))), section.items.length > 5 && _jsxs("div", { style: { fontSize: 9, color: T.text3 }, children: ["+", section.items.length - 5, " more"] }), section.items.length === 0 && _jsx("div", { style: { fontSize: 9, color: T.green }, children: "\u2713 All clear" })] })] }, section.title))) })] })] }));
+    const scoreColor = migrationScore >= 70 ? L.green : migrationScore >= 40 ? L.yellow : L.red;
+    return (_jsxs("div", { style: LS.page, children: [_jsx("style", { children: `
+        @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=DM+Mono:wght@400;500;600&display=swap');
+        @keyframes fadeIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+        @keyframes shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
+        input[type=range]{accent-color:${L.blue};}
+        input[type=range]::-webkit-slider-thumb{background:${L.blue};}
+        * { box-sizing: border-box; }
+        ::-webkit-scrollbar{width:5px;height:5px;}
+        ::-webkit-scrollbar-track{background:${L.insetBg};}
+        ::-webkit-scrollbar-thumb{background:${L.border};border-radius:3px;}
+      ` }), _jsxs(LPanel, { children: [_jsx(LPanelHeader, { left: "REPORT SCOPE \u2014 CLIENT DOMAIN FILTER", right: fromCache ? _jsx(CacheBadge, { age: cacheAge, onRefresh: handleForceRefresh }) : undefined }), _jsxs("div", { style: { padding: 14, display: "flex", flexDirection: "column", gap: 12 }, children: [_jsxs("div", { style: { display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 10 }, children: [_jsxs("div", { children: [_jsx("div", { style: { fontSize: 8, color: L.text3, letterSpacing: ".12em", marginBottom: 5, textTransform: "uppercase", fontWeight: 600 }, children: "CLIENT DOMAIN" }), _jsxs("div", { style: { display: "flex", gap: 6 }, children: [_jsx("input", { value: domainInput, onChange: e => setDomainInput(e.target.value), onKeyDown: e => e.key === "Enter" && applyDomain(), placeholder: "e.g. barclays.com", style: { ...LS.input, flex: 1 } }), _jsx("button", { style: { ...LS.btn, background: `${L.blue}15`, borderColor: `${L.blue}40`, color: L.blue }, onClick: applyDomain, children: "APPLY" }), activeDomain && _jsx("button", { style: { ...LS.btn }, onClick: clearFilter, children: "CLEAR" })] })] }), _jsxs("div", { children: [_jsx("div", { style: { fontSize: 8, color: L.text3, letterSpacing: ".12em", marginBottom: 5, textTransform: "uppercase", fontWeight: 600 }, children: "CLIENT NAME (for PDF)" }), _jsx("input", { value: clientName, onChange: e => setClientName(e.target.value), placeholder: "e.g. Barclays Bank PLC", style: { ...LS.input, width: "100%" } })] })] }), _jsxs("div", { style: { display: "flex", alignItems: "center", gap: 8 }, children: [_jsx("span", { style: { fontSize: 7, fontFamily: "'DM Mono',monospace", color: L.text4, letterSpacing: ".08em" }, children: "API" }), _jsxs("span", { style: { fontSize: 8, fontFamily: "'DM Mono',monospace", color: fetchError ? L.red : L.green, fontWeight: 600 }, children: [fetchError ? "✗" : "✓", " ", API] }), fetchError && _jsx("span", { style: { fontSize: 8, color: L.red }, children: "\u2014 showing demo data" }), loading && _jsx("span", { style: { fontSize: 8, color: L.blue, animation: "fadeIn 0.3s ease" }, children: "fetching\u2026" })] }), activeDomain && (_jsxs("div", { style: { display: "flex", alignItems: "center", gap: 10, background: `${L.blue}0a`, border: `1px solid ${L.blue}25`, borderRadius: 5, padding: "7px 12px" }, children: [_jsx("span", { style: { fontSize: 9, color: L.text3, fontWeight: 600 }, children: "ACTIVE SCOPE" }), _jsxs("span", { style: { fontFamily: "'DM Mono',monospace", fontSize: 10, color: L.blue, fontWeight: 600 }, children: ["*.", normaliseDomain(activeDomain)] }), _jsxs("span", { style: { fontSize: 9, color: L.text3, marginLeft: "auto" }, children: [_jsx("b", { style: { color: L.text1 }, children: uniqueCbom.length }), " apps \u00B7 ", _jsx("b", { style: { color: L.red }, children: enriched.length }), " need migration"] })] })), activeDomain && uniqueCbom.length === 0 && !loading && (_jsxs("div", { style: { background: `${L.red}0a`, border: `1px solid ${L.red}25`, borderRadius: 5, padding: "8px 12px", fontSize: 10, color: L.text2 }, children: ["\u26A0 No assets found for ", _jsxs("b", { style: { color: L.red }, children: ["*.", normaliseDomain(activeDomain)] })] }))] })] }), unmatchedCount > 0 && !loading && (_jsxs("div", { style: { background: `${L.yellow}10`, border: `1px solid ${L.yellow}40`, borderRadius: 5, padding: "8px 14px", display: "flex", alignItems: "center", gap: 10 }, children: [_jsx("span", { style: { color: L.yellow, fontSize: 14 }, children: "\u26A0" }), _jsxs("span", { style: { fontSize: 10, color: L.text2 }, children: [_jsx("b", { style: { color: L.yellow }, children: unmatchedCount }), " asset", unmatchedCount > 1 ? "s" : "", " unmatched \u2014 defaulted to \"Other\"."] })] })), _jsx("div", { style: { display: "grid", gridTemplateColumns: metricCols, gap: isMobile ? 8 : 9 }, children: loading
+                    ? Array.from({ length: 5 }).map((_, i) => _jsx(SkeletonMetricCard, {}, i))
+                    : _jsxs(_Fragment, { children: [_jsx(LMetricCard, { label: "MIGRATION SCORE", value: `${migrationScore}/100`, sub: "Migration progress", color: scoreColor }), _jsx(LMetricCard, { label: "NEED MIGRATION", value: enriched.length, sub: "Weak assets", color: L.red }), _jsx(LMetricCard, { label: "CRITICAL", value: critCount, sub: "Immediate action", color: L.red }), _jsx(LMetricCard, { label: "EST. DAYS", value: calDays, sub: `${teamSize} dev team`, color: L.cyan }), _jsx("div", { style: isMobile ? { gridColumn: "1/-1" } : {}, children: _jsx(LMetricCard, { label: "EST. COST (INR)", value: fmtINR(totalCost), sub: `At ${fmtINR(devRate)}/day`, color: L.orange }) })] }) }), _jsx("div", { style: { display: "grid", gridTemplateColumns: isDesktop ? "1fr 1fr" : "1fr", gap: isMobile ? 8 : 10 }, children: loading
+                    ? _jsxs(_Fragment, { children: [_jsx(SkeletonGaugePanel, {}), _jsx(SkeletonGaugePanel, {})] })
+                    : _jsxs(_Fragment, { children: [_jsxs(LPanel, { children: [_jsx(LPanelHeader, { left: "PQC MIGRATION PROGRESS" }), _jsxs("div", { style: { padding: 14, display: "flex", flexDirection: "column", alignItems: "center", gap: 16 }, children: [_jsx("div", { style: { width: "100%", maxWidth: gaugeSize + 40, margin: "0 auto" }, children: _jsx(ScoreGauge, { score: migrationScore, size: gaugeSize }) }), _jsx("div", { style: { width: "100%", display: "flex", flexDirection: "column", gap: 8 }, children: milestones.map(m => (_jsxs("div", { children: [_jsxs("div", { style: { display: "flex", justifyContent: "space-between", marginBottom: 4 }, children: [_jsxs("span", { style: { fontSize: 9, color: m.done ? L.green : L.text2, display: "flex", alignItems: "center", gap: 5, fontWeight: m.done ? 600 : 400 }, children: [_jsx("span", { style: { fontSize: 10, color: m.done ? L.green : L.text4 }, children: m.done ? "✓" : "○" }), m.label] }), _jsxs("span", { style: { fontSize: 9, fontFamily: "'DM Mono',monospace", color: m.done ? L.green : L.text3, fontWeight: 600 }, children: [m.pct, "%"] })] }), _jsx("div", { style: { height: 4, background: L.insetBg, borderRadius: 2, border: `1px solid ${L.border}` }, children: _jsx("div", { style: { height: "100%", width: `${m.pct}%`, background: m.done ? L.green : m.pct > 50 ? L.yellow : L.orange, borderRadius: 2, transition: "width 0.8s ease" } }) })] }, m.label))) }), _jsx("div", { style: { width: "100%", display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }, children: [
+                                                    { label: "PQC ACTIVE", val: withPQCScore.filter((a) => a.pqcScore?.active).length, color: L.green },
+                                                    { label: "WEAK", val: enriched.length, color: L.red },
+                                                    { label: "IN SCOPE", val: total, color: L.blue },
+                                                ].map(item => (_jsxs("div", { style: { background: L.subtleBg, border: `1px solid ${L.border}`, borderRadius: 5, padding: isMobile ? "6px 4px" : "8px 6px", textAlign: "center" }, children: [_jsx("div", { style: { fontFamily: "'DM Mono',monospace", fontSize: isMobile ? 16 : 20, color: item.color, fontWeight: 700 }, children: item.val }), _jsx("div", { style: { fontSize: isMobile ? 7 : 8, color: L.text3, marginTop: 3, letterSpacing: ".08em", fontWeight: 600 }, children: item.label })] }, item.label))) })] })] }), _jsxs(LPanel, { children: [_jsx(LPanelHeader, { left: "MIGRATION PLAN SUMMARY" }), _jsxs("div", { style: { padding: 14, display: "flex", flexDirection: "column", gap: 12 }, children: [_jsxs("div", { style: { display: "grid", gridTemplateColumns: (isTablet || isDesktop) ? "1fr 1fr" : "1fr", gap: 10 }, children: [_jsxs("div", { style: { background: L.subtleBg, border: `1px solid ${L.border}`, borderRadius: 5, padding: 12 }, children: [_jsx("div", { style: { fontSize: 8, color: L.text3, marginBottom: 5, letterSpacing: ".12em", textTransform: "uppercase", fontWeight: 600 }, children: "ESTIMATED COMPLETION" }), _jsx("div", { style: { fontFamily: "'DM Mono',monospace", fontSize: isMobile ? 13 : 17, color: L.cyan, fontWeight: 700 }, children: dateStr }), _jsxs("div", { style: { fontSize: 9, color: L.text2, marginTop: 4 }, children: [calDays, "d \u00B7 ", totalDays, " dev days \u00B7 ", enriched.length, " assets"] })] }), _jsxs("div", { style: { background: "#fff5f5", border: `1px solid ${L.red}22`, borderRadius: 5, padding: 12 }, children: [_jsx("div", { style: { fontSize: 8, color: L.text3, marginBottom: 5, letterSpacing: ".12em", textTransform: "uppercase", fontWeight: 600 }, children: "TOTAL MIGRATION COST" }), _jsx("div", { style: { fontFamily: "'DM Mono',monospace", fontSize: isMobile ? 13 : 17, color: L.orange, fontWeight: 700 }, children: fmtINR(totalCost) }), _jsxs("div", { style: { fontSize: 9, color: L.text2, marginTop: 4 }, children: [critCount, " critical \u00B7 ", highCount, " high \u00B7 ", fmtINR(devRate), "/day"] })] })] }), _jsx("div", { style: { display: "grid", gridTemplateColumns: (isTablet || isDesktop) ? "1fr 1fr" : "1fr", gap: 12 }, children: [
+                                                    { label: "TEAM SIZE", display: `${teamSize} devs`, min: 1, max: 10, step: 1, val: teamSize, set: (v) => setTeamSize(v), l: "1", r: "10" },
+                                                    { label: "DEV RATE / DAY (INR)", display: fmtINR(devRate), min: 200, max: 2000, step: 100, val: devRate, set: (v) => setDevRate(v), l: fmtINR(200), r: fmtINR(2000) },
+                                                ].map(sl => (_jsxs("div", { children: [_jsxs("div", { style: { display: "flex", justifyContent: "space-between", marginBottom: 6 }, children: [_jsx("span", { style: { fontSize: 9, color: L.text3, letterSpacing: ".1em", textTransform: "uppercase", fontWeight: 600 }, children: sl.label }), _jsx("span", { style: { fontFamily: "'DM Mono',monospace", fontSize: 11, color: L.blue, fontWeight: 700 }, children: sl.display })] }), _jsx("input", { type: "range", min: sl.min, max: sl.max, step: sl.step, value: sl.val, onChange: e => sl.set(Number(e.target.value)), style: { width: "100%", cursor: "pointer" } }), _jsxs("div", { style: { display: "flex", justifyContent: "space-between" }, children: [_jsx("span", { style: { fontSize: 8, color: L.text4 }, children: sl.l }), _jsx("span", { style: { fontSize: 8, color: L.text4 }, children: sl.r })] })] }, sl.label))) })] })] })] }) }), _jsxs(LPanel, { children: [_jsx(LPanelHeader, { left: "RISK DISTRIBUTION" }), _jsx("div", { style: { padding: 14, display: "grid", gridTemplateColumns: isMobile ? "1fr 1fr" : "repeat(4,1fr)", gap: 10 }, children: loading
+                            ? Array.from({ length: 4 }).map((_, i) => (_jsxs("div", { style: { borderRadius: 6, padding: 12, border: `1px solid ${L.border}`, background: L.subtleBg }, children: [_jsxs("div", { style: { display: "flex", justifyContent: "space-between", marginBottom: 8 }, children: [_jsx(Shimmer, { w: 55, h: 9 }), _jsx(Shimmer, { w: 24, h: 20 })] }), _jsx(Shimmer, { w: "100%", h: 4, radius: 2, style: { marginBottom: 8 } }), _jsx(Shimmer, { w: 60, h: 8 })] }, i)))
+                            : ["Critical", "High", "Medium", "Low"].map(level => {
+                                const count = enriched.filter((a) => a.risk === level).length;
+                                const pct = enriched.length ? Math.round(count / enriched.length * 100) : 0;
+                                const color = level === "Critical" ? L.red : level === "High" ? L.orange : level === "Medium" ? L.yellow : L.green;
+                                const bg = level === "Critical" ? "#fff5f5" : level === "High" ? "#fff7ed" : level === "Medium" ? "#fffbeb" : "#f0fdf4";
+                                return (_jsxs("div", { style: { background: bg, border: `1px solid ${color}22`, borderRadius: 6, padding: 12 }, children: [_jsxs("div", { style: { display: "flex", justifyContent: "space-between", marginBottom: 8 }, children: [_jsx("span", { style: { fontSize: 9, color, letterSpacing: ".12em", fontWeight: 700, textTransform: "uppercase" }, children: level }), _jsx("span", { style: { fontFamily: "'DM Mono',monospace", fontSize: 15, color, fontWeight: 800 }, children: count })] }), _jsx("div", { style: { height: 4, background: `${color}20`, borderRadius: 2 }, children: _jsx("div", { style: { height: "100%", width: `${pct}%`, background: color, borderRadius: 2, transition: "width 0.8s ease" } }) }), _jsxs("div", { style: { fontSize: 8, color: L.text3, marginTop: 6, fontWeight: 500 }, children: [enriched.filter((a) => a.risk === level).reduce((s, a) => s + a.days, 0), " dev days"] })] }, level));
+                            }) })] }), _jsxs(LPanel, { children: [_jsx(LPanelHeader, { left: "MIGRATION ROADMAP", right: !loading && _jsxs("div", { style: { display: "flex", gap: 6 }, children: [_jsx("button", { style: { ...LS.btn, fontSize: isMobile ? 9 : 11 }, onClick: exportCSV, children: "\u2193 CSV" }), _jsx("button", { style: { ...LS.btn, fontSize: isMobile ? 9 : 11, background: `${L.blue}15`, borderColor: `${L.blue}40`, color: L.blue, fontWeight: 700 }, onClick: () => exportAuditPDF(enriched, migrationScore, pqcReady, total, totalDays, calDays, totalCost, teamSize, devRate, dateStr, clientName, activeDomain, milestones), children: isMobile ? "⬡ PDF" : "⬡ AUDIT PDF" })] }) }), _jsxs("div", { style: { display: "block" }, className: "pqc-show-cards", children: [_jsx("style", { children: `@media(min-width:900px){.pqc-show-cards{display:none!important;}}` }), _jsx("div", { style: { maxHeight: isMobile ? 400 : 520, overflowY: "auto" }, children: loading
+                                    ? _jsx(SkeletonRoadmapCards, { count: 5 })
+                                    : enriched.length
+                                        ? enriched.map((a, i) => _jsx(RoadmapCard, { a: a, i: i }, i))
+                                        : _jsx("div", { style: { padding: 24, textAlign: "center", fontSize: 10, color: L.green, fontWeight: 600 }, children: "\u2713 No weak assets" }) })] }), _jsxs("div", { style: { display: "none" }, className: "pqc-show-table", children: [_jsx("style", { children: `@media(min-width:900px){.pqc-show-table{display:block!important;}}` }), _jsx("div", { style: { overflowX: "auto" }, children: _jsxs("table", { style: { width: "100%", borderCollapse: "collapse", fontFamily: "'DM Sans',system-ui,sans-serif" }, children: [_jsx("thead", { children: _jsx("tr", { style: { background: L.subtleBg, borderBottom: `2px solid ${L.border}` }, children: ["#", "APPLICATION", "TYPE", "RISK", "KEY LEN", "CIPHER", "TLS", "CA", "PQC SCORE", "DAYS", "COST (INR)", "PUB", "PQC"].map(h => (_jsx("th", { style: { padding: "7px 8px", fontSize: 8, fontWeight: 700, color: L.text3, textTransform: "uppercase", letterSpacing: ".08em", textAlign: "left", whiteSpace: "nowrap" }, children: h }, h))) }) }), _jsx("tbody", { children: loading
+                                                ? _jsx(SkeletonTableRows, { count: 7 })
+                                                : enriched.map((a, i) => {
+                                                    const ps = a.pqcScore;
+                                                    return (_jsxs("tr", { style: { borderBottom: `1px solid ${L.borderLight}`, background: i % 2 === 0 ? L.panelBg : L.subtleBg }, children: [_jsx("td", { style: { padding: "7px 8px", fontFamily: "'DM Mono',monospace", fontSize: 9, color: L.text4 }, children: i + 1 }), _jsx("td", { style: { padding: "7px 8px", color: L.blue, fontSize: 10, fontWeight: 500 }, children: a.app }), _jsx("td", { style: { padding: "7px 8px" }, children: _jsx("span", { style: { fontSize: 8, color: L.text3, background: L.insetBg, border: `1px solid ${L.border}`, borderRadius: 3, padding: "1px 5px", fontWeight: 600 }, children: a.assetType }) }), _jsx("td", { style: { padding: "7px 8px" }, children: _jsx("span", { style: { fontSize: 8, fontWeight: 700, color: a.risk === "Critical" ? L.red : a.risk === "High" ? L.orange : a.risk === "Medium" ? L.yellow : L.green, background: a.risk === "Critical" ? "#fef2f2" : a.risk === "High" ? "#fff7ed" : a.risk === "Medium" ? "#fffbeb" : "#f0fdf4", border: `1px solid ${a.risk === "Critical" ? L.red : a.risk === "High" ? L.orange : a.risk === "Medium" ? L.yellow : L.green}33`, borderRadius: 3, padding: "1px 6px" }, children: a.risk }) }), _jsx("td", { style: { padding: "7px 8px", fontSize: 10, fontWeight: 600, fontFamily: "'DM Mono',monospace", color: a.keylen?.startsWith("1024") ? L.red : a.keylen?.startsWith("2048") ? L.yellow : L.green }, children: a.keylen }), _jsx("td", { style: { padding: "7px 8px", fontSize: 9, color: L.text3, maxWidth: 140, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }, children: a.cipher }), _jsx("td", { style: { padding: "7px 8px" }, children: _jsxs("span", { style: { fontSize: 8, fontWeight: 600, color: a.tls === "1.0" ? L.red : a.tls === "1.2" ? L.yellow : L.green }, children: ["TLS ", a.tls] }) }), _jsx("td", { style: { padding: "7px 8px", fontSize: 9, color: L.text3 }, children: a.ca }), _jsx("td", { style: { padding: "7px 8px", textAlign: "center" }, children: ps && _jsx("span", { style: { fontSize: 8, fontWeight: 700, color: ps.color, border: `1px solid ${ps.color}44`, borderRadius: 3, padding: "1px 5px", background: `${ps.color}10` }, children: ps.active ? "ACTIVE" : `${ps.score}/100` }) }), _jsxs("td", { style: { padding: "7px 8px", fontFamily: "'DM Mono',monospace", fontSize: 10, color: L.cyan, fontWeight: 600 }, children: [a.days, "d"] }), _jsx("td", { style: { padding: "7px 8px", fontFamily: "'DM Mono',monospace", fontSize: 10, color: L.orange, fontWeight: 700 }, children: fmtINR(a.cost) }), _jsx("td", { style: { padding: "7px 8px", textAlign: "center", fontSize: 13 }, children: a.isPublic ? _jsx("span", { style: { color: L.cyan }, children: "\u25CF" }) : _jsx("span", { style: { color: L.text4 }, children: "\u25CB" }) }), _jsx("td", { style: { padding: "7px 8px", textAlign: "center", fontSize: 13 }, children: a.pqc ? _jsx("span", { style: { color: L.green }, children: "\u2713" }) : _jsx("span", { style: { color: L.red }, children: "\u2717" }) })] }, i));
+                                                }) })] }) })] }), _jsx("div", { style: { padding: "8px 14px", borderTop: `1px solid ${L.borderLight}`, display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8, background: L.subtleBg, borderRadius: "0 0 8px 8px" }, children: loading
+                            ? _jsx(Shimmer, { w: 220, h: 10 })
+                            : _jsxs(_Fragment, { children: [_jsxs("span", { style: { fontSize: 10, color: L.text2 }, children: [_jsx("b", { style: { color: L.text1 }, children: enriched.length }), " to migrate \u00B7", " ", _jsxs("b", { style: { color: L.cyan }, children: [totalDays, "d"] }), " dev \u00B7", " ", _jsx("b", { style: { color: L.orange }, children: fmtINR(totalCost) })] }), !isMobile && _jsx("span", { style: { fontSize: 9, color: L.text3 }, children: "Ranked: public-facing \u2192 risk \u2192 cost" })] }) })] }), _jsxs(LPanel, { children: [_jsx(LPanelHeader, { left: "REMEDIATION GUIDE" }), _jsx("div", { style: { padding: 14, display: "grid", gridTemplateColumns: isMobile ? "1fr" : isTablet ? "1fr 1fr" : "repeat(3,1fr)", gap: 10 }, children: loading
+                            ? Array.from({ length: 3 }).map((_, i) => (_jsxs("div", { style: { border: `1px solid ${L.border}`, borderRadius: 6, padding: 12, background: L.subtleBg }, children: [_jsxs("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }, children: [_jsx(Shimmer, { w: 120, h: 10 }), _jsx(Shimmer, { w: 20, h: 20 })] }), _jsx(Shimmer, { w: "90%", h: 9, style: { marginBottom: 6 } }), _jsx(Shimmer, { w: "75%", h: 8, style: { marginBottom: 12 } }), [80, 65, 90, 70, 55].map((w, j) => _jsx(Shimmer, { w: `${w}%`, h: 8, style: { marginBottom: 5 } }, j))] }, i)))
+                            : [
+                                { title: "Upgrade cert key", color: L.red, bg: "#fff5f5", border: `${L.red}25`, icon: "⬡", items: enriched.filter((a) => !(a.pqcScore?.criteria?.certKey4096?.pass)).map((a) => a.app), fix: "Deploy RSA-4096 or EC P-384 — 70/100 pts" },
+                                { title: "Remove wildcard certs", color: L.orange, bg: "#fff7ed", border: `${L.orange}25`, icon: "◈", items: enriched.filter((a) => a.is_wildcard).map((a) => a.app), fix: "Dedicated per-service certificates — 20/100 pts" },
+                                { title: "Enable Kyber hybrid", color: L.cyan, bg: "#f0f9ff", border: `${L.cyan}25`, icon: "◉", items: enriched.filter((a) => !a.pqc).map((a) => a.app), fix: "X25519+Kyber768 (FIPS 203) → ACTIVE status" },
+                            ].map(section => (_jsxs("div", { style: { background: section.bg, border: `1px solid ${section.border}`, borderRadius: 6, padding: 12 }, children: [_jsxs("div", { style: { display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }, children: [_jsx("span", { style: { fontFamily: "'DM Mono',monospace", color: section.color, fontSize: 14, flexShrink: 0 }, children: section.icon }), _jsx("span", { style: { fontSize: 9, color: section.color, letterSpacing: ".1em", textTransform: "uppercase", fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }, children: section.title }), _jsx("span", { style: { marginLeft: "auto", fontFamily: "'DM Mono',monospace", fontSize: 14, color: section.color, flexShrink: 0, fontWeight: 800 }, children: section.items.length })] }), _jsx("div", { style: { fontSize: 9, color: L.text2, marginBottom: 8, lineHeight: 1.6, fontWeight: 500 }, children: section.fix }), _jsxs("div", { style: { display: "flex", flexDirection: "column", gap: 4 }, children: [section.items.slice(0, 5).map((app, i) => (_jsxs("div", { style: { fontSize: 9, color: L.text2, display: "flex", alignItems: "center", gap: 6, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", padding: "3px 0", borderTop: `1px solid ${section.border}` }, children: [_jsx("span", { style: { color: section.color, fontSize: 8, flexShrink: 0, fontWeight: 700 }, children: "\u25B8" }), " ", app] }, i))), section.items.length > 5 && _jsxs("div", { style: { fontSize: 9, color: L.text3, fontStyle: "italic" }, children: ["+", section.items.length - 5, " more"] }), section.items.length === 0 && _jsx("div", { style: { fontSize: 9, color: L.green, fontWeight: 600 }, children: "\u2713 All clear" })] })] }, section.title))) })] })] }));
 }
