@@ -4,7 +4,7 @@ import {
   Table, TR, TD,
 } from "./shared.js";
 import { Grid } from "antd";
-const { useBreakpoint } = Grid;
+
 import {
   parseCipher, fullAnalysis,
   normaliseTLS,
