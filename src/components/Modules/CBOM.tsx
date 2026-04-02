@@ -3,7 +3,6 @@ import {
   Panel, PanelHeader, Badge, ProgBar,
   Table, TR, TD,
 } from "./shared.js";
-import { Grid } from "antd";
 
 import {
   parseCipher, fullAnalysis,
@@ -15,7 +14,6 @@ import {
 import type { CipherAnalysis, CipherFinding, PQCScoreBreakdown } from "./cipherAnalysis.js";
 
 const API = "https://r3bel-production.up.railway.app";
-const { useBreakpoint } = Grid;
 
 // ─── LIGHT PALETTE ────────────────────────────────────────────────────────────
 const L = {
@@ -331,11 +329,9 @@ export default function CBOMPage() {
   const protoLegendRef = useRef<HTMLDivElement>(null);
 
   const bp        = useBreakpoint();
-
-
-    const isMobile  = !screens.md;
-    const isTablet  = screens.md && !screens.lg;
-    const isDesktop = screens.lg;
+  const isMobile  = bp === "mobile";
+  const isTablet  = bp === "tablet";
+  const isDesktop = bp === "desktop";
 
   const [loading,    setLoading]    = useState(true);
   const [cbomData,   setCbomData]   = useState<any[]>([]);
