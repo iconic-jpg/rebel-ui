@@ -5,6 +5,8 @@
 
 import type { PQCScoreBreakdown } from "./cipherAnalysis.js";
 
+const INR_RATE = 83;
+
 // ── INR formatters ────────────────────────────────────────────────────────────
 
 function fmtINR(inr: number): string {
@@ -33,9 +35,9 @@ export interface ExportPDFOptions {
   total:          number;
   totalDays:      number;
   calDays:        number;
-  totalCostINR:   number;
+  totalCostINR:   number;  // NOTE: caller passes USD; converted to INR in exportAuditPDF
   teamSize:       number;
-  devRateINR:     number;
+  devRateINR:     number;  // NOTE: caller passes USD; converted to INR in exportAuditPDF
   completionDate: string;
   clientName:     string;
   clientDomain:   string;
@@ -306,23 +308,35 @@ function buildCSS(): string {
 }
 
 // ── Gauge SVG ─────────────────────────────────────────────────────────────────
+// FIX: uses sweep-flag=0 (counter-clockwise) so arc fills left→right as score
+// rises, and clamps to 0.002–0.998 to avoid degenerate zero-length paths.
 
 function buildGaugeSVG(score: number): string {
-  const pct = Math.min(0.999, Math.max(0.001, score / 100));
+  const pct = Math.min(0.998, Math.max(0.002, score / 100));
   const r = 52, cx = 68, cy = 70;
-  const x1 = cx + r * Math.cos(Math.PI);
-  const y1 = cy + r * Math.sin(Math.PI);
-  const x2 = cx + r * Math.cos(Math.PI + Math.PI * pct);
-  const y2 = cy + r * Math.sin(Math.PI + Math.PI * pct);
-  const la  = pct > 0.5 ? 1 : 0;
+
+  // Track: full semicircle left tip → right tip, counter-clockwise (sweep=0)
+  const tx1 = (cx - r).toFixed(2);
+  const ty1 = cy.toFixed(2);
+  const tx2 = (cx + r).toFixed(2);
+  const ty2 = cy.toFixed(2);
+
+  // Fill arc: left tip → end angle (sweeps rightward as pct increases)
+  // endAngle goes from PI (left) down toward 0 (right) as pct rises
+  const endAngle = Math.PI * (1 - pct);
+  const x2 = (cx + r * Math.cos(endAngle)).toFixed(2);
+  const y2 = (cy + r * Math.sin(endAngle)).toFixed(2);
+  // large-arc-flag: 1 when fill > half the semicircle
+  const la = pct > 0.5 ? 1 : 0;
+
   const col = score >= 70 ? "#16a34a" : score >= 40 ? "#d97706" : "#dc2626";
   const lbl = score >= 70 ? "COMPLIANT" : score >= 40 ? "AT RISK" : "CRITICAL";
 
   return `<svg width="136" height="86" viewBox="0 0 136 86" xmlns="http://www.w3.org/2000/svg">
-  <path d="M ${cx-r} ${cy} A ${r} ${r} 0 0 1 ${cx+r} ${cy}" fill="none" stroke="#e2e8f0" stroke-width="10" stroke-linecap="round"/>
-  <path d="M ${x1.toFixed(2)} ${y1.toFixed(2)} A ${r} ${r} 0 ${la} 1 ${x2.toFixed(2)} ${y2.toFixed(2)}" fill="none" stroke="${col}" stroke-width="10" stroke-linecap="round"/>
-  <text x="${cx}" y="${cy-4}" text-anchor="middle" font-family="Inter,sans-serif" font-size="22" font-weight="700" fill="${col}">${score}</text>
-  <text x="${cx}" y="${cy+13}" text-anchor="middle" font-family="Inter,sans-serif" font-size="6.5" font-weight="600" fill="${col}" letter-spacing="1.6">${lbl}</text>
+  <path d="M ${tx1} ${ty1} A ${r} ${r} 0 0 0 ${tx2} ${ty2}" fill="none" stroke="#e2e8f0" stroke-width="10" stroke-linecap="round"/>
+  <path d="M ${tx1} ${ty1} A ${r} ${r} 0 ${la} 0 ${x2} ${y2}" fill="none" stroke="${col}" stroke-width="10" stroke-linecap="round"/>
+  <text x="${cx}" y="${cy - 4}" text-anchor="middle" font-family="Inter,sans-serif" font-size="22" font-weight="700" fill="${col}">${score}</text>
+  <text x="${cx}" y="${cy + 13}" text-anchor="middle" font-family="Inter,sans-serif" font-size="6.5" font-weight="600" fill="${col}" letter-spacing="1.6">${lbl}</text>
 </svg>`;
 }
 
@@ -363,6 +377,7 @@ export function buildAuditHTML(opts: ExportPDFOptions): string {
     totalCostINR, teamSize, devRateINR, completionDate,
     clientName, clientDomain, milestones,
   } = opts;
+  // At this point all cost values are already in INR (converted in exportAuditPDF)
 
   const now         = new Date();
   const timestamp   = now.toLocaleString("en-IN", { year: "numeric", month: "long", day: "numeric", hour: "2-digit", minute: "2-digit", timeZoneName: "short" });
@@ -406,6 +421,7 @@ export function buildAuditHTML(opts: ExportPDFOptions): string {
   }).join("");
 
   // ── Asset rows ──────────────────────────────────────────────────────────────
+  // a.cost is already INR here (converted at entry)
   const assetRows = enriched.map((a: any, i: number) => {
     const ps       = a.pqcScore as PQCScoreBreakdown | undefined;
     const pqcLabel = ps?.active ? "ACTIVE" : ps ? `${ps.score}/100` : "—";
@@ -660,9 +676,21 @@ export function buildAuditHTML(opts: ExportPDFOptions): string {
 }
 
 // ── Entry point ───────────────────────────────────────────────────────────────
+// FIX: convert all USD cost values → INR here, once, before building HTML.
+// buildAuditHTML and its fmtINR/fmtINRFull helpers expect pre-converted INR values.
 
 export function exportAuditPDF(opts: ExportPDFOptions): void {
-  const html = buildAuditHTML(opts);
+  const converted: ExportPDFOptions = {
+    ...opts,
+    totalCostINR: Math.round(opts.totalCostINR * INR_RATE),
+    devRateINR:   Math.round(opts.devRateINR   * INR_RATE),
+    enriched: opts.enriched.map((a: any) => ({
+      ...a,
+      cost: Math.round(a.cost * INR_RATE),
+    })),
+  };
+
+  const html = buildAuditHTML(converted);
   const blob = new Blob([html], { type: "text/html;charset=utf-8" });
   const url  = URL.createObjectURL(blob);
   const win  = window.open(url, "_blank");
