@@ -4,14 +4,15 @@ import {
   Table, TR, TD, MOCK_ASSETS,
 } from "./shared.js";
 
-// ── API Base: VITE_API_BASE env var → Docker/airgap → cloud fallback ──────────
+// ── API Base ──────────────────────────────────────────────────────────────────
 const API =
   (typeof import.meta !== "undefined" && (import.meta as any).env?.VITE_API_BASE) ||
   "https://r3bel-production.up.railway.app";
 
 // ── Cache config ──────────────────────────────────────────────────────────────
-const CACHE_TTL_MS  = 12 * 60 * 60 * 1000; // 12 hours
-const CACHE_KEY_ASSETS = "rebel_cache_assets_inventory";
+const CACHE_TTL_MS          = 12 * 60 * 60 * 1000;
+const CACHE_KEY_NORMAL      = "rebel_cache_assets_inventory";
+const CACHE_KEY_GHOST       = "rebel_cache_assets_ghost";
 
 interface CacheEntry<T> { ts: number; data: T; }
 
@@ -29,8 +30,9 @@ function cacheSet<T>(key: string, data: T): void {
   try { localStorage.setItem(key, JSON.stringify({ ts: Date.now(), data })); } catch {}
 }
 
-function cacheClear(): void {
-  localStorage.removeItem(CACHE_KEY_ASSETS);
+function cacheClearAll(): void {
+  localStorage.removeItem(CACHE_KEY_NORMAL);
+  localStorage.removeItem(CACHE_KEY_GHOST);
 }
 
 function cacheAgeLabel(key: string): string | null {
@@ -142,7 +144,6 @@ function SkeletonDonutPanel() {
         <Shimmer w={160} h={9} />
       </div>
       <div style={{ padding: 14, display: "flex", gap: 16, alignItems: "center" }}>
-        {/* Fake donut */}
         <div style={{ width: 140, height: 140, flexShrink: 0, borderRadius: "50%", background: "conic-gradient(#e2e8f0 0deg 90deg,#f1f5f9 90deg 200deg,#e2e8f0 200deg 290deg,#f1f5f9 290deg 360deg)", position: "relative", animation: "shimmer 1.4s ease infinite" }}>
           <div style={{ position: "absolute", inset: 28, borderRadius: "50%", background: L.panelBg }} />
         </div>
@@ -218,7 +219,7 @@ function SkeletonMobileCards({ count = 5 }: { count?: number }) {
   );
 }
 
-function SkeletonProgBar({ label }: { label: string }) {
+function SkeletonProgBar() {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
       <Shimmer w={8} h={8} radius={4} />
@@ -251,6 +252,27 @@ function CacheBadge({ age, onRefresh }: { age: string | null; onRefresh: () => v
   );
 }
 
+// ── Secure Mode Banner ────────────────────────────────────────────────────────
+function SecureModeBanner() {
+  return (
+    <div style={{
+      display: "flex", alignItems: "center", gap: 8,
+      padding: "8px 14px",
+      background: `${L.purple}0d`,
+      border: `1px solid ${L.purple}44`,
+      borderRadius: 6,
+    }}>
+      <span style={{ fontSize: 9, color: L.purple, fontWeight: 800, letterSpacing: ".14em", textTransform: "uppercase" as const }}>
+        🔒 SECURE MODE ACTIVE
+      </span>
+      <span style={{ fontSize: 9, color: L.purple, opacity: 0.75 }}>·</span>
+      <span style={{ fontSize: 9, color: L.purple, fontFamily: "'DM Mono', monospace" }}>
+        /ghost/assets — anonymised data, no live scans
+      </span>
+    </div>
+  );
+}
+
 // ── Light sub-components ──────────────────────────────────────────────────────
 function LPanel({ children, style = {} }: { children: React.ReactNode; style?: React.CSSProperties }) {
   return <div style={{ ...LS.panel, ...style }}>{children}</div>;
@@ -263,7 +285,7 @@ function LPanelHeader({ left, right }: { left: string; right?: React.ReactNode }
       padding: "10px 14px", borderBottom: `1px solid ${L.borderLight}`,
       background: L.subtleBg, borderRadius: "8px 8px 0 0",
     }}>
-      <span style={{ fontSize: 9, fontWeight: 700, color: L.text3, letterSpacing: ".14em", textTransform: "uppercase" }}>{left}</span>
+      <span style={{ fontSize: 9, fontWeight: 700, color: L.text3, letterSpacing: ".14em", textTransform: "uppercase" as const }}>{left}</span>
       {right}
     </div>
   );
@@ -275,7 +297,7 @@ function LMetricCard({ label, value, sub, color }: { label: string; value: strin
       background: L.panelBg, border: `1px solid ${L.panelBorder}`, borderRadius: 8,
       padding: "14px 16px", boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
     }}>
-      <div style={{ fontSize: 8, color: L.text4, textTransform: "uppercase", letterSpacing: ".12em", marginBottom: 6, fontWeight: 600 }}>{label}</div>
+      <div style={{ fontSize: 8, color: L.text4, textTransform: "uppercase" as const, letterSpacing: ".12em", marginBottom: 6, fontWeight: 600 }}>{label}</div>
       <div style={{ fontSize: 22, fontWeight: 800, color, lineHeight: 1 }}>{value}</div>
       <div style={{ fontSize: 9, color: L.text3, marginTop: 5 }}>{sub}</div>
     </div>
@@ -303,22 +325,38 @@ function useMobile() {
 
 // ── Main Component ────────────────────────────────────────────────────────────
 export default function AssetInventoryPage() {
-  const [assets,      setAssets]      = useState<any[]>([]);
-  const [loading,     setLoading]     = useState(true);
-  const [fetchError,  setFetchError]  = useState(false);
-  const [fromCache,   setFromCache]   = useState(false);
-  const [cacheAge,    setCacheAge]    = useState<string | null>(null);
-  const [query,       setQuery]       = useState("");
-  const [filterCrit,  setFilterCrit]  = useState("All");
-  const [expandedRow, setExpandedRow] = useState<number | null>(null);
-  const [riskCounts,  setRiskCounts]  = useState({ Critical: 0, High: 0, Medium: 0, Low: 0 });
-  const [certBuckets, setCertBuckets] = useState({ "0-30": 0, "30-60": 0, "60-90": 0, "90+": 0 });
-  const [byType,      setByType]      = useState<Record<string, number>>({});
+  const [assets,        setAssets]        = useState<any[]>([]);
+  const [loading,       setLoading]       = useState(true);
+  const [fetchError,    setFetchError]    = useState(false);
+  const [fromCache,     setFromCache]     = useState(false);
+  const [cacheAge,      setCacheAge]      = useState<string | null>(null);
+  const [query,         setQuery]         = useState("");
+  const [filterCrit,    setFilterCrit]    = useState("All");
+  const [expandedRow,   setExpandedRow]   = useState<number | null>(null);
+  const [riskCounts,    setRiskCounts]    = useState({ Critical: 0, High: 0, Medium: 0, Low: 0 });
+  const [certBuckets,   setCertBuckets]   = useState({ "0-30": 0, "30-60": 0, "60-90": 0, "90+": 0 });
+  const [byType,        setByType]        = useState<Record<string, number>>({});
+  const [secureModeOn,  setSecureModeOn]  = useState(false);
+  const [secureModeLoading, setSecureModeLoading] = useState(true);
 
   const typeRef   = useRef<HTMLCanvasElement>(null);
   const riskRef   = useRef<HTMLCanvasElement>(null);
   const legendRef = useRef<HTMLDivElement>(null);
   const mobile    = useMobile();
+
+  // ── Fetch secure mode status on mount ────────────────────────────────────
+  useEffect(() => {
+    fetch(`${API}/secure-mode/status`)
+      .then(r => r.ok ? r.json() : null)
+      .then(d => {
+        if (d?.enabled !== undefined) setSecureModeOn(Boolean(d.enabled));
+      })
+      .catch(() => {})
+      .finally(() => setSecureModeLoading(false));
+  }, []);
+
+  // ── Derive cache key from mode ────────────────────────────────────────────
+  const activeCacheKey = secureModeOn ? CACHE_KEY_GHOST : CACHE_KEY_NORMAL;
 
   // ── Data fetch with cache ─────────────────────────────────────────────────
   const applyPayload = (d: any) => {
@@ -337,19 +375,25 @@ export default function AssetInventoryPage() {
     setFetchError(false);
 
     if (!forceRefresh) {
-      const cached = cacheGet<any>(CACHE_KEY_ASSETS);
+      const cached = cacheGet<any>(activeCacheKey);
       if (cached) {
         applyPayload(cached);
         setFromCache(true);
-        setCacheAge(cacheAgeLabel_(CACHE_KEY_ASSETS));
+        setCacheAge(cacheAgeLabel(activeCacheKey));
         setLoading(false);
         return;
       }
     }
 
+    // Pick endpoint based on secure mode
+    const endpoint = secureModeOn ? `${API}/ghost/assets` : `${API}/assets`;
+
     try {
-      const d = await fetch(`${API}/assets`).then(r => { if (!r.ok) throw new Error(); return r.json(); });
-      cacheSet(CACHE_KEY_ASSETS, d);
+      const d = await fetch(endpoint).then(r => {
+        if (!r.ok) throw new Error();
+        return r.json();
+      });
+      cacheSet(activeCacheKey, d);
       applyPayload(d);
       setFromCache(false);
       setCacheAge(null);
@@ -360,26 +404,23 @@ export default function AssetInventoryPage() {
     setLoading(false);
   };
 
-  function cacheAgeLabel_(key: string): string | null {
-    try {
-      const raw = localStorage.getItem(key);
-      if (!raw) return null;
-      const entry = JSON.parse(raw);
-      const mins = Math.round((Date.now() - entry.ts) / 60000);
-      if (mins < 60) return `${mins}m ago`;
-      return `${Math.round(mins / 60)}h ago`;
-    } catch { return null; }
-  }
-
   function handleForceRefresh() {
-    cacheClear();
+    cacheClearAll();
     setFromCache(false);
     setCacheAge(null);
     loadData(true);
   }
 
-  useEffect(() => { loadData(); }, []);
-  useEffect(() => { if (!loading) { drawTypeChart(); drawRiskChart(); } }, [assets, riskCounts, byType, mobile, loading]);
+  // Wait for secure mode status before loading data
+  useEffect(() => {
+    if (!secureModeLoading) {
+      loadData();
+    }
+  }, [secureModeOn, secureModeLoading]);
+
+  useEffect(() => {
+    if (!loading) { drawTypeChart(); drawRiskChart(); }
+  }, [assets, riskCounts, byType, mobile, loading]);
 
   // ── Charts ────────────────────────────────────────────────────────────────
   function drawTypeChart() {
@@ -494,12 +535,25 @@ export default function AssetInventoryPage() {
         select option { background: ${L.panelBg}; color: ${L.text1}; }
       `}</style>
 
+      {/* ── SECURE MODE BANNER ── */}
+      {secureModeOn && <SecureModeBanner />}
+
       {/* ── API STATUS BAR ── */}
       <div style={{ display: "flex", alignItems: "center", gap: 10, justifyContent: "space-between", flexWrap: "wrap" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <span style={{ fontSize: 7, fontFamily: "'DM Mono',monospace", color: L.text4, letterSpacing: ".08em" }}>API</span>
           <span style={{ fontSize: 8, fontFamily: "'DM Mono',monospace", color: fetchError ? L.red : L.green, fontWeight: 600 }}>
             {fetchError ? "✗" : "✓"} {API}
+          </span>
+          {/* Active endpoint pill */}
+          <span style={{
+            fontSize: 8, fontFamily: "'DM Mono',monospace", fontWeight: 700,
+            color: secureModeOn ? L.purple : L.cyan,
+            background: secureModeOn ? `${L.purple}10` : `${L.cyan}10`,
+            border: `1px solid ${secureModeOn ? L.purple : L.cyan}44`,
+            borderRadius: 3, padding: "2px 6px", letterSpacing: ".04em",
+          }}>
+            {secureModeOn ? "→ /ghost/assets" : "→ /assets"}
           </span>
           {fetchError && <span style={{ fontSize: 8, color: L.red }}>— showing demo data</span>}
           {loading && <span style={{ fontSize: 8, color: L.blue }}>fetching…</span>}
@@ -512,9 +566,9 @@ export default function AssetInventoryPage() {
         {loading
           ? Array.from({ length: 4 }).map((_, i) => <SkeletonMetricCard key={i} />)
           : <>
-              <LMetricCard label="TOTAL ASSETS"  value={assets.length}                              sub="Scanned"            color={L.blue}   />
-              <LMetricCard label="HIGH RISK"      value={highRisk}                                   sub="Immediate action"   color={L.red}    />
-              <LMetricCard label="CERT EXPIRING"  value={certBuckets["0-30"]}                        sub="Within 30 days"     color={L.orange} />
+              <LMetricCard label="TOTAL ASSETS"  value={assets.length}                                 sub="Scanned"            color={L.blue}   />
+              <LMetricCard label="HIGH RISK"      value={highRisk}                                      sub="Immediate action"   color={L.red}    />
+              <LMetricCard label="CERT EXPIRING"  value={certBuckets["0-30"]}                           sub="Within 30 days"     color={L.orange} />
               <div style={mobile ? { gridColumn: "1/-1" } : {}}>
                 <LMetricCard label="ACTIVE CERTS" value={assets.filter(a => a.cert === "Valid").length} sub="Valid certificates" color={L.green} />
               </div>
@@ -626,7 +680,7 @@ export default function AssetInventoryPage() {
               <thead>
                 <tr style={{ background: L.subtleBg, borderBottom: `2px solid ${L.panelBorder}` }}>
                   {["ASSET", "TYPE", "CRITICALITY", "OWNER", "TLS", "CERT", "KEY LEN", "COMPLIANCE", "LAST SCAN", ""].map(h => (
-                    <th key={h} style={{ padding: "7px 8px", fontSize: 8, fontWeight: 700, color: L.text3, textTransform: "uppercase", letterSpacing: ".08em", textAlign: "left", whiteSpace: "nowrap" }}>{h}</th>
+                    <th key={h} style={{ padding: "7px 8px", fontSize: 8, fontWeight: 700, color: L.text3, textTransform: "uppercase" as const, letterSpacing: ".08em", textAlign: "left", whiteSpace: "nowrap" }}>{h}</th>
                   ))}
                 </tr>
               </thead>
@@ -701,13 +755,13 @@ export default function AssetInventoryPage() {
                                       { label: "CIPHER",             val: a.cipher || "—",                                                                            color: L.text3  },
                                     ].map(item => (
                                       <div key={item.label}>
-                                        <div style={{ fontSize: 7, color: L.text4, letterSpacing: ".1em", marginBottom: 4, textTransform: "uppercase", fontWeight: 600 }}>{item.label}</div>
+                                        <div style={{ fontSize: 7, color: L.text4, letterSpacing: ".1em", marginBottom: 4, textTransform: "uppercase" as const, fontWeight: 600 }}>{item.label}</div>
                                         <div style={{ fontSize: 10, color: item.color, fontFamily: "'DM Mono',monospace", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.val}</div>
                                       </div>
                                     ))}
                                     {a.notes && (
                                       <div style={{ gridColumn: "1/-1" }}>
-                                        <div style={{ fontSize: 7, color: L.text4, letterSpacing: ".1em", marginBottom: 4, textTransform: "uppercase", fontWeight: 600 }}>NOTES</div>
+                                        <div style={{ fontSize: 7, color: L.text4, letterSpacing: ".1em", marginBottom: 4, textTransform: "uppercase" as const, fontWeight: 600 }}>NOTES</div>
                                         <div style={{ fontSize: 9, color: L.text2, lineHeight: 1.6 }}>{a.notes}</div>
                                       </div>
                                     )}
@@ -737,6 +791,9 @@ export default function AssetInventoryPage() {
                 <span style={{ fontSize: 10, color: L.text2 }}>
                   Showing <b style={{ color: L.text1 }}>{filtered.length}</b> of{" "}
                   <b style={{ color: L.text1 }}>{assets.length}</b> assets
+                  {secureModeOn && (
+                    <span style={{ marginLeft: 8, fontSize: 8, color: L.purple, fontWeight: 600 }}>· ghost mode</span>
+                  )}
                 </span>
                 {!mobile && <span style={{ fontSize: 9, color: L.text3 }}>▼ expand row for financial exposure and cipher details</span>}
               </>
@@ -750,7 +807,7 @@ export default function AssetInventoryPage() {
           <LPanelHeader left="CERTIFICATE EXPIRY TIMELINE" />
           <div style={{ padding: 14 }}>
             {loading
-              ? [0, 1, 2, 3].map(i => <SkeletonProgBar key={i} label="" />)
+              ? [0, 1, 2, 3].map(i => <SkeletonProgBar key={i} />)
               : [
                   { label: "0–30 Days",  count: certBuckets["0-30"],  color: L.red    },
                   { label: "30–60 Days", count: certBuckets["30-60"], color: L.orange },
@@ -798,7 +855,7 @@ export default function AssetInventoryPage() {
                 <thead>
                   <tr style={{ background: L.subtleBg, borderBottom: `2px solid ${L.panelBorder}` }}>
                     {["ASSET", "KEY LEN", "CIPHER SUITE", "TLS", "CA"].map(h => (
-                      <th key={h} style={{ padding: "7px 8px", fontSize: 8, fontWeight: 700, color: L.text3, textTransform: "uppercase", letterSpacing: ".08em", textAlign: "left" }}>{h}</th>
+                      <th key={h} style={{ padding: "7px 8px", fontSize: 8, fontWeight: 700, color: L.text3, textTransform: "uppercase" as const, letterSpacing: ".08em", textAlign: "left" }}>{h}</th>
                     ))}
                   </tr>
                 </thead>
