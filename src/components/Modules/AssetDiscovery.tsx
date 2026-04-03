@@ -229,18 +229,66 @@ export default function AssetDiscoveryPage() {
   const [loading,      setLoading]      = useState(true);
 
   useEffect(() => {
-    fetch(`${API}/discovery`)
-      .then(r => r.json())
-      .then(d => {
-        setDomainData(d.domains  || []);
-        setSslData(d.ssl         || []);
-        setIpData(d.ips          || []);
-        setSoftwareData(d.software || []);
-        setCounts(d.counts       || { domains:0, ssl:0, ips:0, software:0 });
-        setLoading(false);
-      })
-      .catch(() => setLoading(false));
-  }, []);
+  fetch(`${API}/ghost/assets?demo=true`)
+    .then(r => r.json())
+    .then(d => {
+      const assets = d.assets || [];
+
+      // Map assets → UI format
+      setDomainData(
+        assets.map((a: any) => ({
+          domain: a.name,
+          date: a.scan,
+          company: a.business_unit,
+        }))
+      );
+
+      setSslData(
+        assets.map((a: any) => ({
+          common: a.name,
+          date: a.scan,
+          tls_version: a.tls,
+          ca: a.ca,
+          sha: a.cipher,
+          from: a.scan,
+          company: a.business_unit,
+        }))
+      );
+
+      setIpData(
+        assets.map((a: any) => ({
+          ip: a.ip,
+          date: a.scan,
+          subnet: a.ip?.split(".").slice(0, 3).join(".") + ".0/24",
+          netname: a.business_unit,
+          ports: "443",
+          asn: "AS-INTERNAL",
+          location: a.business_unit,
+        }))
+      );
+
+      setSoftwareData(
+        assets.map((a: any) => ({
+          product: a.type,
+          version: a._os,
+          type: "Server",
+          port: "443",
+          host: a.name,
+          date: a.scan,
+        }))
+      );
+
+      setCounts({
+        domains: assets.length,
+        ssl: assets.length,
+        ips: assets.length,
+        software: assets.length,
+      });
+
+      setLoading(false);
+    })
+    .catch(() => setLoading(false));
+}, []);
 
   useEffect(() => { drawNetMap(); }, [mobile]);
 
