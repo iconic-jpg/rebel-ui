@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import {
-  T, S, Panel, PanelHeader, MetricCard, Badge, ProgBar,
-  Table, TR, TD, MOCK_ASSETS, MOCK_CBOM,
+  Badge,
+  MOCK_ASSETS, MOCK_CBOM,
 } from "./shared.js";
 
 // ── API Base ──────────────────────────────────────────────────────────────────
@@ -26,25 +26,19 @@ function cacheGet<T>(key: string): T | null {
     return entry.data;
   } catch { return null; }
 }
-
 function cacheSet<T>(key: string, data: T): void {
   try { localStorage.setItem(key, JSON.stringify({ ts: Date.now(), data })); } catch {}
 }
-
 function cacheClearAll(): void {
-  localStorage.removeItem(CACHE_KEY_NORMAL);
-  localStorage.removeItem(CACHE_KEY_CBOM_NORMAL);
-  localStorage.removeItem(CACHE_KEY_GHOST);
+  [CACHE_KEY_NORMAL, CACHE_KEY_CBOM_NORMAL, CACHE_KEY_GHOST].forEach(k => localStorage.removeItem(k));
 }
-
 function cacheAgeLabel(key: string): string | null {
   try {
     const raw = localStorage.getItem(key);
     if (!raw) return null;
     const entry: CacheEntry<unknown> = JSON.parse(raw);
     const mins = Math.round((Date.now() - entry.ts) / 60000);
-    if (mins < 60) return `${mins}m ago`;
-    return `${Math.round(mins / 60)}h ago`;
+    return mins < 60 ? `${mins}m ago` : `${Math.round(mins / 60)}h ago`;
   } catch { return null; }
 }
 
@@ -116,10 +110,10 @@ function fmtINRFull(usd: number): string {
 
 // ── Merge helper: assets + cbom → unified asset list ─────────────────────────
 function buildMergedAssets(assetsData: any, cbom: any): any[] {
-  const base: any[] = assetsData?.assets ?? [];
+  // Clone to avoid mutating cached objects
+  const base: any[] = (assetsData?.assets ?? []).map((a: any) => ({ ...a }));
   if (!cbom?.apps?.length) return base;
 
-  // Build a lookup by normalised name from assets
   const byName: Record<string, number> = {};
   base.forEach((a, i) => { if (a.name) byName[a.name.toLowerCase()] = i; });
 
@@ -129,43 +123,82 @@ function buildMergedAssets(assetsData: any, cbom: any): any[] {
     if (!key) continue;
     const idx = byName[key];
     if (idx !== undefined) {
-      // Enrich existing asset with CBOM cipher/tls/pqc data if missing
       const existing = base[idx];
       base[idx] = {
         ...existing,
-        cipher:            existing.cipher            || app.cipher            || "—",
-        tls:               existing.tls               || app.tls               || "—",
-        keylen:            existing.keylen             || app.keylen            || "—",
-        ca:                existing.ca                || app.ca                || "—",
-        pqc:               existing.pqc               ?? app.pqc               ?? false,
-        pqc_support:       existing.pqc_support       || app.pqc_support       || "none",
-        key_exchange_group:existing.key_exchange_group|| app.key_exchange_group|| null,
-        is_wildcard:       existing.is_wildcard       ?? app.is_wildcard       ?? null,
-        cbom_status:       app.status,
+        cipher:             existing.cipher             || app.cipher             || "—",
+        tls:                existing.tls                || app.tls                || "—",
+        keylen:             existing.keylen              || app.keylen             || "—",
+        ca:                 existing.ca                 || app.ca                 || "—",
+        pqc:                existing.pqc                ?? app.pqc                ?? false,
+        pqc_support:        existing.pqc_support        || app.pqc_support        || "none",
+        key_exchange_group: existing.key_exchange_group || app.key_exchange_group || null,
+        is_wildcard:        existing.is_wildcard        ?? app.is_wildcard        ?? null,
+        cbom_status:        app.status,
       };
     } else {
-      // CBOM app not in registered assets — add as synthetic entry
       extras.push({
-        name:              app.app,
-        url:               app.app,
-        type:              "Other",
-        cipher:            app.cipher   || "—",
-        tls:               app.tls      || "—",
-        keylen:            app.keylen   || "—",
-        ca:                app.ca       || "—",
-        cert:              "—",
-        scan:              "—",
-        pqc:               app.pqc      ?? false,
-        pqc_support:       app.pqc_support || "none",
-        key_exchange_group:app.key_exchange_group || null,
-        is_wildcard:       app.is_wildcard ?? null,
-        cbom_status:       app.status,
-        _fromCbom:         true,
+        name:               app.app,
+        url:                app.app,
+        type:               "Other",
+        cipher:             app.cipher             || "—",
+        tls:                app.tls                || "—",
+        keylen:             app.keylen             || "—",
+        ca:                 app.ca                 || "—",
+        cert:               "—",
+        scan:               "—",
+        pqc:                app.pqc                ?? false,
+        pqc_support:        app.pqc_support        || "none",
+        key_exchange_group: app.key_exchange_group || null,
+        is_wildcard:        app.is_wildcard        ?? null,
+        cbom_status:        app.status,
+        _fromCbom:          true,
       });
     }
   }
-
   return [...base, ...extras];
+}
+
+// ── Derive stats from merged asset list ───────────────────────────────────────
+// Always called after a merge so charts/metrics reflect the full unified set,
+// not just the subset the /assets endpoint happened to pre-compute.
+interface DerivedStats {
+  risk_counts:  { Critical: number; High: number; Medium: number; Low: number };
+  cert_buckets: { "0-30": number; "30-60": number; "60-90": number; "90+": number };
+  by_type:      Record<string, number>;
+}
+function deriveStats(assets: any[]): DerivedStats {
+  const risk_counts  = { Critical: 0, High: 0, Medium: 0, Low: 0 };
+  const cert_buckets = { "0-30": 0, "30-60": 0, "60-90": 0, "90+": 0 };
+  const by_type: Record<string, number> = {};
+
+  for (const a of assets) {
+    // Risk — prefer explicit `risk` field, fallback to `criticality`
+    const r = (a.risk || a.criticality || "") as string;
+    if (r === "Critical")     risk_counts.Critical++;
+    else if (r === "High")    risk_counts.High++;
+    else if (r === "Medium")  risk_counts.Medium++;
+    else if (r === "Low")     risk_counts.Low++;
+
+    // Cert expiry — use numeric days_to_expiry when available, else infer from cert string
+    const dte = a.days_to_expiry;
+    if (typeof dte === "number") {
+      if (dte <= 30)       cert_buckets["0-30"]++;
+      else if (dte <= 60)  cert_buckets["30-60"]++;
+      else if (dte <= 90)  cert_buckets["60-90"]++;
+      else                 cert_buckets["90+"]++;
+    } else if (a.cert === "Expiring") {
+      cert_buckets["0-30"]++;
+    } else if (a.cert === "Valid") {
+      cert_buckets["90+"]++;
+    }
+
+    // Type distribution
+    const t = a.type || "Other";
+    by_type[t] = (by_type[t] || 0) + 1;
+  }
+
+  return { risk_counts, cert_buckets, by_type };
 }
 
 // ── Skeleton components ───────────────────────────────────────────────────────
@@ -295,15 +328,12 @@ function CacheBadge({ age, onRefresh }: { age: string | null; onRefresh: () => v
   if (!age) return null;
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-      <span style={{
-        fontSize: 8, fontWeight: 600, color: L.text3,
-        background: L.insetBg, border: `1px solid ${L.panelBorder}`,
-        borderRadius: 3, padding: "2px 7px", letterSpacing: ".06em",
-      }}>CACHED · {age}</span>
-      <button
-        onClick={onRefresh}
-        style={{ ...LS.btn, fontSize: 9, padding: "3px 8px", color: L.blue, borderColor: `${L.blue}40`, background: `${L.blue}0d` }}
-      >↺ REFRESH</button>
+      <span style={{ fontSize: 8, fontWeight: 600, color: L.text3, background: L.insetBg, border: `1px solid ${L.panelBorder}`, borderRadius: 3, padding: "2px 7px", letterSpacing: ".06em" }}>
+        CACHED · {age}
+      </span>
+      <button onClick={onRefresh} style={{ ...LS.btn, fontSize: 9, padding: "3px 8px", color: L.blue, borderColor: `${L.blue}40`, background: `${L.blue}0d` }}>
+        ↺ REFRESH
+      </button>
     </div>
   );
 }
@@ -311,20 +341,10 @@ function CacheBadge({ age, onRefresh }: { age: string | null; onRefresh: () => v
 // ── Secure Mode Banner ────────────────────────────────────────────────────────
 function SecureModeBanner() {
   return (
-    <div style={{
-      display: "flex", alignItems: "center", gap: 8,
-      padding: "8px 14px",
-      background: `${L.purple}0d`,
-      border: `1px solid ${L.purple}44`,
-      borderRadius: 6,
-    }}>
-      <span style={{ fontSize: 9, color: L.purple, fontWeight: 800, letterSpacing: ".14em", textTransform: "uppercase" as const }}>
-        🔒 SECURE MODE ACTIVE
-      </span>
+    <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 14px", background: `${L.purple}0d`, border: `1px solid ${L.purple}44`, borderRadius: 6 }}>
+      <span style={{ fontSize: 9, color: L.purple, fontWeight: 800, letterSpacing: ".14em", textTransform: "uppercase" as const }}>🔒 SECURE MODE ACTIVE</span>
       <span style={{ fontSize: 9, color: L.purple, opacity: 0.75 }}>·</span>
-      <span style={{ fontSize: 9, color: L.purple, fontFamily: "'DM Mono', monospace" }}>
-        /ghost/assets — anonymised data, no live scans
-      </span>
+      <span style={{ fontSize: 9, color: L.purple, fontFamily: "'DM Mono', monospace" }}>/ghost/assets — anonymised data, no live scans</span>
     </div>
   );
 }
@@ -333,33 +353,23 @@ function SecureModeBanner() {
 function LPanel({ children, style = {} }: { children: React.ReactNode; style?: React.CSSProperties }) {
   return <div style={{ ...LS.panel, ...style }}>{children}</div>;
 }
-
 function LPanelHeader({ left, right }: { left: string; right?: React.ReactNode }) {
   return (
-    <div style={{
-      display: "flex", justifyContent: "space-between", alignItems: "center",
-      padding: "10px 14px", borderBottom: `1px solid ${L.borderLight}`,
-      background: L.subtleBg, borderRadius: "8px 8px 0 0",
-    }}>
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", borderBottom: `1px solid ${L.borderLight}`, background: L.subtleBg, borderRadius: "8px 8px 0 0" }}>
       <span style={{ fontSize: 9, fontWeight: 700, color: L.text3, letterSpacing: ".14em", textTransform: "uppercase" as const }}>{left}</span>
       {right}
     </div>
   );
 }
-
 function LMetricCard({ label, value, sub, color }: { label: string; value: string | number; sub: string; color: string }) {
   return (
-    <div style={{
-      background: L.panelBg, border: `1px solid ${L.panelBorder}`, borderRadius: 8,
-      padding: "14px 16px", boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
-    }}>
+    <div style={{ background: L.panelBg, border: `1px solid ${L.panelBorder}`, borderRadius: 8, padding: "14px 16px", boxShadow: "0 1px 3px rgba(0,0,0,0.05)" }}>
       <div style={{ fontSize: 8, color: L.text4, textTransform: "uppercase" as const, letterSpacing: ".12em", marginBottom: 6, fontWeight: 600 }}>{label}</div>
       <div style={{ fontSize: 22, fontWeight: 800, color, lineHeight: 1 }}>{value}</div>
       <div style={{ fontSize: 9, color: L.text3, marginTop: 5 }}>{sub}</div>
     </div>
   );
 }
-
 function LProgBar({ pct, color }: { pct: number; color: string }) {
   return (
     <div style={{ height: 4, background: L.insetBg, borderRadius: 2, border: `1px solid ${L.panelBorder}`, overflow: "hidden" }}>
@@ -381,18 +391,18 @@ function useMobile() {
 
 // ── Main Component ────────────────────────────────────────────────────────────
 export default function AssetInventoryPage() {
-  const [assets,        setAssets]        = useState<any[]>([]);
-  const [loading,       setLoading]       = useState(true);
-  const [fetchError,    setFetchError]    = useState(false);
-  const [fromCache,     setFromCache]     = useState(false);
-  const [cacheAge,      setCacheAge]      = useState<string | null>(null);
-  const [query,         setQuery]         = useState("");
-  const [filterCrit,    setFilterCrit]    = useState("All");
-  const [expandedRow,   setExpandedRow]   = useState<number | null>(null);
-  const [riskCounts,    setRiskCounts]    = useState({ Critical: 0, High: 0, Medium: 0, Low: 0 });
-  const [certBuckets,   setCertBuckets]   = useState({ "0-30": 0, "30-60": 0, "60-90": 0, "90+": 0 });
-  const [byType,        setByType]        = useState<Record<string, number>>({});
-  const [secureModeOn,  setSecureModeOn]  = useState(false);
+  const [assets,            setAssets]            = useState<any[]>([]);
+  const [loading,           setLoading]           = useState(true);
+  const [fetchError,        setFetchError]        = useState(false);
+  const [fromCache,         setFromCache]         = useState(false);
+  const [cacheAge,          setCacheAge]          = useState<string | null>(null);
+  const [query,             setQuery]             = useState("");
+  const [filterCrit,        setFilterCrit]        = useState("All");
+  const [expandedRow,       setExpandedRow]       = useState<number | null>(null);
+  const [riskCounts,        setRiskCounts]        = useState({ Critical: 0, High: 0, Medium: 0, Low: 0 });
+  const [certBuckets,       setCertBuckets]       = useState({ "0-30": 0, "30-60": 0, "60-90": 0, "90+": 0 });
+  const [byType,            setByType]            = useState<Record<string, number>>({});
+  const [secureModeOn,      setSecureModeOn]      = useState(false);
   const [secureModeLoading, setSecureModeLoading] = useState(true);
 
   const typeRef   = useRef<HTMLCanvasElement>(null);
@@ -400,24 +410,24 @@ export default function AssetInventoryPage() {
   const legendRef = useRef<HTMLDivElement>(null);
   const mobile    = useMobile();
 
-  // ── Fetch secure mode status on mount ────────────────────────────────────
+  // ── Fetch secure mode status ──────────────────────────────────────────────
   useEffect(() => {
     fetch(`${API}/secure-mode/status`)
       .then(r => r.ok ? r.json() : null)
-      .then(d => {
-        if (d?.enabled !== undefined) setSecureModeOn(Boolean(d.enabled));
-      })
+      .then(d => { if (d?.enabled !== undefined) setSecureModeOn(Boolean(d.enabled)); })
       .catch(() => {})
       .finally(() => setSecureModeLoading(false));
   }, []);
 
-  // ── Apply fetched payload ─────────────────────────────────────────────────
-  const applyPayload = (d: any, mergedAssets?: any[]) => {
-    const finalAssets = mergedAssets ?? (d?.assets?.length ? d.assets : MOCK_ASSETS);
+  // ── Commit a resolved asset list to state, always re-deriving stats ───────
+  // We always call deriveStats on the FINAL merged list so the charts and
+  // metric cards reflect CBOM-sourced entries too, not just /assets pre-computed totals.
+  const commitAssets = (finalAssets: any[]) => {
     setAssets(finalAssets);
-    setRiskCounts(d.risk_counts   || { Critical: 0, High: 0, Medium: 0, Low: 0 });
-    setCertBuckets(d.cert_buckets || { "0-30": 0, "30-60": 0, "60-90": 0, "90+": 0 });
-    setByType(d.by_type           || {});
+    const stats = deriveStats(finalAssets);
+    setRiskCounts(stats.risk_counts);
+    setCertBuckets(stats.cert_buckets);
+    setByType(stats.by_type);
   };
 
   // ── Data fetch with cache ─────────────────────────────────────────────────
@@ -426,11 +436,11 @@ export default function AssetInventoryPage() {
     setFetchError(false);
 
     if (secureModeOn) {
-      // ── SECURE MODE: fetch /ghost/assets only ───────────────────────────
+      // ── SECURE MODE: /ghost/assets only ──────────────────────────────────
       if (!forceRefresh) {
         const cached = cacheGet<any>(CACHE_KEY_GHOST);
         if (cached) {
-          applyPayload(cached);
+          commitAssets(cached?.assets?.length ? cached.assets : MOCK_ASSETS);
           setFromCache(true);
           setCacheAge(cacheAgeLabel(CACHE_KEY_GHOST));
           setLoading(false);
@@ -438,28 +448,26 @@ export default function AssetInventoryPage() {
         }
       }
       try {
-        const d = await fetch(`${API}/ghost/assets`).then(r => {
-          if (!r.ok) throw new Error();
-          return r.json();
-        });
+        const d = await fetch(`${API}/ghost/assets`).then(r => { if (!r.ok) throw new Error(); return r.json(); });
         cacheSet(CACHE_KEY_GHOST, d);
-        applyPayload(d);
+        commitAssets(d?.assets?.length ? d.assets : MOCK_ASSETS);
         setFromCache(false);
         setCacheAge(null);
       } catch {
         setFetchError(true);
-        setAssets(MOCK_ASSETS);
+        commitAssets(MOCK_ASSETS);
       }
+
     } else {
-      // ── NORMAL MODE: fetch /assets + /cbom, merge ───────────────────────
+      // ── NORMAL MODE: /assets + /cbom merged ──────────────────────────────
       if (!forceRefresh) {
         const cachedAssets = cacheGet<any>(CACHE_KEY_NORMAL);
         const cachedCbom   = cacheGet<any>(CACHE_KEY_CBOM_NORMAL);
         if (cachedAssets) {
           const merged = cachedCbom
             ? buildMergedAssets(cachedAssets, cachedCbom)
-            : (cachedAssets.assets ?? MOCK_ASSETS);
-          applyPayload(cachedAssets, merged.length ? merged : undefined);
+            : (cachedAssets.assets ?? []);
+          commitAssets(merged.length ? merged : MOCK_ASSETS);
           setFromCache(true);
           setCacheAge(cacheAgeLabel(CACHE_KEY_NORMAL));
           setLoading(false);
@@ -475,13 +483,13 @@ export default function AssetInventoryPage() {
         if (cbomData) cacheSet(CACHE_KEY_CBOM_NORMAL, cbomData);
         const merged = cbomData
           ? buildMergedAssets(assetsData, cbomData)
-          : (assetsData.assets ?? []);
-        applyPayload(assetsData, merged.length ? merged : undefined);
+          : (assetsData?.assets ?? []);
+        commitAssets(merged.length ? merged : MOCK_ASSETS);
         setFromCache(false);
         setCacheAge(null);
       } catch {
         setFetchError(true);
-        setAssets(MOCK_ASSETS);
+        commitAssets(MOCK_ASSETS);
       }
     }
 
@@ -495,11 +503,8 @@ export default function AssetInventoryPage() {
     loadData(true);
   }
 
-  // Wait for secure mode status before loading data
   useEffect(() => {
-    if (!secureModeLoading) {
-      loadData();
-    }
+    if (!secureModeLoading) loadData();
   }, [secureModeOn, secureModeLoading]);
 
   useEffect(() => {
@@ -511,39 +516,33 @@ export default function AssetInventoryPage() {
     const c = typeRef.current; if (!c) return;
     const ctx = c.getContext("2d")!;
     const W = 140, H = 140, cx = 70, cy = 70, r = 50, gap = 0.05;
-
     const data = [
-      { label: "Web Apps",         val: byType["Web App"] || byType["Web Apps"] || 0,  color: L.blue   },
-      { label: "APIs",             val: byType["API"]     || byType["APIs"]     || 0,  color: L.purple },
-      { label: "Core Banking",     val: byType["Core Banking"]     || 0,                color: L.green  },
-      { label: "Internet Banking", val: byType["Internet Banking"] || 0,                color: L.yellow },
-      { label: "Servers",          val: byType["Server"]  || byType["Servers"]  || 0,  color: "#94a3b8" },
-      { label: "Other",            val: byType["Other"]   || 0,                         color: "#cbd5e1" },
+      { label: "Web Apps",         val: byType["Web App"] || byType["Web Apps"] || 0, color: L.blue    },
+      { label: "APIs",             val: byType["API"]     || byType["APIs"]     || 0, color: L.purple  },
+      { label: "Core Banking",     val: byType["Core Banking"]     || 0,               color: L.green   },
+      { label: "Internet Banking", val: byType["Internet Banking"] || 0,               color: L.yellow  },
+      { label: "Servers",          val: byType["Server"]  || byType["Servers"]  || 0, color: "#94a3b8" },
+      { label: "Other",            val: byType["Other"]   || 0,                        color: "#cbd5e1" },
     ].filter(d => d.val > 0);
-
     const display = data.length ? data : [{ label: "Web Apps", val: 1, color: L.blue }];
     const total   = display.reduce((a, d) => a + d.val, 0);
     let angle = -Math.PI / 2;
     ctx.clearRect(0, 0, W, H);
-
     display.forEach(d => {
       const sweep = 2 * Math.PI * (d.val / total) - gap;
       ctx.beginPath(); ctx.moveTo(cx, cy); ctx.arc(cx, cy, r, angle, angle + sweep);
       ctx.fillStyle = d.color; ctx.fill();
       angle += 2 * Math.PI * (d.val / total);
     });
-
     ctx.beginPath(); ctx.arc(cx, cy, 28, 0, Math.PI * 2);
     ctx.fillStyle = "#ffffff"; ctx.fill();
-
     ctx.fillStyle = L.text1;
     ctx.font = "bold 13px 'DM Mono', monospace";
     ctx.textAlign = "center";
     ctx.fillText(String(assets.length), cx, cy + 5);
-
     if (legendRef.current) {
-      legendRef.current.innerHTML = display.map(d => `
-        <div style="display:flex;align-items:center;gap:6px;">
+      legendRef.current.innerHTML = display.map(d =>
+        `<div style="display:flex;align-items:center;gap:6px;">
           <div style="width:8px;height:8px;border-radius:2px;background:${d.color};flex-shrink:0;"></div>
           <span style="font-size:9px;color:${L.text2};flex:1;font-family:'DM Sans',sans-serif;">${d.label}</span>
           <span style="font-size:9px;font-family:'DM Mono',monospace;color:${L.text3};font-weight:600;">${d.val}</span>
@@ -562,8 +561,8 @@ export default function AssetInventoryPage() {
       { label: "Medium",   val: riskCounts.Medium,   color: L.yellow },
       { label: "Low",      val: riskCounts.Low,       color: L.green  },
     ];
-    const max  = Math.max(...bars.map(b => b.val), 1);
-    const bw   = mobile ? 28 : 36, gap = mobile ? 14 : 22;
+    const max    = Math.max(...bars.map(b => b.val), 1);
+    const bw     = mobile ? 28 : 36, gap = mobile ? 14 : 22;
     const startX = (W - (bars.length * (bw + gap) - gap)) / 2;
     ctx.clearRect(0, 0, W, H);
     bars.forEach((b, i) => {
@@ -584,13 +583,10 @@ export default function AssetInventoryPage() {
   // ── Helpers ───────────────────────────────────────────────────────────────
   const certVariant = (c: string): any =>
     c === "Valid" ? "green" : c === "Expiring" ? "yellow" : "red";
-
   const keyColor = (k: string) =>
     k?.startsWith("1024") ? L.red : k?.startsWith("2048") ? L.yellow : L.green;
-
   const critColor = (c: string) =>
     ({ Critical: L.red, High: L.orange, Medium: L.yellow, Low: L.green }[c] ?? null);
-
   const critBg = (c: string) =>
     ({ Critical: "#fff5f5", High: "#fff7ed", Medium: "#fffbeb", Low: "#f0fdf4" }[c] ?? L.subtleBg);
 
@@ -605,8 +601,6 @@ export default function AssetInventoryPage() {
   });
 
   const highRisk = riskCounts.Critical + riskCounts.High;
-
-  // ── Active endpoint label ─────────────────────────────────────────────────
   const activeEndpointLabel = secureModeOn ? "→ /ghost/assets" : "→ /assets + /cbom";
 
   // ── Render ────────────────────────────────────────────────────────────────
@@ -622,7 +616,6 @@ export default function AssetInventoryPage() {
         select option { background: ${L.panelBg}; color: ${L.text1}; }
       `}</style>
 
-      {/* ── SECURE MODE BANNER ── */}
       {secureModeOn && <SecureModeBanner />}
 
       {/* ── API STATUS BAR ── */}
@@ -632,16 +625,13 @@ export default function AssetInventoryPage() {
           <span style={{ fontSize: 8, fontFamily: "'DM Mono',monospace", color: fetchError ? L.red : L.green, fontWeight: 600 }}>
             {fetchError ? "✗" : "✓"} {API}
           </span>
-          {/* Active endpoint pill */}
           <span style={{
             fontSize: 8, fontFamily: "'DM Mono',monospace", fontWeight: 700,
             color: secureModeOn ? L.purple : L.cyan,
             background: secureModeOn ? `${L.purple}10` : `${L.cyan}10`,
             border: `1px solid ${secureModeOn ? L.purple : L.cyan}44`,
             borderRadius: 3, padding: "2px 6px", letterSpacing: ".04em",
-          }}>
-            {activeEndpointLabel}
-          </span>
+          }}>{activeEndpointLabel}</span>
           {fetchError && <span style={{ fontSize: 8, color: L.red }}>— showing demo data</span>}
           {loading && <span style={{ fontSize: 8, color: L.blue }}>fetching…</span>}
         </div>
@@ -675,7 +665,6 @@ export default function AssetInventoryPage() {
                   <div ref={legendRef} style={{ display: "flex", flexDirection: "column", gap: 7, flex: 1 }} />
                 </div>
               </LPanel>
-
               <LPanel>
                 <LPanelHeader
                   left="RISK DISTRIBUTION"
@@ -762,7 +751,6 @@ export default function AssetInventoryPage() {
             }
           </div>
         ) : (
-          /* Desktop table */
           <div style={{ overflowX: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", fontFamily: "'DM Sans',system-ui,sans-serif" }}>
               <thead>
@@ -801,11 +789,10 @@ export default function AssetInventoryPage() {
                                 <span style={{ fontSize: 8, color: L.text3, background: L.insetBg, border: `1px solid ${L.panelBorder}`, borderRadius: 3, padding: "1px 5px", fontWeight: 600 }}>{a.type || "—"}</span>
                               </td>
                               <td style={{ padding: "8px 8px" }}>
-                                {cc ? (
-                                  <span style={{ fontSize: 8, fontWeight: 700, color: cc, border: `1px solid ${cc}44`, borderRadius: 3, padding: "1px 6px", background: cbg }}>{a.criticality}</span>
-                                ) : (
-                                  <span style={{ fontSize: 9, color: L.text3 }}>—</span>
-                                )}
+                                {cc
+                                  ? <span style={{ fontSize: 8, fontWeight: 700, color: cc, border: `1px solid ${cc}44`, borderRadius: 3, padding: "1px 6px", background: cbg }}>{a.criticality}</span>
+                                  : <span style={{ fontSize: 9, color: L.text3 }}>—</span>
+                                }
                               </td>
                               <td style={{ padding: "8px 8px" }}>
                                 <div style={{ fontSize: 9, color: L.text2, fontWeight: 500 }}>{a.owner || "—"}</div>
@@ -840,10 +827,10 @@ export default function AssetInventoryPage() {
                                 <td colSpan={10} style={{ padding: "0 12px 12px" }}>
                                   <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 8, background: L.panelBg, border: `1px solid ${L.panelBorder}`, borderRadius: 6, padding: 12, marginTop: 4, boxShadow: "inset 0 1px 3px rgba(0,0,0,0.04)" }}>
                                     {[
-                                      { label: "BUSINESS UNIT",      val: a.business_unit || "—",                                                                    color: L.text1  },
-                                      { label: "FINANCIAL EXPOSURE", val: a.financial_exposure ? `₹${Number(a.financial_exposure).toLocaleString("en-IN")}` : "—",   color: L.orange },
-                                      { label: "IP ADDRESS",         val: a.ip || "—",                                                                                color: L.text2  },
-                                      { label: "CIPHER",             val: a.cipher || "—",                                                                            color: L.text3  },
+                                      { label: "BUSINESS UNIT",      val: a.business_unit || "—",                                                                  color: L.text1  },
+                                      { label: "FINANCIAL EXPOSURE", val: a.financial_exposure ? `₹${Number(a.financial_exposure).toLocaleString("en-IN")}` : "—", color: L.orange },
+                                      { label: "IP ADDRESS",         val: a.ip || "—",                                                                              color: L.text2  },
+                                      { label: "CIPHER",             val: a.cipher || "—",                                                                          color: L.text3  },
                                     ].map(item => (
                                       <div key={item.label}>
                                         <div style={{ fontSize: 7, color: L.text4, letterSpacing: ".1em", marginBottom: 4, textTransform: "uppercase" as const, fontWeight: 600 }}>{item.label}</div>
@@ -882,11 +869,10 @@ export default function AssetInventoryPage() {
                 <span style={{ fontSize: 10, color: L.text2 }}>
                   Showing <b style={{ color: L.text1 }}>{filtered.length}</b> of{" "}
                   <b style={{ color: L.text1 }}>{assets.length}</b> assets
-                  {secureModeOn ? (
-                    <span style={{ marginLeft: 8, fontSize: 8, color: L.purple, fontWeight: 600 }}>· ghost mode</span>
-                  ) : (
-                    <span style={{ marginLeft: 8, fontSize: 8, color: L.cyan, fontWeight: 600 }}>· assets + cbom</span>
-                  )}
+                  {secureModeOn
+                    ? <span style={{ marginLeft: 8, fontSize: 8, color: L.purple, fontWeight: 600 }}>· ghost mode</span>
+                    : <span style={{ marginLeft: 8, fontSize: 8, color: L.cyan, fontWeight: 600 }}>· assets + cbom</span>
+                  }
                 </span>
                 {!mobile && <span style={{ fontSize: 9, color: L.text3 }}>▼ expand row for financial exposure and cipher details</span>}
               </>
