@@ -11,6 +11,45 @@ import type { CipherAnalysis, CipherFinding, PQCScoreBreakdown } from "./cipherA
 
 const API = "https://r3bel-production.up.railway.app";
 
+// ─── CACHE CONFIG ─────────────────────────────────────────────────────────────
+const CACHE_TTL_MS          = 12 * 60 * 60 * 1000;
+const CACHE_KEY_CBOM        = "rebel_cache_cbom";
+const CACHE_KEY_ASSETS      = "rebel_cache_assets_cbom";
+const CACHE_KEY_GHOST       = "rebel_cache_ghost_cbom";
+
+interface CacheEntry<T> { ts: number; data: T; }
+
+function cacheGet<T>(key: string): T | null {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return null;
+    const entry: CacheEntry<T> = JSON.parse(raw);
+    if (Date.now() - entry.ts > CACHE_TTL_MS) { localStorage.removeItem(key); return null; }
+    return entry.data;
+  } catch { return null; }
+}
+
+function cacheSet<T>(key: string, data: T): void {
+  try { localStorage.setItem(key, JSON.stringify({ ts: Date.now(), data })); } catch {}
+}
+
+function cacheClearAll(): void {
+  localStorage.removeItem(CACHE_KEY_CBOM);
+  localStorage.removeItem(CACHE_KEY_ASSETS);
+  localStorage.removeItem(CACHE_KEY_GHOST);
+}
+
+function cacheAgeLabel(key: string): string | null {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return null;
+    const entry: CacheEntry<unknown> = JSON.parse(raw);
+    const mins = Math.round((Date.now() - entry.ts) / 60000);
+    if (mins < 60) return `${mins}m ago`;
+    return `${Math.round(mins / 60)}h ago`;
+  } catch { return null; }
+}
+
 // ─── BREAKPOINT HOOK ─────────────────────────────────────────────────────────
 function useBreakpoint() {
   const get = () => {
@@ -84,9 +123,9 @@ const L = {
   red:    "#dc2626", orange: "#ea580c",
   yellow: "#ca8a04", green:  "#16a34a",
   cyan:   "#0891b2", blue:   "#1d4ed8",
+  purple: "#7c3aed",
 };
 
-// Chart palette (solid, readable on white canvas)
 const CC = {
   green: "#16a34a", blue: "#1d4ed8", cyan: "#0891b2",
   yellow: "#ca8a04", red: "#dc2626", orange: "#ea580c",
@@ -119,18 +158,6 @@ function MetricSkeleton() {
       <Skel w={48} h={30} r={4} style={{ marginBottom: 8 }} />
       <Skel w={80} h={7} />
     </div>
-  );
-}
-
-function RowSkeleton({ cols = 10 }: { cols?: number }) {
-  return (
-    <tr style={{ borderBottom: `1px solid ${L.divider}` }}>
-      {Array.from({ length: cols }).map((_, i) => (
-        <td key={i} style={{ padding: "10px 12px" }}>
-          <Skel w={i === 0 ? 120 : i === 1 ? 50 : 70} h={9} />
-        </td>
-      ))}
-    </tr>
   );
 }
 
@@ -370,6 +397,50 @@ function AppCard({ d, compact }: { d: any; compact: boolean }) {
   );
 }
 
+// ─── CACHE BADGE ─────────────────────────────────────────────────────────────
+function CacheBadge({ age, onRefresh }: { age: string | null; onRefresh: () => void }) {
+  if (!age) return null;
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+      <span style={{
+        fontSize: 8, fontWeight: 600, color: L.textMuted,
+        background: "rgba(14,165,233,0.06)", border: `1px solid ${L.accentBorder}`,
+        borderRadius: 3, padding: "2px 7px", letterSpacing: ".06em",
+        fontFamily: "'Orbitron',monospace",
+      }}>CACHED · {age}</span>
+      <button
+        onClick={onRefresh}
+        style={{
+          background: `${L.accent}0d`, border: `1px solid ${L.accent}40`,
+          borderRadius: 4, color: L.accent, cursor: "pointer",
+          padding: "3px 8px", fontFamily: "'Orbitron',monospace", fontSize: 9, fontWeight: 700,
+        }}
+      >↺ REFRESH</button>
+    </div>
+  );
+}
+
+// ─── SECURE MODE BANNER ───────────────────────────────────────────────────────
+function SecureModeBanner() {
+  return (
+    <div style={{
+      display: "flex", alignItems: "center", gap: 8,
+      padding: "8px 14px",
+      background: `${L.purple}0d`,
+      border: `1px solid ${L.purple}44`,
+      borderRadius: 6,
+    }}>
+      <span style={{ fontSize: 9, color: L.purple, fontWeight: 800, letterSpacing: ".14em", textTransform: "uppercase" as const, fontFamily: "'Orbitron',monospace" }}>
+        🔒 SECURE MODE ACTIVE
+      </span>
+      <span style={{ fontSize: 9, color: L.purple, opacity: 0.75 }}>·</span>
+      <span style={{ fontSize: 9, color: L.purple, fontFamily: "'Share Tech Mono',monospace" }}>
+        /ghost/assets — anonymised data, no live scans
+      </span>
+    </div>
+  );
+}
+
 // ─── MAIN PAGE ────────────────────────────────────────────────────────────────
 export default function CBOMPage() {
   const klRef          = useRef<HTMLCanvasElement>(null);
@@ -383,84 +454,193 @@ export default function CBOMPage() {
   const isTablet  = bp === "tablet";
   const isDesktop = bp === "desktop";
 
-  const [loading,    setLoading]    = useState(true);
-  const [cbomData,   setCbomData]   = useState<any[]>([]);
-  const [stats,      setStats]      = useState({ total_apps: 0, weak_crypto: 0, pqc_ready: 0, active_certs: 0 });
-  const [cipherData, setCipherData] = useState<any[]>([]);
-  const [caData,     setCaData]     = useState<any[]>([]);
-  const [protoData,  setProtoData]  = useState<any[]>([]);
-  const [keyData,    setKeyData]    = useState<any>({});
-  const [expandedRow,setExpandedRow]= useState<number | null>(null);
+  const [loading,           setLoading]           = useState(true);
+  const [cbomData,          setCbomData]           = useState<any[]>([]);
+  const [stats,             setStats]             = useState({ total_apps: 0, weak_crypto: 0, pqc_ready: 0, active_certs: 0 });
+  const [cipherData,        setCipherData]         = useState<any[]>([]);
+  const [caData,            setCaData]             = useState<any[]>([]);
+  const [protoData,         setProtoData]          = useState<any[]>([]);
+  const [keyData,           setKeyData]            = useState<any>({});
+  const [expandedRow,       setExpandedRow]        = useState<number | null>(null);
+  const [fetchError,        setFetchError]         = useState(false);
+  const [fromCache,         setFromCache]          = useState(false);
+  const [cacheAge,          setCacheAge]           = useState<string | null>(null);
+  const [secureModeOn,      setSecureModeOn]       = useState(false);
+  const [secureModeLoading, setSecureModeLoading]  = useState(true);
 
+  // ── Fetch secure mode status on mount ───────────────────────────────────
   useEffect(() => {
+    fetch(`${API}/secure-mode/status`)
+      .then(r => r.ok ? r.json() : null)
+      .then(d => {
+        if (d?.enabled !== undefined) setSecureModeOn(Boolean(d.enabled));
+      })
+      .catch(() => {})
+      .finally(() => setSecureModeLoading(false));
+  }, []);
+
+  // ── Apply fetched CBOM payload ───────────────────────────────────────────
+  const applyPayload = (d: any, apps: any[]) => {
+    setCbomData(apps);
+    setStats(d.stats || { total_apps: apps.length, weak_crypto: 0, pqc_ready: 0, active_certs: 0 });
+
+    if (d.cipher_counts?.length) setCipherData(
+      d.cipher_counts.map((c: any, i: number) => ({
+        name: c.name, count: c.count,
+        color: [CC.green, CC.blue, CC.cyan, CC.yellow, CC.red][i] || L.textMuted,
+      }))
+    );
+    if (d.ca_counts?.length) setCaData(
+      d.ca_counts.map((c: any, i: number) => ({
+        label: c.label, val: c.val,
+        color: [CC.blue, CC.cyan, CC.green, CC.yellow][i] || L.textMuted,
+      }))
+    );
+    if (d.proto_counts?.length) setProtoData(
+      d.proto_counts.map((p: any) => ({
+        label: p.label, val: p.val,
+        color: p.label.includes("1.3") ? CC.green
+             : p.label.includes("1.2") ? CC.blue
+             : p.label.includes("1.1") ? CC.orange : CC.red,
+      }))
+    );
+    setKeyData(d.key_counts || {});
+  };
+
+  // ── Data load ────────────────────────────────────────────────────────────
+  const loadData = async (forceRefresh = false) => {
     setLoading(true);
-    Promise.all([
-      fetch(`${API}/cbom`).then(r => r.json()).catch(() => ({})),
-      fetch(`${API}/assets`).then(r => r.json()).catch(() => ({ assets: [] })),
-    ]).then(([d, assetsData]) => {
-      const registeredMap: Record<string, any> = {};
-      (assetsData?.assets ?? []).forEach((a: any) => { if (a.name) registeredMap[a.name] = a; });
+    setFetchError(false);
 
-      const cbomApps: any[] = (d.apps ?? []).map((app: any) => {
-        const reg = registeredMap[app.app];
-        if (!reg) return app;
-        return {
-          ...app,
-          is_wildcard:        reg.is_wildcard        ?? app.is_wildcard,
-          criticality:        reg.criticality,
-          owner:              reg.owner,
-          owner_email:        reg.owner_email,
-          business_unit:      reg.business_unit,
-          financial_exposure: reg.financial_exposure,
-          compliance_scope:   reg.compliance_scope,
-        };
-      });
-
-      const cbomDomains = new Set(cbomApps.map((a: any) => a.app));
-      const registeredOnly = (assetsData?.assets ?? [])
-        .filter((a: any) => a.id && !cbomDomains.has(a.name))
-        .map((a: any) => ({
+    if (secureModeOn) {
+      // ── SECURE MODE: fetch /ghost/assets only ─────────────────────────
+      if (!forceRefresh) {
+        const cached = cacheGet<any>(CACHE_KEY_GHOST);
+        if (cached) {
+          // Ghost assets don't carry full CBOM stats — build minimal view
+          const apps = (cached?.assets ?? []).map((a: any) => ({
+            app: a.name, keylen: a.keylen || "—", cipher: a.cipher || "—",
+            tls: a.tls || "—", ca: a.ca || "—",
+            status: a.risk === "weak" ? "weak" : "ok",
+            pqc: false, pqc_support: "none",
+            key_exchange_group: a.key_exchange_group || null,
+            is_wildcard: a.is_wildcard ?? null,
+          }));
+          applyPayload(cached, apps);
+          setFromCache(true);
+          setCacheAge(cacheAgeLabel(CACHE_KEY_GHOST));
+          setLoading(false);
+          return;
+        }
+      }
+      try {
+        const d = await fetch(`${API}/ghost/assets`).then(r => {
+          if (!r.ok) throw new Error();
+          return r.json();
+        });
+        cacheSet(CACHE_KEY_GHOST, d);
+        const apps = (d?.assets ?? []).map((a: any) => ({
           app: a.name, keylen: a.keylen || "—", cipher: a.cipher || "—",
           tls: a.tls || "—", ca: a.ca || "—",
           status: a.risk === "weak" ? "weak" : "ok",
           pqc: false, pqc_support: "none",
           key_exchange_group: a.key_exchange_group || null,
           is_wildcard: a.is_wildcard ?? null,
-          criticality: a.criticality, owner: a.owner,
-          owner_email: a.owner_email, business_unit: a.business_unit,
-          financial_exposure: a.financial_exposure, compliance_scope: a.compliance_scope,
         }));
+        applyPayload(d, apps);
+        setFromCache(false);
+        setCacheAge(null);
+      } catch {
+        setFetchError(true);
+      }
+    } else {
+      // ── NORMAL MODE: fetch /cbom + /assets, merge ─────────────────────
+      if (!forceRefresh) {
+        const cachedCbom   = cacheGet<any>(CACHE_KEY_CBOM);
+        const cachedAssets = cacheGet<any>(CACHE_KEY_ASSETS);
+        if (cachedCbom) {
+          const registeredMap: Record<string, any> = {};
+          (cachedAssets?.assets ?? []).forEach((a: any) => { if (a.name) registeredMap[a.name] = a; });
+          const apps = buildMergedApps(cachedCbom, registeredMap, cachedAssets?.assets ?? []);
+          applyPayload(cachedCbom, apps);
+          setFromCache(true);
+          setCacheAge(cacheAgeLabel(CACHE_KEY_CBOM));
+          setLoading(false);
+          return;
+        }
+      }
+      try {
+        const [d, assetsData] = await Promise.all([
+          fetch(`${API}/cbom`).then(r => r.json()).catch(() => ({})),
+          fetch(`${API}/assets`).then(r => r.json()).catch(() => ({ assets: [] })),
+        ]);
+        cacheSet(CACHE_KEY_CBOM, d);
+        cacheSet(CACHE_KEY_ASSETS, assetsData);
 
-      const merged = [...cbomApps, ...registeredOnly];
-      if (merged.length) { setCbomData(merged); setStats(d.stats || stats); }
+        const registeredMap: Record<string, any> = {};
+        (assetsData?.assets ?? []).forEach((a: any) => { if (a.name) registeredMap[a.name] = a; });
+        const apps = buildMergedApps(d, registeredMap, assetsData?.assets ?? []);
+        applyPayload(d, apps);
+        setFromCache(false);
+        setCacheAge(null);
+      } catch {
+        setFetchError(true);
+      }
+    }
 
-      if (d.cipher_counts?.length) setCipherData(
-        d.cipher_counts.map((c: any, i: number) => ({
-          name: c.name, count: c.count,
-          color: [CC.green, CC.blue, CC.cyan, CC.yellow, CC.red][i] || L.textMuted,
-        }))
-      );
-      if (d.ca_counts?.length) setCaData(
-        d.ca_counts.map((c: any, i: number) => ({
-          label: c.label, val: c.val,
-          color: [CC.blue, CC.cyan, CC.green, CC.yellow][i] || L.textMuted,
-        }))
-      );
-      if (d.proto_counts?.length) setProtoData(
-        d.proto_counts.map((p: any) => ({
-          label: p.label, val: p.val,
-          color: p.label.includes("1.3") ? CC.green
-               : p.label.includes("1.2") ? CC.blue
-               : p.label.includes("1.1") ? CC.orange : CC.red,
-        }))
-      );
-      setKeyData(d.key_counts || {});
-    }).finally(() => setLoading(false));
-  }, []);
+    setLoading(false);
+  };
+
+  function handleForceRefresh() {
+    cacheClearAll();
+    setFromCache(false);
+    setCacheAge(null);
+    loadData(true);
+  }
+
+  // Wait for secure mode before loading
+  useEffect(() => {
+    if (!secureModeLoading) loadData();
+  }, [secureModeOn, secureModeLoading]);
 
   useEffect(() => { if (!loading) drawKeyLength(); }, [keyData, bp, loading]);
   useEffect(() => { if (!loading) drawCA();         }, [caData, loading]);
   useEffect(() => { if (!loading) drawProto();      }, [protoData, loading]);
+
+  // ── Merge helper ─────────────────────────────────────────────────────────
+  function buildMergedApps(d: any, registeredMap: Record<string, any>, allAssets: any[]): any[] {
+    const cbomApps: any[] = (d.apps ?? []).map((app: any) => {
+      const reg = registeredMap[app.app];
+      if (!reg) return app;
+      return {
+        ...app,
+        is_wildcard:        reg.is_wildcard        ?? app.is_wildcard,
+        criticality:        reg.criticality,
+        owner:              reg.owner,
+        owner_email:        reg.owner_email,
+        business_unit:      reg.business_unit,
+        financial_exposure: reg.financial_exposure,
+        compliance_scope:   reg.compliance_scope,
+      };
+    });
+
+    const cbomDomains = new Set(cbomApps.map((a: any) => a.app));
+    const registeredOnly = allAssets
+      .filter((a: any) => a.id && !cbomDomains.has(a.name))
+      .map((a: any) => ({
+        app: a.name, keylen: a.keylen || "—", cipher: a.cipher || "—",
+        tls: a.tls || "—", ca: a.ca || "—",
+        status: a.risk === "weak" ? "weak" : "ok",
+        pqc: false, pqc_support: "none",
+        key_exchange_group: a.key_exchange_group || null,
+        is_wildcard: a.is_wildcard ?? null,
+        criticality: a.criticality, owner: a.owner,
+        owner_email: a.owner_email, business_unit: a.business_unit,
+        financial_exposure: a.financial_exposure, compliance_scope: a.compliance_scope,
+      }));
+
+    return [...cbomApps, ...registeredOnly];
+  }
 
   const analysed = cbomData.map((d: any) => ({
     ...d,
@@ -492,26 +672,22 @@ export default function CBOMPage() {
       { label: "1024",  val: keyData["1024"]  || 0, color: CC.yellow },
       { label: "other", val: keyData["other"] || 0, color: CC.red    },
     ];
-    const max  = Math.max(...bars.map(b => b.val), 1);
-    const bw   = isMobile ? 22 : 30, gap = isMobile ? 8 : 16;
+    const max    = Math.max(...bars.map(b => b.val), 1);
+    const bw     = isMobile ? 22 : 30, gap = isMobile ? 8 : 16;
     const startX = (W - (bars.length * (bw + gap) - gap)) / 2;
     ctx.clearRect(0, 0, W, H);
-    // light background
     ctx.fillStyle = "#f8fafc";
     ctx.fillRect(0, 0, W, H);
     bars.forEach(b => {
-      const x = startX + bars.indexOf(b) * (bw + gap);
+      const x    = startX + bars.indexOf(b) * (bw + gap);
       const barH = Math.round((b.val / max) * (H - 34));
-      const y = H - barH - 22;
-      // bar fill
+      const y    = H - barH - 22;
       ctx.fillStyle = `${b.color}1a`; ctx.fillRect(x, y, bw, barH);
       ctx.fillStyle = `${b.color}88`; ctx.fillRect(x, y + 3, bw, barH - 3);
       ctx.fillStyle = b.color;        ctx.fillRect(x, y, bw, 3);
-      // value
       ctx.fillStyle = b.color;
       ctx.font = "bold 9px 'Share Tech Mono'"; ctx.textAlign = "center";
       ctx.fillText(String(b.val), x + bw / 2, y - 4);
-      // label
       ctx.fillStyle = "#475569";
       ctx.font = "9px 'Share Tech Mono'";
       ctx.fillText(b.label, x + bw / 2, H - 5);
@@ -530,7 +706,6 @@ export default function CBOMPage() {
     if (total === 0) return;
     let angle = -Math.PI / 2;
     ctx.clearRect(0, 0, W, H);
-    // light bg
     ctx.fillStyle = "#f8fafc";
     ctx.fillRect(0, 0, W, H);
     data.forEach(d => {
@@ -540,10 +715,8 @@ export default function CBOMPage() {
       ctx.strokeStyle = d.color; ctx.lineWidth = 2; ctx.stroke();
       angle += 2 * Math.PI * (d.val / total);
     });
-    // donut hole
     ctx.beginPath(); ctx.arc(cx, cy, 28, 0, Math.PI * 2);
     ctx.fillStyle = "#f8fafc"; ctx.fill();
-    // legend
     if (legendRef.current) {
       legendRef.current.innerHTML = data.map(d => `
         <div style="display:flex;align-items:center;gap:7px;">
@@ -584,6 +757,8 @@ export default function CBOMPage() {
   const maxCipher  = Math.max(...(cipherData.length ? cipherData : [{ count: 1 }]).map(c => c.count), 1);
   const metricCols = isMobile ? "1fr 1fr" : isTablet ? "repeat(3,1fr)" : "repeat(5,1fr)";
   const chartCols  = isMobile ? "1fr" : isTablet ? "1fr 1fr" : "repeat(3,1fr)";
+
+  const activeEndpointLabel = secureModeOn ? "→ /ghost/assets" : "→ /cbom + /assets";
 
   const panelSt: React.CSSProperties = {
     background: L.panelBg,
@@ -626,6 +801,31 @@ export default function CBOMPage() {
         @keyframes ping { 75%,100% { transform: scale(2.2); opacity: 0; } }
       `}</style>
 
+      {/* ── SECURE MODE BANNER ── */}
+      {secureModeOn && <SecureModeBanner />}
+
+      {/* ── API STATUS BAR ── */}
+      <div style={{ display: "flex", alignItems: "center", gap: 10, justifyContent: "space-between", flexWrap: "wrap" as const }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" as const }}>
+          <span style={{ fontSize: 7, fontFamily: "'Orbitron',monospace", color: L.textFaint, letterSpacing: ".08em" }}>API</span>
+          <span style={{ fontSize: 8, fontFamily: "'Share Tech Mono',monospace", color: fetchError ? L.red : L.green, fontWeight: 600 }}>
+            {fetchError ? "✗" : "✓"} {API}
+          </span>
+          <span style={{
+            fontSize: 8, fontFamily: "'Share Tech Mono',monospace", fontWeight: 700,
+            color: secureModeOn ? L.purple : L.cyan,
+            background: secureModeOn ? `${L.purple}10` : `${L.cyan}10`,
+            border: `1px solid ${secureModeOn ? L.purple : L.cyan}44`,
+            borderRadius: 3, padding: "2px 6px", letterSpacing: ".04em",
+          }}>
+            {activeEndpointLabel}
+          </span>
+          {fetchError && <span style={{ fontSize: 8, color: L.red }}>— showing cached data</span>}
+          {loading && <span style={{ fontSize: 8, color: L.blue }}>fetching…</span>}
+        </div>
+        {fromCache && <CacheBadge age={cacheAge} onRefresh={handleForceRefresh} />}
+      </div>
+
       {/* ── METRICS ── */}
       <div style={{ display: "grid", gridTemplateColumns: metricCols, gap: isMobile ? 8 : 10 }}>
         {loading ? (
@@ -660,6 +860,11 @@ export default function CBOMPage() {
             <div style={{ width: 3, height: 14, background: L.accent, borderRadius: 2 }} />
             DORA ART. 9.4 — LIVE FINDING SUMMARY
           </span>
+          {secureModeOn && (
+            <span style={{ fontSize: 7, color: L.purple, fontFamily: "'Orbitron',monospace", fontWeight: 700, border: `1px solid ${L.purple}44`, borderRadius: 3, padding: "2px 6px", background: `${L.purple}0a` }}>
+              GHOST MODE
+            </span>
+          )}
         </div>
         <div style={{ padding: "10px 14px", display: "grid", gridTemplateColumns: isMobile ? "1fr 1fr" : "repeat(4,1fr)", gap: 8 }}>
           {loading ? (
@@ -785,10 +990,18 @@ export default function CBOMPage() {
           <span style={sLabelSt}>
             <div style={{ width: 3, height: 14, background: L.accent, borderRadius: 2 }} />
             APPLICATION CRYPTOGRAPHIC INVENTORY
+            {secureModeOn && (
+              <span style={{ fontSize: 7, color: L.purple, fontFamily: "'Orbitron',monospace", fontWeight: 700, border: `1px solid ${L.purple}44`, borderRadius: 3, padding: "2px 6px", background: `${L.purple}0a`, marginLeft: 4 }}>
+                🔒 GHOST
+              </span>
+            )}
           </span>
-          <button style={btnSt} onClick={exportCSV} disabled={loading}>
-            {isMobile ? "↓ CSV" : "↓ EXPORT FULL CSV"}
-          </button>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            {fromCache && !isMobile && <CacheBadge age={cacheAge} onRefresh={handleForceRefresh} />}
+            <button style={btnSt} onClick={exportCSV} disabled={loading}>
+              {isMobile ? "↓ CSV" : "↓ EXPORT FULL CSV"}
+            </button>
+          </div>
         </div>
 
         {!isDesktop && (
@@ -802,7 +1015,6 @@ export default function CBOMPage() {
 
         {isDesktop && (
           <>
-            {/* Table header */}
             <div style={{ display: "grid", gridTemplateColumns: "1.8fr 0.7fr 1.1fr 1.1fr 0.5fr 0.7fr 0.9fr 0.8fr 0.9fr 90px", padding: "7px 14px", borderBottom: `1px solid ${L.divider}`, background: L.pageBg }}>
               {["APPLICATION","KEY LEN","KEY EXCHANGE","BULK CIPHER","PFS","TLS VER","CA","OVERALL RISK","PQC",""].map(h => (
                 <span key={h} style={{ fontSize: 7.5, color: "#1e3a5f", letterSpacing: "0.14em", fontFamily: "'Orbitron',monospace", fontWeight: 700 }}>{h}</span>
@@ -810,7 +1022,11 @@ export default function CBOMPage() {
             </div>
             <div style={{ maxHeight: 480, overflowY: "auto" }}>
               {loading ? (
-                Array.from({ length: 8 }).map((_, i) => <RowSkeleton key={i} cols={10} />)
+                Array.from({ length: 8 }).map((_, i) => (
+                  <div key={i} style={{ display: "grid", gridTemplateColumns: "1.8fr 0.7fr 1.1fr 1.1fr 0.5fr 0.7fr 0.9fr 0.8fr 0.9fr 90px", padding: "10px 14px", borderBottom: `1px solid ${L.divider}`, alignItems: "center", gap: 8 }}>
+                    {[120,50,90,90,30,50,70,60,60,60].map((w, j) => <Skel key={j} w={w} h={9} />)}
+                  </div>
+                ))
               ) : (
                 analysed.map((d: any, i: number) => {
                   const c        = d.analysis.components;
@@ -876,6 +1092,9 @@ export default function CBOMPage() {
               <b style={{ color: L.red }}> {findingCounts.critical}</b> critical ·
               <b style={{ color: L.orange }}> {findingCounts.high}</b> high ·
               <b style={{ color: L.red }}> {noPFSCount}</b> without PFS
+              {secureModeOn && (
+                <span style={{ marginLeft: 8, fontSize: 8, color: L.purple, fontWeight: 600 }}>· ghost mode</span>
+              )}
             </span>
           )}
           {!isMobile && (

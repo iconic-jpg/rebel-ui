@@ -18,9 +18,11 @@ const API =
   "https://r3bel-production.up.railway.app";
 
 // ── Cache config ──────────────────────────────────────────────────────────────
-const CACHE_TTL_MS  = 12 * 60 * 60 * 1000; // 12 hours
-const CACHE_KEY_CBOM   = "rebel_cache_cbom";
-const CACHE_KEY_ASSETS = "rebel_cache_assets";
+const CACHE_TTL_MS         = 12 * 60 * 60 * 1000; // 12 hours
+const CACHE_KEY_CBOM       = "rebel_cache_cbom";
+const CACHE_KEY_ASSETS     = "rebel_cache_assets";
+const CACHE_KEY_CBOM_GHOST = "rebel_cache_cbom_ghost";
+const CACHE_KEY_ASSETS_GHOST = "rebel_cache_assets_ghost";
 
 interface CacheEntry<T> { ts: number; data: T; }
 
@@ -38,18 +40,23 @@ function cacheSet<T>(key: string, data: T): void {
   try { localStorage.setItem(key, JSON.stringify({ ts: Date.now(), data })); } catch {}
 }
 
-function cacheClear(): void {
-  localStorage.removeItem(CACHE_KEY_CBOM);
-  localStorage.removeItem(CACHE_KEY_ASSETS);
+function cacheClear(ghost: boolean): void {
+  if (ghost) {
+    localStorage.removeItem(CACHE_KEY_CBOM_GHOST);
+    localStorage.removeItem(CACHE_KEY_ASSETS_GHOST);
+  } else {
+    localStorage.removeItem(CACHE_KEY_CBOM);
+    localStorage.removeItem(CACHE_KEY_ASSETS);
+  }
 }
 
-function cacheAge(key: string): string | null {
+function cacheAge_(key: string): string | null {
   try {
     const raw = localStorage.getItem(key);
     if (!raw) return null;
-    const entry: CacheEntry<unknown> = JSON.parse(raw);
+    const entry = JSON.parse(raw);
     const mins = Math.round((Date.now() - entry.ts) / 60000);
-    if (mins < 60)  return `${mins}m ago`;
+    if (mins < 60) return `${mins}m ago`;
     return `${Math.round(mins / 60)}h ago`;
   } catch { return null; }
 }
@@ -72,6 +79,7 @@ const L = {
   yellow: "#b45309",
   orange: "#c2410c",
   red:    "#dc2626",
+  purple: "#7c3aed",
   border:      "#e2e8f0",
   borderLight: "#f1f5f9",
 };
@@ -216,7 +224,6 @@ function SkeletonGaugePanel() {
         <Shimmer w={160} h={9}/>
       </div>
       <div style={{ padding: 14, display: "flex", flexDirection: "column", alignItems: "center", gap: 16 }}>
-        {/* Fake gauge arc */}
         <div style={{ width: 200, height: 120, display: "flex", alignItems: "flex-end", justifyContent: "center", position: "relative" }}>
           <div style={{
             width: 180, height: 90,
@@ -231,7 +238,6 @@ function SkeletonGaugePanel() {
             <Shimmer w={80} h={9} radius={4} style={{ margin: "0 auto" }}/>
           </div>
         </div>
-        {/* Milestone bars */}
         {[100, 80, 65, 90, 40].map((w, i) => (
           <div key={i} style={{ width: "100%" }}>
             <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
@@ -322,6 +328,27 @@ function CacheBadge({ age, onRefresh }: { age: string | null; onRefresh: () => v
   );
 }
 
+// ── Secure Mode Banner ────────────────────────────────────────────────────────
+function SecureModeBanner() {
+  return (
+    <div style={{
+      display: "flex", alignItems: "center", gap: 8,
+      padding: "8px 14px",
+      background: `${L.purple}0d`,
+      border: `1px solid ${L.purple}44`,
+      borderRadius: 6,
+    }}>
+      <span style={{ fontSize: 9, color: L.purple, fontWeight: 800, letterSpacing: ".14em", textTransform: "uppercase" as const }}>
+        🔒 SECURE MODE ACTIVE
+      </span>
+      <span style={{ fontSize: 9, color: L.purple, opacity: 0.75 }}>·</span>
+      <span style={{ fontSize: 9, color: L.purple, fontFamily: "'DM Mono', monospace" }}>
+        /ghost/assets — anonymised data, no live scans
+      </span>
+    </div>
+  );
+}
+
 // ── Light Panel Components ────────────────────────────────────────────────────
 function LPanel({ children, style={} }: { children: React.ReactNode; style?: React.CSSProperties }) {
   return <div style={{...LS.panel, ...style}}>{children}</div>;
@@ -352,8 +379,6 @@ function LMetricCard({ label, value, sub, color }: { label: string; value: strin
     </div>
   );
 }
-
-
 
 // ── Score Gauge ───────────────────────────────────────────────────────────────
 function ScoreGauge({ score, size=200 }: { score:number; size?:number }) {
@@ -448,59 +473,36 @@ function RoadmapCard({ a, i }: { a:any; i:number }) {
 
 // ── Main Page ─────────────────────────────────────────────────────────────────
 export default function PQCReadinessPage() {
-  const [cbomData,     setCbomData]     = useState<any[]>([]);
-  const [assets,       setAssets]       = useState<any[]>([]);
-  const [loading,      setLoading]      = useState(true);
-  const [fetchError,   setFetchError]   = useState(false);
-  const [fromCache,    setFromCache]    = useState(false);
-  const [cacheAge,     setCacheAge]     = useState<string|null>(null);
-  const [teamSize,     setTeamSize]     = useState(2);
-  const [devRate,      setDevRate]      = useState(DEV_RATE_USD);
-  const [domainInput,  setDomainInput]  = useState("");
-  const [activeDomain, setActiveDomain] = useState("");
-  const [clientName,   setClientName]   = useState("");
+  const [cbomData,          setCbomData]          = useState<any[]>([]);
+  const [assets,            setAssets]            = useState<any[]>([]);
+  const [loading,           setLoading]           = useState(true);
+  const [fetchError,        setFetchError]        = useState(false);
+  const [fromCache,         setFromCache]         = useState(false);
+  const [cachedAt,          setCachedAt]          = useState<string|null>(null);
+  const [teamSize,          setTeamSize]          = useState(2);
+  const [devRate,           setDevRate]           = useState(DEV_RATE_USD);
+  const [domainInput,       setDomainInput]       = useState("");
+  const [activeDomain,      setActiveDomain]      = useState("");
+  const [clientName,        setClientName]        = useState("");
+  const [secureModeOn,      setSecureModeOn]      = useState(false);
+  const [secureModeLoading, setSecureModeLoading] = useState(true);
 
   const bp=useBreakpoint(), isMobile=bp==="mobile", isTablet=bp==="tablet", isDesktop=bp==="desktop";
 
-  // ── Data fetch with cache ───────────────────────────────────────────────────
-  const loadData = async (forceRefresh = false) => {
-    setLoading(true);
-    setFetchError(false);
+  // ── Derive cache keys based on mode ──────────────────────────────────────
+  const cbomCacheKey   = secureModeOn ? CACHE_KEY_CBOM_GHOST   : CACHE_KEY_CBOM;
+  const assetsCacheKey = secureModeOn ? CACHE_KEY_ASSETS_GHOST : CACHE_KEY_ASSETS;
 
-    // Try cache first (unless force-refreshing)
-    if (!forceRefresh) {
-      const cachedCbom   = cacheGet<any>(CACHE_KEY_CBOM);
-      const cachedAssets = cacheGet<any>(CACHE_KEY_ASSETS);
-      if (cachedCbom && cachedAssets) {
-        const merged = buildMerged(cachedCbom, cachedAssets);
-        if (merged.length) setCbomData(merged);
-        if (cachedAssets?.assets?.length) setAssets(cachedAssets.assets);
-        setFromCache(true);
-        setCacheAge(cacheAge => cacheAge); // will be read fresh below
-        setLoading(false);
-        return;
-      }
-    }
+  // ── Fetch secure mode status on mount ────────────────────────────────────
+  useEffect(() => {
+    fetch(`${API}/secure-mode/status`)
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d?.enabled !== undefined) setSecureModeOn(Boolean(d.enabled)); })
+      .catch(() => {})
+      .finally(() => setSecureModeLoading(false));
+  }, []);
 
-    // Fetch from API
-    try {
-      const [cbom, assetsData] = await Promise.all([
-        fetch(`${API}/cbom`).then(r => { if (!r.ok) throw new Error(); return r.json(); }),
-        fetch(`${API}/assets`).then(r => { if (!r.ok) throw new Error(); return r.json(); }),
-      ]);
-      cacheSet(CACHE_KEY_CBOM,   cbom);
-      cacheSet(CACHE_KEY_ASSETS, assetsData);
-      const merged = buildMerged(cbom, assetsData);
-      if (merged.length) setCbomData(merged);
-      if (assetsData?.assets?.length) setAssets(assetsData.assets);
-      setFromCache(false);
-    } catch {
-      setFetchError(true);
-      // fall through — displayCbom/displayAssets will use MOCK below
-    }
-    setLoading(false);
-  };
-
+  // ── Merge helper ─────────────────────────────────────────────────────────
   function buildMerged(cbom: any, assetsData: any): any[] {
     const registeredMap: Record<string, any> = {};
     (assetsData?.assets ?? []).forEach((a: any) => { if (a.name) registeredMap[a.name] = a; });
@@ -516,32 +518,59 @@ export default function PQCReadinessPage() {
     return [...cbomApps, ...registeredOnly];
   }
 
-  useEffect(() => { loadData(); }, []);
+  // ── Data fetch with cache ─────────────────────────────────────────────────
+  const loadData = async (forceRefresh = false) => {
+    setLoading(true);
+    setFetchError(false);
 
-  // Update cache age display after load
-  useEffect(() => {
-    if (fromCache) {
-      setCacheAge(cacheAge_(CACHE_KEY_CBOM));
+    // Try cache first (unless force-refreshing)
+    if (!forceRefresh) {
+      const cachedCbom   = cacheGet<any>(cbomCacheKey);
+      const cachedAssets = cacheGet<any>(assetsCacheKey);
+      if (cachedCbom && cachedAssets) {
+        const merged = buildMerged(cachedCbom, cachedAssets);
+        if (merged.length) setCbomData(merged);
+        if (cachedAssets?.assets?.length) setAssets(cachedAssets.assets);
+        setFromCache(true);
+        setCachedAt(cacheAge_(cbomCacheKey));
+        setLoading(false);
+        return;
+      }
     }
-  }, [fromCache]);
 
-  function cacheAge_(key: string): string | null {
+    // ── Pick endpoints: secure mode uses /ghost/assets for assets ──────────
+    // CBOM is always fetched from /cbom (no ghost variant for CBOM)
+    const assetsEndpoint = secureModeOn ? `${API}/ghost/assets` : `${API}/assets`;
+
     try {
-      const raw = localStorage.getItem(key);
-      if (!raw) return null;
-      const entry = JSON.parse(raw);
-      const mins = Math.round((Date.now() - entry.ts) / 60000);
-      if (mins < 60) return `${mins}m ago`;
-      return `${Math.round(mins / 60)}h ago`;
-    } catch { return null; }
-  }
+      const [cbom, assetsData] = await Promise.all([
+        fetch(`${API}/cbom`).then(r => { if (!r.ok) throw new Error(); return r.json(); }),
+        fetch(assetsEndpoint).then(r => { if (!r.ok) throw new Error(); return r.json(); }),
+      ]);
+      cacheSet(cbomCacheKey,   cbom);
+      cacheSet(assetsCacheKey, assetsData);
+      const merged = buildMerged(cbom, assetsData);
+      if (merged.length) setCbomData(merged);
+      if (assetsData?.assets?.length) setAssets(assetsData.assets);
+      setFromCache(false);
+      setCachedAt(null);
+    } catch {
+      setFetchError(true);
+    }
+    setLoading(false);
+  };
 
   function handleForceRefresh() {
-    cacheClear();
+    cacheClear(secureModeOn);
     setFromCache(false);
-    setCacheAge(null);
+    setCachedAt(null);
     loadData(true);
   }
+
+  // Wait for secure mode status before first load
+  useEffect(() => {
+    if (!secureModeLoading) { loadData(); }
+  }, [secureModeOn, secureModeLoading]);
 
   const displayCbom   = cbomData.length ? cbomData   : MOCK_CBOM;
   const displayAssets = assets.length   ? assets     : MOCK_ASSETS;
@@ -618,6 +647,9 @@ export default function PQCReadinessPage() {
     const el=document.createElement("a"); el.href=url; el.download=`rebel-pqc-${activeDomain||"all"}.csv`; el.click();
   }
 
+  // ── Active endpoint label for UI ──────────────────────────────────────────
+  const activeEndpointLabel = secureModeOn ? "→ /ghost/assets + /cbom" : "→ /assets + /cbom";
+
   const gaugeSize=isMobile?160:200;
   const metricCols=isMobile?"1fr 1fr":isTablet?"repeat(3,1fr)":"repeat(5,1fr)";
   const scoreColor = migrationScore>=70?L.green:migrationScore>=40?L.yellow:L.red;
@@ -636,11 +668,14 @@ export default function PQCReadinessPage() {
         ::-webkit-scrollbar-thumb{background:${L.border};border-radius:3px;}
       `}</style>
 
+      {/* SECURE MODE BANNER */}
+      {secureModeOn && <SecureModeBanner />}
+
       {/* DOMAIN FILTER */}
       <LPanel>
         <LPanelHeader
           left="REPORT SCOPE — CLIENT DOMAIN FILTER"
-          right={fromCache ? <CacheBadge age={cacheAge} onRefresh={handleForceRefresh}/> : undefined}
+          right={fromCache ? <CacheBadge age={cachedAt} onRefresh={handleForceRefresh}/> : undefined}
         />
         <div style={{padding:14,display:"flex",flexDirection:"column",gap:12}}>
           <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"1fr 1fr",gap:10}}>
@@ -659,10 +694,19 @@ export default function PQCReadinessPage() {
           </div>
 
           {/* API endpoint indicator */}
-          <div style={{display:"flex",alignItems:"center",gap:8}}>
+          <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
             <span style={{fontSize:7,fontFamily:"'DM Mono',monospace",color:L.text4,letterSpacing:".08em"}}>API</span>
             <span style={{fontSize:8,fontFamily:"'DM Mono',monospace",color:fetchError?L.red:L.green,fontWeight:600}}>
               {fetchError?"✗":"✓"} {API}
+            </span>
+            <span style={{
+              fontSize:8,fontFamily:"'DM Mono',monospace",fontWeight:700,
+              color:secureModeOn?L.purple:L.cyan,
+              background:secureModeOn?`${L.purple}10`:`${L.cyan}10`,
+              border:`1px solid ${secureModeOn?L.purple:L.cyan}44`,
+              borderRadius:3,padding:"2px 6px",letterSpacing:".04em",
+            }}>
+              {activeEndpointLabel}
             </span>
             {fetchError&&<span style={{fontSize:8,color:L.red}}>— showing demo data</span>}
             {loading&&<span style={{fontSize:8,color:L.blue,animation:"fadeIn 0.3s ease"}}>fetching…</span>}

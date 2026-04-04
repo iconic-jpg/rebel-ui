@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import {
   T, S, Panel, PanelHeader, MetricCard, Badge, ProgBar,
-  Table, TR, TD, MOCK_ASSETS,
+  Table, TR, TD, MOCK_ASSETS, MOCK_CBOM,
 } from "./shared.js";
 
 // ── API Base ──────────────────────────────────────────────────────────────────
@@ -12,6 +12,7 @@ const API =
 // ── Cache config ──────────────────────────────────────────────────────────────
 const CACHE_TTL_MS          = 12 * 60 * 60 * 1000;
 const CACHE_KEY_NORMAL      = "rebel_cache_assets_inventory";
+const CACHE_KEY_CBOM_NORMAL = "rebel_cache_cbom_inventory";
 const CACHE_KEY_GHOST       = "rebel_cache_assets_ghost";
 
 interface CacheEntry<T> { ts: number; data: T; }
@@ -32,6 +33,7 @@ function cacheSet<T>(key: string, data: T): void {
 
 function cacheClearAll(): void {
   localStorage.removeItem(CACHE_KEY_NORMAL);
+  localStorage.removeItem(CACHE_KEY_CBOM_NORMAL);
   localStorage.removeItem(CACHE_KEY_GHOST);
 }
 
@@ -110,6 +112,60 @@ const INR_RATE = 83;
 function toINR(usd: number): number { return Math.round(usd * INR_RATE); }
 function fmtINRFull(usd: number): string {
   return `₹${toINR(usd).toLocaleString("en-IN")}`;
+}
+
+// ── Merge helper: assets + cbom → unified asset list ─────────────────────────
+function buildMergedAssets(assetsData: any, cbom: any): any[] {
+  const base: any[] = assetsData?.assets ?? [];
+  if (!cbom?.apps?.length) return base;
+
+  // Build a lookup by normalised name from assets
+  const byName: Record<string, number> = {};
+  base.forEach((a, i) => { if (a.name) byName[a.name.toLowerCase()] = i; });
+
+  const extras: any[] = [];
+  for (const app of cbom.apps ?? []) {
+    const key = (app.app ?? "").toLowerCase();
+    if (!key) continue;
+    const idx = byName[key];
+    if (idx !== undefined) {
+      // Enrich existing asset with CBOM cipher/tls/pqc data if missing
+      const existing = base[idx];
+      base[idx] = {
+        ...existing,
+        cipher:            existing.cipher            || app.cipher            || "—",
+        tls:               existing.tls               || app.tls               || "—",
+        keylen:            existing.keylen             || app.keylen            || "—",
+        ca:                existing.ca                || app.ca                || "—",
+        pqc:               existing.pqc               ?? app.pqc               ?? false,
+        pqc_support:       existing.pqc_support       || app.pqc_support       || "none",
+        key_exchange_group:existing.key_exchange_group|| app.key_exchange_group|| null,
+        is_wildcard:       existing.is_wildcard       ?? app.is_wildcard       ?? null,
+        cbom_status:       app.status,
+      };
+    } else {
+      // CBOM app not in registered assets — add as synthetic entry
+      extras.push({
+        name:              app.app,
+        url:               app.app,
+        type:              "Other",
+        cipher:            app.cipher   || "—",
+        tls:               app.tls      || "—",
+        keylen:            app.keylen   || "—",
+        ca:                app.ca       || "—",
+        cert:              "—",
+        scan:              "—",
+        pqc:               app.pqc      ?? false,
+        pqc_support:       app.pqc_support || "none",
+        key_exchange_group:app.key_exchange_group || null,
+        is_wildcard:       app.is_wildcard ?? null,
+        cbom_status:       app.status,
+        _fromCbom:         true,
+      });
+    }
+  }
+
+  return [...base, ...extras];
 }
 
 // ── Skeleton components ───────────────────────────────────────────────────────
@@ -355,52 +411,80 @@ export default function AssetInventoryPage() {
       .finally(() => setSecureModeLoading(false));
   }, []);
 
-  // ── Derive cache key from mode ────────────────────────────────────────────
-  const activeCacheKey = secureModeOn ? CACHE_KEY_GHOST : CACHE_KEY_NORMAL;
-
-  // ── Data fetch with cache ─────────────────────────────────────────────────
-  const applyPayload = (d: any) => {
-    if (d?.assets?.length) {
-      setAssets(d.assets);
-      setRiskCounts(d.risk_counts   || { Critical: 0, High: 0, Medium: 0, Low: 0 });
-      setCertBuckets(d.cert_buckets || { "0-30": 0, "30-60": 0, "60-90": 0, "90+": 0 });
-      setByType(d.by_type           || {});
-    } else {
-      setAssets(MOCK_ASSETS);
-    }
+  // ── Apply fetched payload ─────────────────────────────────────────────────
+  const applyPayload = (d: any, mergedAssets?: any[]) => {
+    const finalAssets = mergedAssets ?? (d?.assets?.length ? d.assets : MOCK_ASSETS);
+    setAssets(finalAssets);
+    setRiskCounts(d.risk_counts   || { Critical: 0, High: 0, Medium: 0, Low: 0 });
+    setCertBuckets(d.cert_buckets || { "0-30": 0, "30-60": 0, "60-90": 0, "90+": 0 });
+    setByType(d.by_type           || {});
   };
 
+  // ── Data fetch with cache ─────────────────────────────────────────────────
   const loadData = async (forceRefresh = false) => {
     setLoading(true);
     setFetchError(false);
 
-    if (!forceRefresh) {
-      const cached = cacheGet<any>(activeCacheKey);
-      if (cached) {
-        applyPayload(cached);
-        setFromCache(true);
-        setCacheAge(cacheAgeLabel(activeCacheKey));
-        setLoading(false);
-        return;
+    if (secureModeOn) {
+      // ── SECURE MODE: fetch /ghost/assets only ───────────────────────────
+      if (!forceRefresh) {
+        const cached = cacheGet<any>(CACHE_KEY_GHOST);
+        if (cached) {
+          applyPayload(cached);
+          setFromCache(true);
+          setCacheAge(cacheAgeLabel(CACHE_KEY_GHOST));
+          setLoading(false);
+          return;
+        }
+      }
+      try {
+        const d = await fetch(`${API}/ghost/assets`).then(r => {
+          if (!r.ok) throw new Error();
+          return r.json();
+        });
+        cacheSet(CACHE_KEY_GHOST, d);
+        applyPayload(d);
+        setFromCache(false);
+        setCacheAge(null);
+      } catch {
+        setFetchError(true);
+        setAssets(MOCK_ASSETS);
+      }
+    } else {
+      // ── NORMAL MODE: fetch /assets + /cbom, merge ───────────────────────
+      if (!forceRefresh) {
+        const cachedAssets = cacheGet<any>(CACHE_KEY_NORMAL);
+        const cachedCbom   = cacheGet<any>(CACHE_KEY_CBOM_NORMAL);
+        if (cachedAssets) {
+          const merged = cachedCbom
+            ? buildMergedAssets(cachedAssets, cachedCbom)
+            : (cachedAssets.assets ?? MOCK_ASSETS);
+          applyPayload(cachedAssets, merged.length ? merged : undefined);
+          setFromCache(true);
+          setCacheAge(cacheAgeLabel(CACHE_KEY_NORMAL));
+          setLoading(false);
+          return;
+        }
+      }
+      try {
+        const [assetsData, cbomData] = await Promise.all([
+          fetch(`${API}/assets`).then(r => { if (!r.ok) throw new Error(); return r.json(); }),
+          fetch(`${API}/cbom`).then(r => r.ok ? r.json() : null).catch(() => null),
+        ]);
+        cacheSet(CACHE_KEY_NORMAL, assetsData);
+        if (cbomData) cacheSet(CACHE_KEY_CBOM_NORMAL, cbomData);
+        const merged = cbomData
+          ? buildMergedAssets(assetsData, cbomData)
+          : (assetsData.assets ?? []);
+        applyPayload(assetsData, merged.length ? merged : undefined);
+        setFromCache(false);
+        setCacheAge(null);
+      } catch {
+        setFetchError(true);
+        setAssets(MOCK_ASSETS);
       }
     }
 
-    // Pick endpoint based on secure mode
-    const endpoint = secureModeOn ? `${API}/ghost/assets` : `${API}/assets`;
-
-    try {
-      const d = await fetch(endpoint).then(r => {
-        if (!r.ok) throw new Error();
-        return r.json();
-      });
-      cacheSet(activeCacheKey, d);
-      applyPayload(d);
-      setFromCache(false);
-      setCacheAge(null);
-    } catch {
-      setFetchError(true);
-      setAssets(MOCK_ASSETS);
-    }
     setLoading(false);
   };
 
@@ -522,6 +606,9 @@ export default function AssetInventoryPage() {
 
   const highRisk = riskCounts.Critical + riskCounts.High;
 
+  // ── Active endpoint label ─────────────────────────────────────────────────
+  const activeEndpointLabel = secureModeOn ? "→ /ghost/assets" : "→ /assets + /cbom";
+
   // ── Render ────────────────────────────────────────────────────────────────
   return (
     <div style={LS.page}>
@@ -540,7 +627,7 @@ export default function AssetInventoryPage() {
 
       {/* ── API STATUS BAR ── */}
       <div style={{ display: "flex", alignItems: "center", gap: 10, justifyContent: "space-between", flexWrap: "wrap" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
           <span style={{ fontSize: 7, fontFamily: "'DM Mono',monospace", color: L.text4, letterSpacing: ".08em" }}>API</span>
           <span style={{ fontSize: 8, fontFamily: "'DM Mono',monospace", color: fetchError ? L.red : L.green, fontWeight: 600 }}>
             {fetchError ? "✗" : "✓"} {API}
@@ -553,7 +640,7 @@ export default function AssetInventoryPage() {
             border: `1px solid ${secureModeOn ? L.purple : L.cyan}44`,
             borderRadius: 3, padding: "2px 6px", letterSpacing: ".04em",
           }}>
-            {secureModeOn ? "→ /ghost/assets" : "→ /assets"}
+            {activeEndpointLabel}
           </span>
           {fetchError && <span style={{ fontSize: 8, color: L.red }}>— showing demo data</span>}
           {loading && <span style={{ fontSize: 8, color: L.blue }}>fetching…</span>}
@@ -648,9 +735,10 @@ export default function AssetInventoryPage() {
                       <div key={i} style={{ padding: "10px 14px", borderBottom: `1px solid ${L.borderLight}` }}>
                         <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
                           <span style={{ fontSize: 12, color: L.blue, fontWeight: 600 }}>{a.name}</span>
-                          {cc && (
-                            <span style={{ fontSize: 7, fontWeight: 700, color: cc, border: `1px solid ${cc}44`, borderRadius: 2, padding: "1px 5px", background: cbg }}>{a.criticality}</span>
-                          )}
+                          <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+                            {a._fromCbom && <span style={{ fontSize: 7, color: L.purple, border: `1px solid ${L.purple}44`, borderRadius: 2, padding: "1px 4px", background: `${L.purple}0a` }}>CBOM</span>}
+                            {cc && <span style={{ fontSize: 7, fontWeight: 700, color: cc, border: `1px solid ${cc}44`, borderRadius: 2, padding: "1px 5px", background: cbg }}>{a.criticality}</span>}
+                          </div>
                         </div>
                         <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 4 }}>
                           <Badge v="gray">{a.type || "—"}</Badge>
@@ -703,7 +791,10 @@ export default function AssetInventoryPage() {
                               onMouseLeave={e => (e.currentTarget.style.background = rowBg)}
                             >
                               <td style={{ padding: "8px 8px" }}>
-                                <div style={{ fontSize: 10, color: L.blue, fontWeight: 600 }}>{a.name}</div>
+                                <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                                  <div style={{ fontSize: 10, color: L.blue, fontWeight: 600 }}>{a.name}</div>
+                                  {a._fromCbom && <span style={{ fontSize: 7, color: L.purple, border: `1px solid ${L.purple}44`, borderRadius: 2, padding: "1px 4px", background: `${L.purple}0a`, flexShrink: 0 }}>CBOM</span>}
+                                </div>
                                 <div style={{ fontSize: 8, color: L.text4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 160 }}>{a.url}</div>
                               </td>
                               <td style={{ padding: "8px 8px" }}>
@@ -791,8 +882,10 @@ export default function AssetInventoryPage() {
                 <span style={{ fontSize: 10, color: L.text2 }}>
                   Showing <b style={{ color: L.text1 }}>{filtered.length}</b> of{" "}
                   <b style={{ color: L.text1 }}>{assets.length}</b> assets
-                  {secureModeOn && (
+                  {secureModeOn ? (
                     <span style={{ marginLeft: 8, fontSize: 8, color: L.purple, fontWeight: 600 }}>· ghost mode</span>
+                  ) : (
+                    <span style={{ marginLeft: 8, fontSize: 8, color: L.cyan, fontWeight: 600 }}>· assets + cbom</span>
                   )}
                 </span>
                 {!mobile && <span style={{ fontSize: 9, color: L.text3 }}>▼ expand row for financial exposure and cipher details</span>}
