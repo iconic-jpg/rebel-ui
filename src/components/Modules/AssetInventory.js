@@ -1,12 +1,14 @@
 import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-runtime";
 import React, { useState, useEffect, useRef } from "react";
 import { Badge, MOCK_ASSETS, } from "./shared.js";
-// ── API Base: VITE_API_BASE env var → Docker/airgap → cloud fallback ──────────
+// ── API Base ──────────────────────────────────────────────────────────────────
 const API = (typeof import.meta !== "undefined" && import.meta.env?.VITE_API_BASE) ||
     "https://r3bel-production.up.railway.app";
 // ── Cache config ──────────────────────────────────────────────────────────────
-const CACHE_TTL_MS = 12 * 60 * 60 * 1000; // 12 hours
-const CACHE_KEY_ASSETS = "rebel_cache_assets_inventory";
+const CACHE_TTL_MS = 12 * 60 * 60 * 1000;
+const CACHE_KEY_NORMAL = "rebel_cache_assets_inventory";
+const CACHE_KEY_CBOM_NORMAL = "rebel_cache_cbom_inventory";
+const CACHE_KEY_GHOST = "rebel_cache_assets_ghost";
 function cacheGet(key) {
     try {
         const raw = localStorage.getItem(key);
@@ -29,8 +31,8 @@ function cacheSet(key, data) {
     }
     catch { }
 }
-function cacheClear() {
-    localStorage.removeItem(CACHE_KEY_ASSETS);
+function cacheClearAll() {
+    [CACHE_KEY_NORMAL, CACHE_KEY_CBOM_NORMAL, CACHE_KEY_GHOST].forEach(k => localStorage.removeItem(k));
 }
 function cacheAgeLabel(key) {
     try {
@@ -39,9 +41,7 @@ function cacheAgeLabel(key) {
             return null;
         const entry = JSON.parse(raw);
         const mins = Math.round((Date.now() - entry.ts) / 60000);
-        if (mins < 60)
-            return `${mins}m ago`;
-        return `${Math.round(mins / 60)}h ago`;
+        return mins < 60 ? `${mins}m ago` : `${Math.round(mins / 60)}h ago`;
     }
     catch {
         return null;
@@ -110,6 +110,97 @@ function toINR(usd) { return Math.round(usd * INR_RATE); }
 function fmtINRFull(usd) {
     return `₹${toINR(usd).toLocaleString("en-IN")}`;
 }
+// ── Merge helper: assets + cbom → unified asset list ─────────────────────────
+function buildMergedAssets(assetsData, cbom) {
+    // Clone to avoid mutating cached objects
+    const base = (assetsData?.assets ?? []).map((a) => ({ ...a }));
+    if (!cbom?.apps?.length)
+        return base;
+    const byName = {};
+    base.forEach((a, i) => { if (a.name)
+        byName[a.name.toLowerCase()] = i; });
+    const extras = [];
+    for (const app of cbom.apps ?? []) {
+        const key = (app.app ?? "").toLowerCase();
+        if (!key)
+            continue;
+        const idx = byName[key];
+        if (idx !== undefined) {
+            const existing = base[idx];
+            base[idx] = {
+                ...existing,
+                cipher: existing.cipher || app.cipher || "—",
+                tls: existing.tls || app.tls || "—",
+                keylen: existing.keylen || app.keylen || "—",
+                ca: existing.ca || app.ca || "—",
+                pqc: existing.pqc ?? app.pqc ?? false,
+                pqc_support: existing.pqc_support || app.pqc_support || "none",
+                key_exchange_group: existing.key_exchange_group || app.key_exchange_group || null,
+                is_wildcard: existing.is_wildcard ?? app.is_wildcard ?? null,
+                cbom_status: app.status,
+            };
+        }
+        else {
+            extras.push({
+                name: app.app,
+                url: app.app,
+                type: "Other",
+                cipher: app.cipher || "—",
+                tls: app.tls || "—",
+                keylen: app.keylen || "—",
+                ca: app.ca || "—",
+                cert: "—",
+                scan: "—",
+                pqc: app.pqc ?? false,
+                pqc_support: app.pqc_support || "none",
+                key_exchange_group: app.key_exchange_group || null,
+                is_wildcard: app.is_wildcard ?? null,
+                cbom_status: app.status,
+                _fromCbom: true,
+            });
+        }
+    }
+    return [...base, ...extras];
+}
+function deriveStats(assets) {
+    const risk_counts = { Critical: 0, High: 0, Medium: 0, Low: 0 };
+    const cert_buckets = { "0-30": 0, "30-60": 0, "60-90": 0, "90+": 0 };
+    const by_type = {};
+    for (const a of assets) {
+        // Risk — prefer explicit `risk` field, fallback to `criticality`
+        const r = (a.risk || a.criticality || "");
+        if (r === "Critical")
+            risk_counts.Critical++;
+        else if (r === "High")
+            risk_counts.High++;
+        else if (r === "Medium")
+            risk_counts.Medium++;
+        else if (r === "Low")
+            risk_counts.Low++;
+        // Cert expiry — use numeric days_to_expiry when available, else infer from cert string
+        const dte = a.days_to_expiry;
+        if (typeof dte === "number") {
+            if (dte <= 30)
+                cert_buckets["0-30"]++;
+            else if (dte <= 60)
+                cert_buckets["30-60"]++;
+            else if (dte <= 90)
+                cert_buckets["60-90"]++;
+            else
+                cert_buckets["90+"]++;
+        }
+        else if (a.cert === "Expiring") {
+            cert_buckets["0-30"]++;
+        }
+        else if (a.cert === "Valid") {
+            cert_buckets["90+"]++;
+        }
+        // Type distribution
+        const t = a.type || "Other";
+        by_type[t] = (by_type[t] || 0) + 1;
+    }
+    return { risk_counts, cert_buckets, by_type };
+}
 // ── Skeleton components ───────────────────────────────────────────────────────
 function Shimmer({ w = "100%", h = 14, radius = 4, style = {} }) {
     return (_jsx("div", { style: {
@@ -136,35 +227,28 @@ function SkeletonTableRows({ cols, count = 7 }) {
 function SkeletonMobileCards({ count = 5 }) {
     return (_jsx(_Fragment, { children: Array.from({ length: count }).map((_, i) => (_jsxs("div", { style: { padding: "10px 14px", borderBottom: `1px solid ${L.borderLight}` }, children: [_jsxs("div", { style: { display: "flex", justifyContent: "space-between", marginBottom: 6 }, children: [_jsx(Shimmer, { w: 160, h: 12 }), _jsx(Shimmer, { w: 52, h: 16, radius: 3 })] }), _jsxs("div", { style: { display: "flex", gap: 6, marginBottom: 6 }, children: [_jsx(Shimmer, { w: 50, h: 16, radius: 3 }), _jsx(Shimmer, { w: 50, h: 16, radius: 3 }), _jsx(Shimmer, { w: 50, h: 16, radius: 3 })] }), _jsx(Shimmer, { w: "70%", h: 9 })] }, i))) }));
 }
-function SkeletonProgBar({ label }) {
+function SkeletonProgBar() {
     return (_jsxs("div", { style: { display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }, children: [_jsx(Shimmer, { w: 8, h: 8, radius: 4 }), _jsxs("div", { style: { flex: 1 }, children: [_jsxs("div", { style: { display: "flex", justifyContent: "space-between", marginBottom: 4 }, children: [_jsx(Shimmer, { w: 80, h: 9 }), _jsx(Shimmer, { w: 18, h: 9 })] }), _jsx(Shimmer, { w: "100%", h: 4, radius: 2 })] })] }));
 }
 // ── Cache badge ───────────────────────────────────────────────────────────────
 function CacheBadge({ age, onRefresh }) {
     if (!age)
         return null;
-    return (_jsxs("div", { style: { display: "flex", alignItems: "center", gap: 6 }, children: [_jsxs("span", { style: {
-                    fontSize: 8, fontWeight: 600, color: L.text3,
-                    background: L.insetBg, border: `1px solid ${L.panelBorder}`,
-                    borderRadius: 3, padding: "2px 7px", letterSpacing: ".06em",
-                }, children: ["CACHED \u00B7 ", age] }), _jsx("button", { onClick: onRefresh, style: { ...LS.btn, fontSize: 9, padding: "3px 8px", color: L.blue, borderColor: `${L.blue}40`, background: `${L.blue}0d` }, children: "\u21BA REFRESH" })] }));
+    return (_jsxs("div", { style: { display: "flex", alignItems: "center", gap: 6 }, children: [_jsxs("span", { style: { fontSize: 8, fontWeight: 600, color: L.text3, background: L.insetBg, border: `1px solid ${L.panelBorder}`, borderRadius: 3, padding: "2px 7px", letterSpacing: ".06em" }, children: ["CACHED \u00B7 ", age] }), _jsx("button", { onClick: onRefresh, style: { ...LS.btn, fontSize: 9, padding: "3px 8px", color: L.blue, borderColor: `${L.blue}40`, background: `${L.blue}0d` }, children: "\u21BA REFRESH" })] }));
+}
+// ── Secure Mode Banner ────────────────────────────────────────────────────────
+function SecureModeBanner() {
+    return (_jsxs("div", { style: { display: "flex", alignItems: "center", gap: 8, padding: "8px 14px", background: `${L.purple}0d`, border: `1px solid ${L.purple}44`, borderRadius: 6 }, children: [_jsx("span", { style: { fontSize: 9, color: L.purple, fontWeight: 800, letterSpacing: ".14em", textTransform: "uppercase" }, children: "\uD83D\uDD12 SECURE MODE ACTIVE" }), _jsx("span", { style: { fontSize: 9, color: L.purple, opacity: 0.75 }, children: "\u00B7" }), _jsx("span", { style: { fontSize: 9, color: L.purple, fontFamily: "'DM Mono', monospace" }, children: "/ghost/assets \u2014 anonymised data, no live scans" })] }));
 }
 // ── Light sub-components ──────────────────────────────────────────────────────
 function LPanel({ children, style = {} }) {
     return _jsx("div", { style: { ...LS.panel, ...style }, children: children });
 }
 function LPanelHeader({ left, right }) {
-    return (_jsxs("div", { style: {
-            display: "flex", justifyContent: "space-between", alignItems: "center",
-            padding: "10px 14px", borderBottom: `1px solid ${L.borderLight}`,
-            background: L.subtleBg, borderRadius: "8px 8px 0 0",
-        }, children: [_jsx("span", { style: { fontSize: 9, fontWeight: 700, color: L.text3, letterSpacing: ".14em", textTransform: "uppercase" }, children: left }), right] }));
+    return (_jsxs("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", borderBottom: `1px solid ${L.borderLight}`, background: L.subtleBg, borderRadius: "8px 8px 0 0" }, children: [_jsx("span", { style: { fontSize: 9, fontWeight: 700, color: L.text3, letterSpacing: ".14em", textTransform: "uppercase" }, children: left }), right] }));
 }
 function LMetricCard({ label, value, sub, color }) {
-    return (_jsxs("div", { style: {
-            background: L.panelBg, border: `1px solid ${L.panelBorder}`, borderRadius: 8,
-            padding: "14px 16px", boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
-        }, children: [_jsx("div", { style: { fontSize: 8, color: L.text4, textTransform: "uppercase", letterSpacing: ".12em", marginBottom: 6, fontWeight: 600 }, children: label }), _jsx("div", { style: { fontSize: 22, fontWeight: 800, color, lineHeight: 1 }, children: value }), _jsx("div", { style: { fontSize: 9, color: L.text3, marginTop: 5 }, children: sub })] }));
+    return (_jsxs("div", { style: { background: L.panelBg, border: `1px solid ${L.panelBorder}`, borderRadius: 8, padding: "14px 16px", boxShadow: "0 1px 3px rgba(0,0,0,0.05)" }, children: [_jsx("div", { style: { fontSize: 8, color: L.text4, textTransform: "uppercase", letterSpacing: ".12em", marginBottom: 6, fontWeight: 600 }, children: label }), _jsx("div", { style: { fontSize: 22, fontWeight: 800, color, lineHeight: 1 }, children: value }), _jsx("div", { style: { fontSize: 9, color: L.text3, marginTop: 5 }, children: sub })] }));
 }
 function LProgBar({ pct, color }) {
     return (_jsx("div", { style: { height: 4, background: L.insetBg, borderRadius: 2, border: `1px solid ${L.panelBorder}`, overflow: "hidden" }, children: _jsx("div", { style: { height: "100%", width: `${Math.min(pct, 100)}%`, background: color, borderRadius: 2, transition: "width 0.6s ease" } }) }));
@@ -192,75 +276,115 @@ export default function AssetInventoryPage() {
     const [riskCounts, setRiskCounts] = useState({ Critical: 0, High: 0, Medium: 0, Low: 0 });
     const [certBuckets, setCertBuckets] = useState({ "0-30": 0, "30-60": 0, "60-90": 0, "90+": 0 });
     const [byType, setByType] = useState({});
+    const [secureModeOn, setSecureModeOn] = useState(false);
+    const [secureModeLoading, setSecureModeLoading] = useState(true);
     const typeRef = useRef(null);
     const riskRef = useRef(null);
     const legendRef = useRef(null);
     const mobile = useMobile();
-    // ── Data fetch with cache ─────────────────────────────────────────────────
-    const applyPayload = (d) => {
-        if (d?.assets?.length) {
-            setAssets(d.assets);
-            setRiskCounts(d.risk_counts || { Critical: 0, High: 0, Medium: 0, Low: 0 });
-            setCertBuckets(d.cert_buckets || { "0-30": 0, "30-60": 0, "60-90": 0, "90+": 0 });
-            setByType(d.by_type || {});
-        }
-        else {
-            setAssets(MOCK_ASSETS);
-        }
+    // ── Fetch secure mode status ──────────────────────────────────────────────
+    useEffect(() => {
+        fetch(`${API}/secure-mode/status`)
+            .then(r => r.ok ? r.json() : null)
+            .then(d => { if (d?.enabled !== undefined)
+            setSecureModeOn(Boolean(d.enabled)); })
+            .catch(() => { })
+            .finally(() => setSecureModeLoading(false));
+    }, []);
+    // ── Commit a resolved asset list to state, always re-deriving stats ───────
+    // We always call deriveStats on the FINAL merged list so the charts and
+    // metric cards reflect CBOM-sourced entries too, not just /assets pre-computed totals.
+    const commitAssets = (finalAssets) => {
+        setAssets(finalAssets);
+        const stats = deriveStats(finalAssets);
+        setRiskCounts(stats.risk_counts);
+        setCertBuckets(stats.cert_buckets);
+        setByType(stats.by_type);
     };
+    // ── Data fetch with cache ─────────────────────────────────────────────────
     const loadData = async (forceRefresh = false) => {
         setLoading(true);
         setFetchError(false);
-        if (!forceRefresh) {
-            const cached = cacheGet(CACHE_KEY_ASSETS);
-            if (cached) {
-                applyPayload(cached);
-                setFromCache(true);
-                setCacheAge(cacheAgeLabel_(CACHE_KEY_ASSETS));
-                setLoading(false);
-                return;
+        if (secureModeOn) {
+            // ── SECURE MODE: /ghost/assets only ──────────────────────────────────
+            if (!forceRefresh) {
+                const cached = cacheGet(CACHE_KEY_GHOST);
+                if (cached) {
+                    commitAssets(cached?.assets?.length ? cached.assets : MOCK_ASSETS);
+                    setFromCache(true);
+                    setCacheAge(cacheAgeLabel(CACHE_KEY_GHOST));
+                    setLoading(false);
+                    return;
+                }
+            }
+            try {
+                const d = await fetch(`${API}/ghost/assets`).then(r => { if (!r.ok)
+                    throw new Error(); return r.json(); });
+                cacheSet(CACHE_KEY_GHOST, d);
+                commitAssets(d?.assets?.length ? d.assets : MOCK_ASSETS);
+                setFromCache(false);
+                setCacheAge(null);
+            }
+            catch {
+                setFetchError(true);
+                commitAssets(MOCK_ASSETS);
             }
         }
-        try {
-            const d = await fetch(`${API}/assets`).then(r => { if (!r.ok)
-                throw new Error(); return r.json(); });
-            cacheSet(CACHE_KEY_ASSETS, d);
-            applyPayload(d);
-            setFromCache(false);
-            setCacheAge(null);
-        }
-        catch {
-            setFetchError(true);
-            setAssets(MOCK_ASSETS);
+        else {
+            // ── NORMAL MODE: /assets + /cbom merged ──────────────────────────────
+            if (!forceRefresh) {
+                const cachedAssets = cacheGet(CACHE_KEY_NORMAL);
+                const cachedCbom = cacheGet(CACHE_KEY_CBOM_NORMAL);
+                if (cachedAssets) {
+                    const merged = cachedCbom
+                        ? buildMergedAssets(cachedAssets, cachedCbom)
+                        : (cachedAssets.assets ?? []);
+                    commitAssets(merged.length ? merged : MOCK_ASSETS);
+                    setFromCache(true);
+                    setCacheAge(cacheAgeLabel(CACHE_KEY_NORMAL));
+                    setLoading(false);
+                    return;
+                }
+            }
+            try {
+                const [assetsData, cbomData] = await Promise.all([
+                    fetch(`${API}/assets`).then(r => { if (!r.ok)
+                        throw new Error(); return r.json(); }),
+                    fetch(`${API}/cbom`).then(r => r.ok ? r.json() : null).catch(() => null),
+                ]);
+                cacheSet(CACHE_KEY_NORMAL, assetsData);
+                if (cbomData)
+                    cacheSet(CACHE_KEY_CBOM_NORMAL, cbomData);
+                const merged = cbomData
+                    ? buildMergedAssets(assetsData, cbomData)
+                    : (assetsData?.assets ?? []);
+                commitAssets(merged.length ? merged : MOCK_ASSETS);
+                setFromCache(false);
+                setCacheAge(null);
+            }
+            catch {
+                setFetchError(true);
+                commitAssets(MOCK_ASSETS);
+            }
         }
         setLoading(false);
     };
-    function cacheAgeLabel_(key) {
-        try {
-            const raw = localStorage.getItem(key);
-            if (!raw)
-                return null;
-            const entry = JSON.parse(raw);
-            const mins = Math.round((Date.now() - entry.ts) / 60000);
-            if (mins < 60)
-                return `${mins}m ago`;
-            return `${Math.round(mins / 60)}h ago`;
-        }
-        catch {
-            return null;
-        }
-    }
     function handleForceRefresh() {
-        cacheClear();
+        cacheClearAll();
         setFromCache(false);
         setCacheAge(null);
         loadData(true);
     }
-    useEffect(() => { loadData(); }, []);
-    useEffect(() => { if (!loading) {
-        drawTypeChart();
-        drawRiskChart();
-    } }, [assets, riskCounts, byType, mobile, loading]);
+    useEffect(() => {
+        if (!secureModeLoading)
+            loadData();
+    }, [secureModeOn, secureModeLoading]);
+    useEffect(() => {
+        if (!loading) {
+            drawTypeChart();
+            drawRiskChart();
+        }
+    }, [assets, riskCounts, byType, mobile, loading]);
     // ── Charts ────────────────────────────────────────────────────────────────
     function drawTypeChart() {
         const c = typeRef.current;
@@ -298,8 +422,7 @@ export default function AssetInventoryPage() {
         ctx.textAlign = "center";
         ctx.fillText(String(assets.length), cx, cy + 5);
         if (legendRef.current) {
-            legendRef.current.innerHTML = display.map(d => `
-        <div style="display:flex;align-items:center;gap:6px;">
+            legendRef.current.innerHTML = display.map(d => `<div style="display:flex;align-items:center;gap:6px;">
           <div style="width:8px;height:8px;border-radius:2px;background:${d.color};flex-shrink:0;"></div>
           <span style="font-size:9px;color:${L.text2};flex:1;font-family:'DM Sans',sans-serif;">${d.label}</span>
           <span style="font-size:9px;font-family:'DM Mono',monospace;color:${L.text3};font-weight:600;">${d.val}</span>
@@ -357,6 +480,7 @@ export default function AssetInventoryPage() {
         return ms && mc;
     });
     const highRisk = riskCounts.Critical + riskCounts.High;
+    const activeEndpointLabel = secureModeOn ? "→ /ghost/assets" : "→ /assets + /cbom";
     // ── Render ────────────────────────────────────────────────────────────────
     return (_jsxs("div", { style: LS.page, children: [_jsx("style", { children: `
         @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=DM+Mono:wght@400;500;600&display=swap');
@@ -366,7 +490,13 @@ export default function AssetInventoryPage() {
         ::-webkit-scrollbar-track{background:${L.insetBg};}
         ::-webkit-scrollbar-thumb{background:${L.panelBorder};border-radius:3px;}
         select option { background: ${L.panelBg}; color: ${L.text1}; }
-      ` }), _jsxs("div", { style: { display: "flex", alignItems: "center", gap: 10, justifyContent: "space-between", flexWrap: "wrap" }, children: [_jsxs("div", { style: { display: "flex", alignItems: "center", gap: 8 }, children: [_jsx("span", { style: { fontSize: 7, fontFamily: "'DM Mono',monospace", color: L.text4, letterSpacing: ".08em" }, children: "API" }), _jsxs("span", { style: { fontSize: 8, fontFamily: "'DM Mono',monospace", color: fetchError ? L.red : L.green, fontWeight: 600 }, children: [fetchError ? "✗" : "✓", " ", API] }), fetchError && _jsx("span", { style: { fontSize: 8, color: L.red }, children: "\u2014 showing demo data" }), loading && _jsx("span", { style: { fontSize: 8, color: L.blue }, children: "fetching\u2026" })] }), fromCache && _jsx(CacheBadge, { age: cacheAge, onRefresh: handleForceRefresh })] }), _jsx("div", { style: { display: "grid", gridTemplateColumns: mobile ? "1fr 1fr" : "repeat(4,1fr)", gap: mobile ? 8 : 9 }, children: loading
+      ` }), secureModeOn && _jsx(SecureModeBanner, {}), _jsxs("div", { style: { display: "flex", alignItems: "center", gap: 10, justifyContent: "space-between", flexWrap: "wrap" }, children: [_jsxs("div", { style: { display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }, children: [_jsx("span", { style: { fontSize: 7, fontFamily: "'DM Mono',monospace", color: L.text4, letterSpacing: ".08em" }, children: "API" }), _jsxs("span", { style: { fontSize: 8, fontFamily: "'DM Mono',monospace", color: fetchError ? L.red : L.green, fontWeight: 600 }, children: [fetchError ? "✗" : "✓", " ", API] }), _jsx("span", { style: {
+                                    fontSize: 8, fontFamily: "'DM Mono',monospace", fontWeight: 700,
+                                    color: secureModeOn ? L.purple : L.cyan,
+                                    background: secureModeOn ? `${L.purple}10` : `${L.cyan}10`,
+                                    border: `1px solid ${secureModeOn ? L.purple : L.cyan}44`,
+                                    borderRadius: 3, padding: "2px 6px", letterSpacing: ".04em",
+                                }, children: activeEndpointLabel }), fetchError && _jsx("span", { style: { fontSize: 8, color: L.red }, children: "\u2014 showing demo data" }), loading && _jsx("span", { style: { fontSize: 8, color: L.blue }, children: "fetching\u2026" })] }), fromCache && _jsx(CacheBadge, { age: cacheAge, onRefresh: handleForceRefresh })] }), _jsx("div", { style: { display: "grid", gridTemplateColumns: mobile ? "1fr 1fr" : "repeat(4,1fr)", gap: mobile ? 8 : 9 }, children: loading
                     ? Array.from({ length: 4 }).map((_, i) => _jsx(SkeletonMetricCard, {}, i))
                     : _jsxs(_Fragment, { children: [_jsx(LMetricCard, { label: "TOTAL ASSETS", value: assets.length, sub: "Scanned", color: L.blue }), _jsx(LMetricCard, { label: "HIGH RISK", value: highRisk, sub: "Immediate action", color: L.red }), _jsx(LMetricCard, { label: "CERT EXPIRING", value: certBuckets["0-30"], sub: "Within 30 days", color: L.orange }), _jsx("div", { style: mobile ? { gridColumn: "1/-1" } : {}, children: _jsx(LMetricCard, { label: "ACTIVE CERTS", value: assets.filter(a => a.cert === "Valid").length, sub: "Valid certificates", color: L.green }) })] }) }), _jsx("div", { style: { display: "grid", gridTemplateColumns: mobile ? "1fr" : "1fr 1fr", gap: mobile ? 8 : 10 }, children: loading
                     ? _jsxs(_Fragment, { children: [_jsx(SkeletonDonutPanel, {}), _jsx(SkeletonBarPanel, {})] })
@@ -378,11 +508,9 @@ export default function AssetInventoryPage() {
                                     const cc = critColor(a.criticality);
                                     const cbg = cc ? critBg(a.criticality) : undefined;
                                     const tlsN = (a.tls || "").replace(/^TLSv?/i, "");
-                                    return (_jsxs("div", { style: { padding: "10px 14px", borderBottom: `1px solid ${L.borderLight}` }, children: [_jsxs("div", { style: { display: "flex", justifyContent: "space-between", marginBottom: 4 }, children: [_jsx("span", { style: { fontSize: 12, color: L.blue, fontWeight: 600 }, children: a.name }), cc && (_jsx("span", { style: { fontSize: 7, fontWeight: 700, color: cc, border: `1px solid ${cc}44`, borderRadius: 2, padding: "1px 5px", background: cbg }, children: a.criticality }))] }), _jsxs("div", { style: { display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 4 }, children: [_jsx(Badge, { v: "gray", children: a.type || "—" }), _jsx(Badge, { v: certVariant(a.cert), children: a.cert || "—" }), _jsxs(Badge, { v: tlsN === "1.0" ? "red" : tlsN === "1.2" ? "yellow" : "green", children: ["TLS ", tlsN || "—"] })] }), scope.length > 0 && (_jsx("div", { style: { display: "flex", gap: 4, flexWrap: "wrap" }, children: scope.map((s) => (_jsx("span", { style: { fontSize: 7, color: L.cyan, border: `1px solid ${L.cyan}44`, borderRadius: 2, padding: "1px 5px", background: `${L.cyan}0a` }, children: s }, s))) })), _jsxs("div", { style: { fontSize: 9, color: L.text3, marginTop: 4, fontFamily: "'DM Mono',monospace" }, children: [a.keylen, " \u00B7 ", a.ca, " \u00B7 ", a.scan || "—"] })] }, i));
+                                    return (_jsxs("div", { style: { padding: "10px 14px", borderBottom: `1px solid ${L.borderLight}` }, children: [_jsxs("div", { style: { display: "flex", justifyContent: "space-between", marginBottom: 4 }, children: [_jsx("span", { style: { fontSize: 12, color: L.blue, fontWeight: 600 }, children: a.name }), _jsxs("div", { style: { display: "flex", gap: 4, alignItems: "center" }, children: [a._fromCbom && _jsx("span", { style: { fontSize: 7, color: L.purple, border: `1px solid ${L.purple}44`, borderRadius: 2, padding: "1px 4px", background: `${L.purple}0a` }, children: "CBOM" }), cc && _jsx("span", { style: { fontSize: 7, fontWeight: 700, color: cc, border: `1px solid ${cc}44`, borderRadius: 2, padding: "1px 5px", background: cbg }, children: a.criticality })] })] }), _jsxs("div", { style: { display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 4 }, children: [_jsx(Badge, { v: "gray", children: a.type || "—" }), _jsx(Badge, { v: certVariant(a.cert), children: a.cert || "—" }), _jsxs(Badge, { v: tlsN === "1.0" ? "red" : tlsN === "1.2" ? "yellow" : "green", children: ["TLS ", tlsN || "—"] })] }), scope.length > 0 && (_jsx("div", { style: { display: "flex", gap: 4, flexWrap: "wrap" }, children: scope.map((s) => (_jsx("span", { style: { fontSize: 7, color: L.cyan, border: `1px solid ${L.cyan}44`, borderRadius: 2, padding: "1px 5px", background: `${L.cyan}0a` }, children: s }, s))) })), _jsxs("div", { style: { fontSize: 9, color: L.text3, marginTop: 4, fontFamily: "'DM Mono',monospace" }, children: [a.keylen, " \u00B7 ", a.ca, " \u00B7 ", a.scan || "—"] })] }, i));
                                 })
-                                : _jsx("div", { style: { padding: 20, fontSize: 10, color: L.text3, textAlign: "center" }, children: "No assets found" }) })) : (
-                    /* Desktop table */
-                    _jsx("div", { style: { overflowX: "auto" }, children: _jsxs("table", { style: { width: "100%", borderCollapse: "collapse", fontFamily: "'DM Sans',system-ui,sans-serif" }, children: [_jsx("thead", { children: _jsx("tr", { style: { background: L.subtleBg, borderBottom: `2px solid ${L.panelBorder}` }, children: ["ASSET", "TYPE", "CRITICALITY", "OWNER", "TLS", "CERT", "KEY LEN", "COMPLIANCE", "LAST SCAN", ""].map(h => (_jsx("th", { style: { padding: "7px 8px", fontSize: 8, fontWeight: 700, color: L.text3, textTransform: "uppercase", letterSpacing: ".08em", textAlign: "left", whiteSpace: "nowrap" }, children: h }, h))) }) }), _jsx("tbody", { children: loading
+                                : _jsx("div", { style: { padding: 20, fontSize: 10, color: L.text3, textAlign: "center" }, children: "No assets found" }) })) : (_jsx("div", { style: { overflowX: "auto" }, children: _jsxs("table", { style: { width: "100%", borderCollapse: "collapse", fontFamily: "'DM Sans',system-ui,sans-serif" }, children: [_jsx("thead", { children: _jsx("tr", { style: { background: L.subtleBg, borderBottom: `2px solid ${L.panelBorder}` }, children: ["ASSET", "TYPE", "CRITICALITY", "OWNER", "TLS", "CERT", "KEY LEN", "COMPLIANCE", "LAST SCAN", ""].map(h => (_jsx("th", { style: { padding: "7px 8px", fontSize: 8, fontWeight: 700, color: L.text3, textTransform: "uppercase", letterSpacing: ".08em", textAlign: "left", whiteSpace: "nowrap" }, children: h }, h))) }) }), _jsx("tbody", { children: loading
                                         ? _jsx(SkeletonTableRows, { cols: 10, count: 7 })
                                         : filtered.length
                                             ? filtered.map((a, i) => {
@@ -392,7 +520,9 @@ export default function AssetInventoryPage() {
                                                 const tlsN = (a.tls || "").replace(/^TLSv?/i, "");
                                                 const isOpen = expandedRow === i;
                                                 const rowBg = i % 2 === 0 ? L.panelBg : L.subtleBg;
-                                                return (_jsxs(React.Fragment, { children: [_jsxs("tr", { style: { borderBottom: `1px solid ${L.borderLight}`, background: rowBg }, onMouseEnter: e => (e.currentTarget.style.background = L.insetBg), onMouseLeave: e => (e.currentTarget.style.background = rowBg), children: [_jsxs("td", { style: { padding: "8px 8px" }, children: [_jsx("div", { style: { fontSize: 10, color: L.blue, fontWeight: 600 }, children: a.name }), _jsx("div", { style: { fontSize: 8, color: L.text4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 160 }, children: a.url })] }), _jsx("td", { style: { padding: "8px 8px" }, children: _jsx("span", { style: { fontSize: 8, color: L.text3, background: L.insetBg, border: `1px solid ${L.panelBorder}`, borderRadius: 3, padding: "1px 5px", fontWeight: 600 }, children: a.type || "—" }) }), _jsx("td", { style: { padding: "8px 8px" }, children: cc ? (_jsx("span", { style: { fontSize: 8, fontWeight: 700, color: cc, border: `1px solid ${cc}44`, borderRadius: 3, padding: "1px 6px", background: cbg }, children: a.criticality })) : (_jsx("span", { style: { fontSize: 9, color: L.text3 }, children: "\u2014" })) }), _jsxs("td", { style: { padding: "8px 8px" }, children: [_jsx("div", { style: { fontSize: 9, color: L.text2, fontWeight: 500 }, children: a.owner || "—" }), a.owner_email && _jsx("div", { style: { fontSize: 8, color: L.text4 }, children: a.owner_email })] }), _jsx("td", { style: { padding: "8px 8px" }, children: _jsxs("span", { style: { fontSize: 8, fontWeight: 600, color: tlsN === "1.0" ? L.red : tlsN === "1.2" ? L.yellow : L.green, background: tlsN === "1.0" ? "#fff5f5" : tlsN === "1.2" ? "#fffbeb" : "#f0fdf4", border: `1px solid ${tlsN === "1.0" ? L.red : tlsN === "1.2" ? L.yellow : L.green}33`, borderRadius: 3, padding: "1px 5px" }, children: ["TLS ", tlsN || "—"] }) }), _jsx("td", { style: { padding: "8px 8px" }, children: _jsx(Badge, { v: certVariant(a.cert), children: a.cert || "—" }) }), _jsx("td", { style: { padding: "8px 8px", fontSize: 10, fontWeight: 700, fontFamily: "'DM Mono',monospace", color: keyColor(a.keylen) }, children: a.keylen || "—" }), _jsx("td", { style: { padding: "8px 8px" }, children: _jsxs("div", { style: { display: "flex", gap: 3, flexWrap: "wrap" }, children: [scope.slice(0, 3).map((s) => (_jsx("span", { style: { fontSize: 7, color: L.cyan, border: `1px solid ${L.cyan}44`, borderRadius: 2, padding: "1px 4px", background: `${L.cyan}0a` }, children: s }, s))), scope.length > 3 && _jsxs("span", { style: { fontSize: 7, color: L.text3 }, children: ["+", scope.length - 3] }), scope.length === 0 && _jsx("span", { style: { fontSize: 8, color: L.text4 }, children: "\u2014" })] }) }), _jsx("td", { style: { padding: "8px 8px", fontSize: 9, color: L.text3, fontFamily: "'DM Mono',monospace" }, children: a.scan || "Never" }), _jsx("td", { style: { padding: "8px 8px" }, children: _jsx("button", { onClick: () => setExpandedRow(isOpen ? null : i), style: { ...LS.btn, fontSize: 8, padding: "2px 7px", background: isOpen ? `${L.blue}15` : L.subtleBg, color: isOpen ? L.blue : L.text3, borderColor: isOpen ? `${L.blue}40` : L.panelBorder }, children: isOpen ? "▲" : "▼" }) })] }), isOpen && (_jsx("tr", { style: { background: L.insetBg }, children: _jsx("td", { colSpan: 10, style: { padding: "0 12px 12px" }, children: _jsxs("div", { style: { display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 8, background: L.panelBg, border: `1px solid ${L.panelBorder}`, borderRadius: 6, padding: 12, marginTop: 4, boxShadow: "inset 0 1px 3px rgba(0,0,0,0.04)" }, children: [[
+                                                return (_jsxs(React.Fragment, { children: [_jsxs("tr", { style: { borderBottom: `1px solid ${L.borderLight}`, background: rowBg }, onMouseEnter: e => (e.currentTarget.style.background = L.insetBg), onMouseLeave: e => (e.currentTarget.style.background = rowBg), children: [_jsxs("td", { style: { padding: "8px 8px" }, children: [_jsxs("div", { style: { display: "flex", alignItems: "center", gap: 5 }, children: [_jsx("div", { style: { fontSize: 10, color: L.blue, fontWeight: 600 }, children: a.name }), a._fromCbom && _jsx("span", { style: { fontSize: 7, color: L.purple, border: `1px solid ${L.purple}44`, borderRadius: 2, padding: "1px 4px", background: `${L.purple}0a`, flexShrink: 0 }, children: "CBOM" })] }), _jsx("div", { style: { fontSize: 8, color: L.text4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 160 }, children: a.url })] }), _jsx("td", { style: { padding: "8px 8px" }, children: _jsx("span", { style: { fontSize: 8, color: L.text3, background: L.insetBg, border: `1px solid ${L.panelBorder}`, borderRadius: 3, padding: "1px 5px", fontWeight: 600 }, children: a.type || "—" }) }), _jsx("td", { style: { padding: "8px 8px" }, children: cc
+                                                                        ? _jsx("span", { style: { fontSize: 8, fontWeight: 700, color: cc, border: `1px solid ${cc}44`, borderRadius: 3, padding: "1px 6px", background: cbg }, children: a.criticality })
+                                                                        : _jsx("span", { style: { fontSize: 9, color: L.text3 }, children: "\u2014" }) }), _jsxs("td", { style: { padding: "8px 8px" }, children: [_jsx("div", { style: { fontSize: 9, color: L.text2, fontWeight: 500 }, children: a.owner || "—" }), a.owner_email && _jsx("div", { style: { fontSize: 8, color: L.text4 }, children: a.owner_email })] }), _jsx("td", { style: { padding: "8px 8px" }, children: _jsxs("span", { style: { fontSize: 8, fontWeight: 600, color: tlsN === "1.0" ? L.red : tlsN === "1.2" ? L.yellow : L.green, background: tlsN === "1.0" ? "#fff5f5" : tlsN === "1.2" ? "#fffbeb" : "#f0fdf4", border: `1px solid ${tlsN === "1.0" ? L.red : tlsN === "1.2" ? L.yellow : L.green}33`, borderRadius: 3, padding: "1px 5px" }, children: ["TLS ", tlsN || "—"] }) }), _jsx("td", { style: { padding: "8px 8px" }, children: _jsx(Badge, { v: certVariant(a.cert), children: a.cert || "—" }) }), _jsx("td", { style: { padding: "8px 8px", fontSize: 10, fontWeight: 700, fontFamily: "'DM Mono',monospace", color: keyColor(a.keylen) }, children: a.keylen || "—" }), _jsx("td", { style: { padding: "8px 8px" }, children: _jsxs("div", { style: { display: "flex", gap: 3, flexWrap: "wrap" }, children: [scope.slice(0, 3).map((s) => (_jsx("span", { style: { fontSize: 7, color: L.cyan, border: `1px solid ${L.cyan}44`, borderRadius: 2, padding: "1px 4px", background: `${L.cyan}0a` }, children: s }, s))), scope.length > 3 && _jsxs("span", { style: { fontSize: 7, color: L.text3 }, children: ["+", scope.length - 3] }), scope.length === 0 && _jsx("span", { style: { fontSize: 8, color: L.text4 }, children: "\u2014" })] }) }), _jsx("td", { style: { padding: "8px 8px", fontSize: 9, color: L.text3, fontFamily: "'DM Mono',monospace" }, children: a.scan || "Never" }), _jsx("td", { style: { padding: "8px 8px" }, children: _jsx("button", { onClick: () => setExpandedRow(isOpen ? null : i), style: { ...LS.btn, fontSize: 8, padding: "2px 7px", background: isOpen ? `${L.blue}15` : L.subtleBg, color: isOpen ? L.blue : L.text3, borderColor: isOpen ? `${L.blue}40` : L.panelBorder }, children: isOpen ? "▲" : "▼" }) })] }), isOpen && (_jsx("tr", { style: { background: L.insetBg }, children: _jsx("td", { colSpan: 10, style: { padding: "0 12px 12px" }, children: _jsxs("div", { style: { display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 8, background: L.panelBg, border: `1px solid ${L.panelBorder}`, borderRadius: 6, padding: 12, marginTop: 4, boxShadow: "inset 0 1px 3px rgba(0,0,0,0.04)" }, children: [[
                                                                             { label: "BUSINESS UNIT", val: a.business_unit || "—", color: L.text1 },
                                                                             { label: "FINANCIAL EXPOSURE", val: a.financial_exposure ? `₹${Number(a.financial_exposure).toLocaleString("en-IN")}` : "—", color: L.orange },
                                                                             { label: "IP ADDRESS", val: a.ip || "—", color: L.text2 },
@@ -401,8 +531,10 @@ export default function AssetInventoryPage() {
                                             })
                                             : (_jsx("tr", { children: _jsx("td", { colSpan: 10, style: { padding: "20px", fontSize: 10, color: L.text3, textAlign: "center" }, children: "No assets found" }) })) })] }) })), _jsx("div", { style: { padding: "8px 14px", borderTop: `1px solid ${L.borderLight}`, display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8, background: L.subtleBg, borderRadius: "0 0 8px 8px" }, children: loading
                             ? _jsx(Shimmer, { w: 200, h: 10 })
-                            : _jsxs(_Fragment, { children: [_jsxs("span", { style: { fontSize: 10, color: L.text2 }, children: ["Showing ", _jsx("b", { style: { color: L.text1 }, children: filtered.length }), " of", " ", _jsx("b", { style: { color: L.text1 }, children: assets.length }), " assets"] }), !mobile && _jsx("span", { style: { fontSize: 9, color: L.text3 }, children: "\u25BC expand row for financial exposure and cipher details" })] }) })] }), _jsxs("div", { style: { display: "grid", gridTemplateColumns: mobile ? "1fr" : "1fr 1fr", gap: mobile ? 8 : 10 }, children: [_jsxs(LPanel, { children: [_jsx(LPanelHeader, { left: "CERTIFICATE EXPIRY TIMELINE" }), _jsx("div", { style: { padding: 14 }, children: loading
-                                    ? [0, 1, 2, 3].map(i => _jsx(SkeletonProgBar, { label: "" }, i))
+                            : _jsxs(_Fragment, { children: [_jsxs("span", { style: { fontSize: 10, color: L.text2 }, children: ["Showing ", _jsx("b", { style: { color: L.text1 }, children: filtered.length }), " of", " ", _jsx("b", { style: { color: L.text1 }, children: assets.length }), " assets", secureModeOn
+                                                ? _jsx("span", { style: { marginLeft: 8, fontSize: 8, color: L.purple, fontWeight: 600 }, children: "\u00B7 ghost mode" })
+                                                : _jsx("span", { style: { marginLeft: 8, fontSize: 8, color: L.cyan, fontWeight: 600 }, children: "\u00B7 assets + cbom" })] }), !mobile && _jsx("span", { style: { fontSize: 9, color: L.text3 }, children: "\u25BC expand row for financial exposure and cipher details" })] }) })] }), _jsxs("div", { style: { display: "grid", gridTemplateColumns: mobile ? "1fr" : "1fr 1fr", gap: mobile ? 8 : 10 }, children: [_jsxs(LPanel, { children: [_jsx(LPanelHeader, { left: "CERTIFICATE EXPIRY TIMELINE" }), _jsx("div", { style: { padding: 14 }, children: loading
+                                    ? [0, 1, 2, 3].map(i => _jsx(SkeletonProgBar, {}, i))
                                     : [
                                         { label: "0–30 Days", count: certBuckets["0-30"], color: L.red },
                                         { label: "30–60 Days", count: certBuckets["30-60"], color: L.orange },

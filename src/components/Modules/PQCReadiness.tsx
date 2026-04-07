@@ -7,7 +7,7 @@ import {
 import {
   fullAnalysis, normaliseTLS, pqcReadinessScore,
 } from "./cipherAnalysis.js";
-
+import KeyRotationPanel from "./KeyRotationPanel.js";
 import type { PQCScoreBreakdown } from "./cipherAnalysis.js";
 
 const API =

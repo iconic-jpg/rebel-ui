@@ -1,14 +1,15 @@
 import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-runtime";
 import { useState, useEffect, useRef } from "react";
-import { Badge, MOCK_CBOM, MOCK_ASSETS, } from "./shared.js";
+import { exportAuditPDF } from "./exportPDF.js";
+import { MOCK_CBOM, MOCK_ASSETS, } from "./shared.js";
 import { fullAnalysis, normaliseTLS, pqcReadinessScore, } from "./cipherAnalysis.js";
-// ── API Base: VITE_API_BASE env var → Docker/airgap → cloud fallback ──────────
 const API = (typeof import.meta !== "undefined" && import.meta.env?.VITE_API_BASE) ||
     "https://r3bel-production.up.railway.app";
 // ── Cache config ──────────────────────────────────────────────────────────────
-const CACHE_TTL_MS = 12 * 60 * 60 * 1000; // 12 hours
-const CACHE_KEY_CBOM = "rebel_cache_cbom";
-const CACHE_KEY_ASSETS = "rebel_cache_assets";
+const CACHE_TTL_MS = 12 * 60 * 60 * 1000;
+const CACHE_KEY_CBOM = "rebel_cache_cbom_pqcr";
+const CACHE_KEY_ASSETS = "rebel_cache_assets_pqcr";
+const CACHE_KEY_GHOST = "rebel_cache_ghost_pqcr";
 function cacheGet(key) {
     try {
         const raw = localStorage.getItem(key);
@@ -31,20 +32,17 @@ function cacheSet(key, data) {
     }
     catch { }
 }
-function cacheClear() {
-    localStorage.removeItem(CACHE_KEY_CBOM);
-    localStorage.removeItem(CACHE_KEY_ASSETS);
+function cacheClearAll() {
+    [CACHE_KEY_CBOM, CACHE_KEY_ASSETS, CACHE_KEY_GHOST].forEach(k => localStorage.removeItem(k));
 }
-function cacheAge(key) {
+function cacheAgeLabel(key) {
     try {
         const raw = localStorage.getItem(key);
         if (!raw)
             return null;
         const entry = JSON.parse(raw);
         const mins = Math.round((Date.now() - entry.ts) / 60000);
-        if (mins < 60)
-            return `${mins}m ago`;
-        return `${Math.round(mins / 60)}h ago`;
+        return mins < 60 ? `${mins}m ago` : `${Math.round(mins / 60)}h ago`;
     }
     catch {
         return null;
@@ -55,9 +53,9 @@ const L = {
     pageBg: "#f5f7fa",
     panelBg: "#ffffff",
     panelBorder: "#e2e8f0",
-    rowHover: "rgba(59,130,246,0.04)",
     subtleBg: "#f8fafc",
     insetBg: "#f1f5f9",
+    borderLight: "#f1f5f9",
     text1: "#0f172a",
     text2: "#334155",
     text3: "#64748b",
@@ -68,8 +66,8 @@ const L = {
     yellow: "#b45309",
     orange: "#c2410c",
     red: "#dc2626",
+    purple: "#7c3aed",
     border: "#e2e8f0",
-    borderLight: "#f1f5f9",
 };
 const LS = {
     page: {
@@ -177,7 +175,7 @@ function riskLabel(w) {
     return "Low";
 }
 function riskVariant(r) {
-    return r === "Critical" ? "red" : r === "High" ? "orange" : r === "Medium" ? "yellow" : "green";
+    return r === "Critical" ? L.red : r === "High" ? L.orange : r === "Medium" ? L.yellow : L.green;
 }
 function useBreakpoint() {
     const get = () => { const w = window.innerWidth; if (w < 480)
@@ -194,22 +192,14 @@ function Shimmer({ w = "100%", h = 16, radius = 4, style = {} }) {
             background: "linear-gradient(90deg, #e2e8f0 25%, #f1f5f9 50%, #e2e8f0 75%)",
             backgroundSize: "200% 100%",
             animation: "shimmer 1.4s ease infinite",
-            flexShrink: 0,
-            ...style,
+            flexShrink: 0, ...style,
         } }));
 }
 function SkeletonMetricCard() {
     return (_jsxs("div", { style: { background: L.panelBg, border: `1px solid ${L.panelBorder}`, borderRadius: 8, padding: "14px 16px", boxShadow: "0 1px 3px rgba(0,0,0,0.05)" }, children: [_jsx(Shimmer, { w: "55%", h: 8, style: { marginBottom: 10 } }), _jsx(Shimmer, { w: "70%", h: 26, style: { marginBottom: 8 } }), _jsx(Shimmer, { w: "45%", h: 8 })] }));
 }
 function SkeletonGaugePanel() {
-    return (_jsxs("div", { style: { ...LS.panel }, children: [_jsx("div", { style: { padding: "10px 14px", borderBottom: `1px solid ${L.borderLight}`, background: L.subtleBg, borderRadius: "8px 8px 0 0" }, children: _jsx(Shimmer, { w: 160, h: 9 }) }), _jsxs("div", { style: { padding: 14, display: "flex", flexDirection: "column", alignItems: "center", gap: 16 }, children: [_jsxs("div", { style: { width: 200, height: 120, display: "flex", alignItems: "flex-end", justifyContent: "center", position: "relative" }, children: [_jsx("div", { style: {
-                                    width: 180, height: 90,
-                                    borderRadius: "90px 90px 0 0",
-                                    border: "14px solid #e2e8f0",
-                                    borderBottom: "none",
-                                    background: "transparent",
-                                    animation: "shimmer 1.4s ease infinite",
-                                } }), _jsxs("div", { style: { position: "absolute", bottom: 0, textAlign: "center" }, children: [_jsx(Shimmer, { w: 60, h: 32, radius: 6, style: { margin: "0 auto 6px" } }), _jsx(Shimmer, { w: 80, h: 9, radius: 4, style: { margin: "0 auto" } })] })] }), [100, 80, 65, 90, 40].map((w, i) => (_jsxs("div", { style: { width: "100%" }, children: [_jsxs("div", { style: { display: "flex", justifyContent: "space-between", marginBottom: 4 }, children: [_jsx(Shimmer, { w: `${w}%`, h: 9 }), _jsx(Shimmer, { w: 30, h: 9, style: { marginLeft: 8 } })] }), _jsx(Shimmer, { w: "100%", h: 4, radius: 2 })] }, i)))] })] }));
+    return (_jsxs("div", { style: { ...LS.panel }, children: [_jsx("div", { style: { padding: "10px 14px", borderBottom: `1px solid ${L.borderLight}`, background: L.subtleBg, borderRadius: "8px 8px 0 0" }, children: _jsx(Shimmer, { w: 160, h: 9 }) }), _jsxs("div", { style: { padding: 14, display: "flex", flexDirection: "column", alignItems: "center", gap: 16 }, children: [_jsxs("div", { style: { width: 200, height: 120, display: "flex", alignItems: "flex-end", justifyContent: "center", position: "relative" }, children: [_jsx("div", { style: { width: 180, height: 90, borderRadius: "90px 90px 0 0", border: "14px solid #e2e8f0", borderBottom: "none", background: "transparent", animation: "shimmer 1.4s ease infinite" } }), _jsxs("div", { style: { position: "absolute", bottom: 0, textAlign: "center" }, children: [_jsx(Shimmer, { w: 60, h: 32, radius: 6, style: { margin: "0 auto 6px" } }), _jsx(Shimmer, { w: 80, h: 9, radius: 4, style: { margin: "0 auto" } })] })] }), [100, 80, 65, 90, 40].map((w, i) => (_jsxs("div", { style: { width: "100%" }, children: [_jsxs("div", { style: { display: "flex", justifyContent: "space-between", marginBottom: 4 }, children: [_jsx(Shimmer, { w: `${w}%`, h: 9 }), _jsx(Shimmer, { w: 30, h: 9, style: { marginLeft: 8 } })] }), _jsx(Shimmer, { w: "100%", h: 4, radius: 2 })] }, i)))] })] }));
 }
 function SkeletonTableRows({ count = 6 }) {
     return (_jsx(_Fragment, { children: Array.from({ length: count }).map((_, i) => (_jsxs("tr", { style: { borderBottom: `1px solid ${L.borderLight}`, background: i % 2 === 0 ? L.panelBg : L.subtleBg }, children: [_jsx("td", { style: { padding: "10px 8px" }, children: _jsx(Shimmer, { w: 18, h: 9 }) }), _jsx("td", { style: { padding: "10px 8px" }, children: _jsx(Shimmer, { w: 140, h: 10 }) }), _jsx("td", { style: { padding: "10px 8px" }, children: _jsx(Shimmer, { w: 60, h: 18, radius: 3 }) }), _jsx("td", { style: { padding: "10px 8px" }, children: _jsx(Shimmer, { w: 55, h: 18, radius: 3 }) }), _jsx("td", { style: { padding: "10px 8px" }, children: _jsx(Shimmer, { w: 50, h: 10 }) }), _jsx("td", { style: { padding: "10px 8px" }, children: _jsx(Shimmer, { w: 120, h: 9 }) }), _jsx("td", { style: { padding: "10px 8px" }, children: _jsx(Shimmer, { w: 45, h: 10 }) }), _jsx("td", { style: { padding: "10px 8px" }, children: _jsx(Shimmer, { w: 70, h: 9 }) }), _jsx("td", { style: { padding: "10px 8px", textAlign: "center" }, children: _jsx(Shimmer, { w: 52, h: 18, radius: 3, style: { margin: "0 auto" } }) }), _jsx("td", { style: { padding: "10px 8px" }, children: _jsx(Shimmer, { w: 30, h: 10 }) }), _jsx("td", { style: { padding: "10px 8px" }, children: _jsx(Shimmer, { w: 65, h: 10 }) }), _jsx("td", { style: { padding: "10px 8px", textAlign: "center" }, children: _jsx(Shimmer, { w: 12, h: 12, radius: 6, style: { margin: "0 auto" } }) }), _jsx("td", { style: { padding: "10px 8px", textAlign: "center" }, children: _jsx(Shimmer, { w: 12, h: 12, radius: 6, style: { margin: "0 auto" } }) })] }, i))) }));
@@ -217,168 +207,25 @@ function SkeletonTableRows({ count = 6 }) {
 function SkeletonRoadmapCards({ count = 5 }) {
     return (_jsx(_Fragment, { children: Array.from({ length: count }).map((_, i) => (_jsxs("div", { style: { borderBottom: `1px solid ${L.borderLight}`, padding: "12px 14px" }, children: [_jsxs("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }, children: [_jsxs("div", { style: { display: "flex", gap: 8, alignItems: "center" }, children: [_jsx(Shimmer, { w: 24, h: 9 }), _jsx(Shimmer, { w: 160, h: 11 })] }), _jsxs("div", { style: { display: "flex", gap: 6 }, children: [_jsx(Shimmer, { w: 52, h: 18, radius: 3 }), _jsx(Shimmer, { w: 52, h: 18, radius: 3 })] })] }), _jsxs("div", { style: { display: "flex", gap: 10 }, children: [_jsx(Shimmer, { w: 50, h: 9 }), _jsx(Shimmer, { w: 30, h: 9 }), _jsx(Shimmer, { w: 55, h: 9 }), _jsx(Shimmer, { w: 40, h: 9 })] })] }, i))) }));
 }
-// ── Cache status badge ────────────────────────────────────────────────────────
+// ── Cache Badge ───────────────────────────────────────────────────────────────
 function CacheBadge({ age, onRefresh }) {
     if (!age)
         return null;
-    return (_jsxs("div", { style: { display: "flex", alignItems: "center", gap: 8 }, children: [_jsxs("span", { style: {
-                    fontSize: 8, fontWeight: 600, color: L.text3,
-                    background: L.insetBg, border: `1px solid ${L.border}`,
-                    borderRadius: 3, padding: "2px 7px", letterSpacing: ".06em",
-                }, children: ["CACHED \u00B7 ", age] }), _jsx("button", { onClick: onRefresh, title: "Force re-fetch from API", style: {
-                    ...LS.btn, fontSize: 9, padding: "3px 8px",
-                    color: L.blue, borderColor: `${L.blue}40`,
-                    background: `${L.blue}0d`,
-                }, children: "\u21BA REFRESH" })] }));
+    return (_jsxs("div", { style: { display: "flex", alignItems: "center", gap: 8 }, children: [_jsxs("span", { style: { fontSize: 8, fontWeight: 600, color: L.text3, background: L.insetBg, border: `1px solid ${L.border}`, borderRadius: 3, padding: "2px 7px", letterSpacing: ".06em" }, children: ["CACHED \u00B7 ", age] }), _jsx("button", { onClick: onRefresh, style: { ...LS.btn, fontSize: 9, padding: "3px 8px", color: L.blue, borderColor: `${L.blue}40`, background: `${L.blue}0d` }, children: "\u21BA REFRESH" })] }));
+}
+// ── Secure Mode Banner ────────────────────────────────────────────────────────
+function SecureModeBanner() {
+    return (_jsxs("div", { style: { display: "flex", alignItems: "center", gap: 8, padding: "8px 14px", background: `${L.purple}0d`, border: `1px solid ${L.purple}44`, borderRadius: 6 }, children: [_jsx("span", { style: { fontSize: 9, color: L.purple, fontWeight: 800, letterSpacing: ".14em", textTransform: "uppercase" }, children: "\uD83D\uDD12 SECURE MODE ACTIVE" }), _jsx("span", { style: { fontSize: 9, color: L.purple, opacity: 0.75 }, children: "\u00B7" }), _jsx("span", { style: { fontSize: 9, color: L.purple, fontFamily: "'DM Mono', monospace" }, children: "/ghost/assets \u2014 anonymised data, no live scans" })] }));
 }
 // ── Light Panel Components ────────────────────────────────────────────────────
 function LPanel({ children, style = {} }) {
     return _jsx("div", { style: { ...LS.panel, ...style }, children: children });
 }
 function LPanelHeader({ left, right }) {
-    return (_jsxs("div", { style: {
-            display: "flex", justifyContent: "space-between", alignItems: "center",
-            padding: "10px 14px", borderBottom: `1px solid ${L.borderLight}`,
-            background: L.subtleBg, borderRadius: "8px 8px 0 0",
-        }, children: [_jsx("span", { style: { fontSize: 9, fontWeight: 700, color: L.text3, letterSpacing: ".14em", textTransform: "uppercase" }, children: left }), right] }));
+    return (_jsxs("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", borderBottom: `1px solid ${L.borderLight}`, background: L.subtleBg, borderRadius: "8px 8px 0 0" }, children: [_jsx("span", { style: { fontSize: 9, fontWeight: 700, color: L.text3, letterSpacing: ".14em", textTransform: "uppercase" }, children: left }), right] }));
 }
 function LMetricCard({ label, value, sub, color }) {
-    return (_jsxs("div", { style: {
-            background: L.panelBg, border: `1px solid ${L.panelBorder}`, borderRadius: 8,
-            padding: "14px 16px", boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
-        }, children: [_jsx("div", { style: { fontSize: 8, color: L.text4, textTransform: "uppercase", letterSpacing: ".12em", marginBottom: 6 }, children: label }), _jsx("div", { style: { fontSize: 22, fontWeight: 800, color, lineHeight: 1 }, children: value }), _jsx("div", { style: { fontSize: 9, color: L.text3, marginTop: 5 }, children: sub })] }));
-}
-// ── PDF Export ────────────────────────────────────────────────────────────────
-function exportAuditPDF(enriched, migrationScore, pqcReady, total, totalDays, calDays, totalCostUSD, teamSize, devRateUSD, dateStr, clientName, clientDomain, milestoneData) {
-    const now = new Date();
-    const timestamp = now.toLocaleString("en-IN", { year: "numeric", month: "long", day: "numeric", hour: "2-digit", minute: "2-digit", timeZoneName: "short" });
-    const scanDate = now.toISOString().split("T")[0];
-    const reportId = `REBEL-${scanDate.replace(/-/g, "")}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
-    const displayName = clientName.trim() || (clientDomain ? normaliseDomain(clientDomain) : "All Assets");
-    const pct = migrationScore / 100, gr = 54, gcx = 70, gcy = 75;
-    const gx1 = gcx + gr * Math.cos(Math.PI), gy1 = gcy + gr * Math.sin(Math.PI);
-    const gx2 = gcx + gr * Math.cos(Math.PI + Math.PI * pct);
-    const gy2 = gcy + gr * Math.sin(Math.PI + Math.PI * pct);
-    const glf = pct > 0.5 ? 1 : 0;
-    const sc = migrationScore >= 70 ? "#16a34a" : migrationScore >= 40 ? "#d97706" : "#dc2626";
-    const sl = migrationScore >= 70 ? "COMPLIANT" : migrationScore >= 40 ? "AT RISK" : "CRITICAL";
-    const gaugeSVG = `<svg width="140" height="82" viewBox="0 0 140 82" xmlns="http://www.w3.org/2000/svg">
-    <path d="M ${gcx - gr} ${gcy} A ${gr} ${gr} 0 0 1 ${gcx + gr} ${gcy}" fill="none" stroke="#e5e7eb" stroke-width="10" stroke-linecap="round"/>
-    <path d="M ${gx1.toFixed(2)} ${gy1.toFixed(2)} A ${gr} ${gr} 0 ${glf} 1 ${gx2.toFixed(2)} ${gy2.toFixed(2)}" fill="none" stroke="${sc}" stroke-width="10" stroke-linecap="round"/>
-    <text x="${gcx}" y="${gcy - 4}" text-anchor="middle" font-family="Arial" font-size="22" font-weight="bold" fill="${sc}">${migrationScore}</text>
-    <text x="${gcx}" y="${gcy + 13}" text-anchor="middle" font-family="Arial" font-size="7" fill="#6b7280" letter-spacing="1">${sl}</text>
-  </svg>`;
-    const scoreDist = milestoneData.map(m => {
-        const color = m.done ? "#16a34a" : m.pct > 50 ? "#eab308" : "#ef4444";
-        return `<div style="margin-bottom:9px;">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;">
-        <span style="display:flex;align-items:center;gap:6px;font-size:9px;color:#374151;">
-          <span style="font-size:10px;color:${m.done ? "#16a34a" : "#ef4444"};">${m.done ? "✓" : "✗"}</span>${m.label}
-        </span>
-        <span style="font-size:9px;color:${color};font-weight:700;">${m.pct}%</span>
-      </div>
-      <div style="height:5px;background:#f3f4f6;border-radius:3px;">
-        <div style="height:100%;width:${m.pct}%;background:${color};border-radius:3px;"></div>
-      </div>
-    </div>`;
-    }).join("");
-    const assetRows = enriched.map((a, i) => {
-        const rc = a.risk === "Critical" ? "#dc2626" : a.risk === "High" ? "#ea580c" : a.risk === "Medium" ? "#d97706" : "#16a34a";
-        const kc = a.keylen?.startsWith("1024") ? "#dc2626" : a.keylen?.startsWith("2048") ? "#d97706" : "#16a34a";
-        const tc = a.tls === "1.0" ? "#dc2626" : a.tls === "1.2" ? "#d97706" : "#16a34a";
-        const bg = i % 2 === 0 ? "#ffffff" : "#f9fafb";
-        const ps = a.pqcScore;
-        const psc = ps?.active ? "#16a34a" : ps?.color ?? "#ef4444";
-        const psl = ps?.active ? "ACTIVE" : ps ? `${ps.score}/100` : "—";
-        const dots = ps ? Object.values(ps.criteria).map((c) => `<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${c.pass ? "#16a34a" : c.pts > 0 ? "#eab308" : "#ef4444"};margin-right:2px;" title="${c.label}: ${c.pts}/${c.max}"></span>`).join("") : "";
-        return `<tr style="background:${bg};">
-      <td style="padding:5px 7px;font-size:8px;color:#9ca3af;text-align:center;">${i + 1}</td>
-      <td style="padding:5px 7px;font-size:9px;color:#1e40af;font-weight:500;">${a.app}</td>
-      <td style="padding:5px 7px;font-size:8px;color:#374151;">${a.assetType}</td>
-      <td style="padding:5px 7px;text-align:center;"><span style="font-size:8px;font-weight:600;color:${rc};background:${rc}18;padding:2px 6px;border-radius:3px;">${a.risk}</span></td>
-      <td style="padding:5px 7px;font-size:8px;color:${kc};font-weight:600;text-align:center;">${a.keylen ?? "—"}</td>
-      <td style="padding:5px 7px;font-size:7px;color:#6b7280;max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${a.cipher ?? "—"}</td>
-      <td style="padding:5px 7px;text-align:center;font-size:8px;color:${tc};font-weight:500;">TLS ${a.tls ?? "—"}</td>
-      <td style="padding:5px 7px;font-size:8px;color:#6b7280;">${a.ca ?? "—"}</td>
-      <td style="padding:5px 7px;text-align:center;"><div style="font-size:9px;font-weight:700;color:${psc};">${psl}</div><div style="margin-top:3px;">${dots}</div></td>
-      <td style="padding:5px 7px;font-size:8px;color:#0891b2;text-align:center;">${a.days}d</td>
-      <td style="padding:5px 7px;font-size:8px;color:#ea580c;text-align:right;font-weight:600;">${fmtINRFull(a.cost)}</td>
-    </tr>`;
-    }).join("");
-    const criteriaLegend = [
-        { label: "Cert RSA-4096 / EC P-384", max: 70, color: "#1e40af" },
-        { label: "No wildcard certificate", max: 20, color: "#0891b2" },
-        { label: "AES-256-GCM / ChaCha20", max: 8, color: "#16a34a" },
-        { label: "X25519 or P-384 KX", max: 2, color: "#d97706" },
-        { label: "TLS 1.3 (hygiene)", max: 0, color: "#9ca3af" },
-        { label: "No CBC mode (hygiene)", max: 0, color: "#9ca3af" },
-    ].map(c => `<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid #f3f4f6;font-size:9px;">
-    <span style="color:#374151;">${c.label}</span>
-    <span style="color:${c.color};font-weight:700;min-width:30px;text-align:right;">${c.max > 0 ? `${c.max}pts` : "info"}</span>
-  </div>`).join("");
-    const doraRows = [
-        { art: "Art. 9.2", title: "ICT Asset Register", desc: "Maintain an up-to-date register of all ICT assets including cryptographic configurations.", status: total > 0 ? "COVERED" : "PENDING" },
-        { art: "Art. 9.4", title: "Cryptographic Controls", desc: "Implement cryptographic controls protecting data in transit and at rest.", status: enriched.filter(a => a.status !== "weak" && a.status !== "WEAK").length > 0 ? "PARTIAL" : "PENDING" },
-        { art: "Art. 10.1", title: "Vulnerability Management", desc: "Identify, classify and address ICT vulnerabilities in a timely manner.", status: enriched.length > 0 ? "IDENTIFIED" : "CLEAR" },
-        { art: "Art. 11.1", title: "ICT Business Continuity", desc: "Maintain ICT business continuity plans covering cryptographic dependencies.", status: "ROADMAP PROVIDED" },
-    ].map(d => {
-        const sc = ["COVERED", "CLEAR", "ROADMAP PROVIDED"].includes(d.status) ? "#16a34a" : ["PARTIAL", "IDENTIFIED"].includes(d.status) ? "#d97706" : "#dc2626";
-        return `<tr style="border-bottom:1px solid #f3f4f6;">
-      <td style="padding:7px 10px;font-size:9px;color:#1e40af;font-weight:700;white-space:nowrap;">${d.art}</td>
-      <td style="padding:7px 10px;font-size:9px;color:#111827;font-weight:600;">${d.title}</td>
-      <td style="padding:7px 10px;font-size:8px;color:#6b7280;line-height:1.5;">${d.desc}</td>
-      <td style="padding:7px 10px;text-align:center;"><span style="font-size:8px;font-weight:700;color:${sc};background:${sc}18;padding:2px 8px;border-radius:3px;white-space:nowrap;">${d.status}</span></td>
-    </tr>`;
-    }).join("");
-    const remCards = [
-        { title: "Upgrade Certificate Key", color: "#dc2626", bg: "#fef2f2", border: "#fecaca", count: enriched.filter(a => !(a.pqcScore?.criteria?.certKey4096?.pass)).length, action: "Deploy RSA-4096 or EC P-384 certificates.", detail: "Worth 70/100 pts — the primary bank infrastructure gate.", items: enriched.filter(a => !(a.pqcScore?.criteria?.certKey4096?.pass)).map(a => `${a.app} (${a.keylen ?? "?"})`).slice(0, 5) },
-        { title: "Remove Wildcard Certs", color: "#ea580c", bg: "#fff7ed", border: "#fed7aa", count: enriched.filter(a => a.is_wildcard).length, action: "Replace wildcards with dedicated per-service certificates.", detail: "Worth 20/100 pts — bank services must not share certificates.", items: enriched.filter(a => a.is_wildcard).map(a => a.app).slice(0, 5) },
-        { title: "Enable Kyber Hybrid", color: "#0891b2", bg: "#f0f9ff", border: "#bae6fd", count: enriched.filter(a => !a.pqc).length, action: "Implement CRYSTALS-Kyber (FIPS 203) hybrid key exchange.", detail: "Deploy X25519+Kyber768 — the only path to ACTIVE status.", items: enriched.filter(a => !a.pqc).map(a => a.app).slice(0, 5) },
-    ].map(s => `<div style="border:1px solid ${s.border};border-radius:6px;padding:14px;background:${s.bg};">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-      <span style="font-size:10px;font-weight:700;color:${s.color};">${s.title}</span>
-      <span style="font-size:18px;font-weight:700;color:${s.color};">${s.count}</span>
-    </div>
-    <div style="font-size:9px;color:#374151;font-weight:500;margin-bottom:3px;">${s.action}</div>
-    <div style="font-size:8px;color:#6b7280;margin-bottom:10px;line-height:1.5;">${s.detail}</div>
-    ${s.items.map(app => `<div style="font-size:8px;color:#374151;padding:3px 0;border-top:1px solid ${s.border};">▸ ${app}</div>`).join("")}
-    ${s.items.length === 0 ? `<div style="font-size:8px;color:#16a34a;font-weight:500;">✓ All clear</div>` : ""}
-  </div>`).join("");
-    const html = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"/>
-  <title>REBEL — PQC Audit — ${displayName} — ${scanDate}</title>
-  <style>*{box-sizing:border-box;margin:0;padding:0;}body{font-family:Arial,Helvetica,sans-serif;color:#111827;background:#fff;font-size:11px;}@media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact;}.no-print{display:none!important;}.page-break{page-break-before:always;}}.page{max-width:980px;margin:0 auto;padding:32px 40px;}h2{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#374151;margin-bottom:12px;}table{width:100%;border-collapse:collapse;}th{background:#f3f4f6;padding:6px 7px;font-size:8px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#6b7280;text-align:left;border-bottom:2px solid #e5e7eb;}hr{border:none;border-top:1px solid #e5e7eb;margin:22px 0;}.section{margin-bottom:26px;}.grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px;}.grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;}.card{border:1px solid #e5e7eb;border-radius:6px;padding:14px 16px;}.lbl{font-size:8px;color:#9ca3af;text-transform:uppercase;letter-spacing:.1em;margin-bottom:5px;}.val{font-size:20px;font-weight:700;line-height:1;}.sub{font-size:8px;color:#6b7280;margin-top:4px;}.print-btn{position:fixed;top:20px;right:20px;background:#1e40af;color:#fff;border:none;padding:10px 22px;border-radius:5px;cursor:pointer;font-size:13px;font-weight:600;z-index:99;box-shadow:0 2px 8px rgba(30,64,175,.35);}.confidential{background:#fef9c3;border:1px solid #fde047;border-radius:4px;padding:6px 12px;font-size:8px;color:#854d0e;margin-bottom:20px;}.footer{font-size:8px;color:#d1d5db;text-align:center;margin-top:28px;padding-top:14px;border-top:1px solid #f3f4f6;line-height:1.7;}</style>
-  </head><body>
-  <button class="print-btn no-print" onclick="window.print()">⬇ Save as PDF</button>
-  <div class="page">
-  <div style="display:flex;justify-content:space-between;align-items:flex-start;padding-bottom:20px;border-bottom:3px solid #1e40af;margin-bottom:22px;">
-    <div style="display:flex;align-items:center;gap:10px;">
-      <svg width="32" height="32" viewBox="0 0 28 28" xmlns="http://www.w3.org/2000/svg"><polygon points="14,2 26,8 26,20 14,26 2,20 2,8" fill="none" stroke="#1e40af" stroke-width="1.8"/><polygon points="14,7 21,11 21,17 14,21 7,17 7,11" fill="#dbeafe" stroke="#3b82f6" stroke-width="1"/><circle cx="14" cy="14" r="3" fill="#1e40af"/></svg>
-      <div><div style="font-size:18px;font-weight:900;letter-spacing:.2em;color:#111827;">REBEL</div><div style="font-size:7px;color:#9ca3af;letter-spacing:.14em;margin-top:1px;">THREAT INTELLIGENCE PLATFORM</div></div>
-    </div>
-    <div style="text-align:right;"><div style="font-size:8px;color:#9ca3af;text-transform:uppercase;letter-spacing:.1em;margin-bottom:4px;">Prepared for</div><div style="font-size:20px;font-weight:800;color:#111827;">${displayName}</div>${clientDomain ? `<div style="font-size:9px;color:#6b7280;margin-top:3px;">${normaliseDomain(clientDomain)}</div>` : ""}</div>
-  </div>
-  <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:22px;">
-    <div><div style="font-size:22px;font-weight:700;color:#111827;line-height:1.25;">Post-Quantum Cryptography<br/>Audit Report</div><div style="font-size:9px;color:#6b7280;margin-top:7px;line-height:1.9;">DORA Art. 9 · NIST FIPS 203/204/205 · PCI-DSS 4.0 · SWIFT CSP</div></div>
-    <div style="text-align:right;min-width:200px;"><div style="font-size:8px;color:#9ca3af;text-transform:uppercase;letter-spacing:.08em;">Generated</div><div style="font-size:9px;color:#374151;font-weight:500;margin-top:2px;">${timestamp}</div><div style="font-size:8px;color:#9ca3af;margin-top:8px;text-transform:uppercase;letter-spacing:.08em;">Report ID</div><div style="font-size:9px;color:#374151;font-family:monospace;margin-top:2px;">${reportId}</div>${clientDomain ? `<div style="font-size:8px;color:#9ca3af;margin-top:8px;text-transform:uppercase;letter-spacing:.08em;">Scope</div><div style="font-size:9px;color:#1e40af;font-weight:500;margin-top:2px;">*.${normaliseDomain(clientDomain)}</div>` : ""}</div>
-  </div>
-  <div class="confidential">⚠ CONFIDENTIAL — Sensitive cryptographic posture data. Not for external distribution.</div><hr/>
-  <div class="section"><h2>Executive Summary</h2><div class="grid2" style="align-items:start;"><div class="card" style="display:flex;flex-direction:column;align-items:center;padding:22px;">${gaugeSVG}<div style="margin-top:12px;width:100%;"><div style="font-size:9px;color:#374151;font-weight:600;text-align:center;margin-bottom:8px;">${total} Applications Assessed · PQC Migration Progress</div><div style="font-size:8px;color:#6b7280;line-height:1.6;background:#f9fafb;border-radius:4px;padding:8px;border:1px solid #e5e7eb;">Score = 5 milestones × 20pts each.<br/>All certs RSA-4096/EC P-384 · Zero wildcards · AES-256 everywhere · TLS 1.2 eliminated · Kyber deployed.</div></div></div><div style="display:flex;flex-direction:column;gap:10px;"><div class="grid2"><div class="card"><div class="lbl">Assessed</div><div class="val" style="color:#1e40af;">${total}</div><div class="sub">In scope</div></div><div class="card"><div class="lbl">Need Action</div><div class="val" style="color:#dc2626;">${enriched.length}</div><div class="sub">Weak assets</div></div></div><div class="grid2"><div class="card"><div class="lbl">Est. Timeline</div><div class="val" style="color:#0891b2;">${calDays}d</div><div class="sub">${teamSize} dev · ${totalDays} dev-days</div></div><div class="card"><div class="lbl">Est. Cost</div><div class="val" style="color:#ea580c;">${fmtINR(totalCostUSD)}</div><div class="sub">At ${fmtINR(devRateUSD)}/dev/day</div></div></div><div class="card" style="background:#f8fafc;"><div class="lbl">Projected Completion</div><div style="font-size:16px;font-weight:700;color:#0891b2;margin-top:4px;">${dateStr}</div><div class="sub">${teamSize}-dev team</div></div></div></div></div>
-  <div class="section"><h2>PQC Migration Progress — 5 Milestones</h2><div class="grid2"><div class="card">${scoreDist}</div><div class="card"><div style="font-size:10px;color:#374151;font-weight:600;margin-bottom:10px;">Scoring Criteria (per application)</div>${criteriaLegend}</div></div></div>
-  <hr class="page-break"/>
-  <div class="section"><h2>DORA Regulatory Mapping</h2><table><thead><tr><th>Article</th><th>Requirement</th><th>Description</th><th>Status</th></tr></thead><tbody>${doraRows}</tbody></table></div>
-  <hr/>
-  <div class="section"><h2>Application Cryptographic Inventory — Ranked by Risk Priority</h2><table><thead><tr><th style="width:22px;">#</th><th>Application</th><th>Type</th><th>Risk</th><th>Key Len</th><th>Cipher Suite</th><th>TLS</th><th>CA</th><th style="text-align:center;">PQC Score</th><th>Days</th><th>Cost (INR)</th></tr></thead><tbody>${assetRows}</tbody><tfoot><tr style="background:#f8fafc;border-top:2px solid #e5e7eb;"><td colspan="9" style="padding:7px 10px;font-size:9px;color:#374151;font-weight:700;">TOTALS</td><td style="padding:7px 10px;font-size:9px;color:#0891b2;font-weight:700;text-align:center;">${totalDays}d</td><td style="padding:7px 10px;font-size:9px;color:#ea580c;font-weight:700;text-align:right;">${fmtINRFull(totalCostUSD)}</td></tr></tfoot></table></div>
-  <hr/>
-  <div class="section"><h2>Remediation Actions — Priority Order</h2><div class="grid3">${remCards}</div></div>
-  <hr/>
-  <div class="grid3" style="margin-bottom:28px;">${["Prepared by", "Reviewed by", "Approved by"].map(role => `<div><div style="font-size:8px;color:#9ca3af;text-transform:uppercase;letter-spacing:.1em;margin-bottom:22px;">${role}</div><div style="border-bottom:1px solid #374151;margin-bottom:5px;"></div><div style="font-size:8px;color:#9ca3af;">Signature &amp; Date</div></div>`).join("")}</div>
-  <div class="footer">REBEL Threat Intelligence Platform · ${new URL(API).hostname} · Report ID: ${reportId} · ${displayName}${clientDomain ? `· Scope: *.${normaliseDomain(clientDomain)}` : ""}<br/>Confidential — intended solely for the named organisation. · Costs displayed in Indian Rupees (INR).</div>
-  </div></body></html>`;
-    const blob = new Blob([html], { type: "text/html" });
-    const url = URL.createObjectURL(blob);
-    const win = window.open(url, "_blank");
-    if (win)
-        win.focus();
+    return (_jsxs("div", { style: { background: L.panelBg, border: `1px solid ${L.panelBorder}`, borderRadius: 8, padding: "14px 16px", boxShadow: "0 1px 3px rgba(0,0,0,0.05)" }, children: [_jsx("div", { style: { fontSize: 8, color: L.text4, textTransform: "uppercase", letterSpacing: ".12em", marginBottom: 6 }, children: label }), _jsx("div", { style: { fontSize: 22, fontWeight: 800, color, lineHeight: 1 }, children: value }), _jsx("div", { style: { fontSize: 9, color: L.text3, marginTop: 5 }, children: sub })] }));
 }
 // ── Score Gauge ───────────────────────────────────────────────────────────────
 function ScoreGauge({ score, size = 200 }) {
@@ -435,10 +282,7 @@ function ScoreGauge({ score, size = 200 }) {
 function RoadmapCard({ a, i }) {
     const [open, setOpen] = useState(false);
     const ps = a.pqcScore;
-    return (_jsxs("div", { style: {
-            borderBottom: `1px solid ${L.borderLight}`, background: L.panelBg,
-            animation: `fadeIn 0.3s ease both`, animationDelay: `${i * 0.04}s`, transition: "background 0.15s",
-        }, onMouseEnter: e => (e.currentTarget.style.background = L.subtleBg), onMouseLeave: e => (e.currentTarget.style.background = L.panelBg), children: [_jsxs("div", { onClick: () => setOpen(o => !o), style: { padding: "10px 14px", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center" }, children: [_jsxs("div", { style: { display: "flex", alignItems: "center", gap: 8, minWidth: 0, flex: 1 }, children: [_jsxs("span", { style: { fontFamily: "'DM Mono',monospace", fontSize: 9, color: L.text4, flexShrink: 0 }, children: ["#", i + 1] }), _jsx("span", { style: { fontSize: 12, color: L.blue, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontWeight: 500 }, children: a.app }), a.isPublic && _jsx("span", { style: { fontSize: 7, color: L.cyan, border: `1px solid ${L.cyan}55`, borderRadius: 2, padding: "1px 4px", flexShrink: 0, background: `${L.cyan}10` }, children: "PUB" })] }), _jsxs("div", { style: { display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }, children: [ps && _jsx("span", { style: { fontSize: 8, fontWeight: 700, color: ps.color, border: `1px solid ${ps.color}55`, borderRadius: 2, padding: "1px 5px", background: `${ps.color}10` }, children: ps.active ? "ACTIVE" : `${ps.score}/100` }), _jsx(Badge, { v: riskVariant(a.risk), children: a.risk }), _jsx("span", { style: { fontSize: 10, color: L.text4 }, children: open ? "▲" : "▼" })] })] }), _jsxs("div", { style: { padding: "0 14px 10px", display: "flex", gap: 10, flexWrap: "wrap" }, children: [_jsx("span", { style: { fontSize: 9, color: L.text3 }, children: a.assetType }), _jsxs("span", { style: { fontSize: 9, color: L.cyan, fontWeight: 600 }, children: [a.days, "d"] }), _jsx("span", { style: { fontSize: 9, color: L.orange, fontWeight: 600 }, children: fmtINR(a.cost) }), _jsx("span", { style: { fontSize: 9, color: a.pqc ? L.green : L.red, fontWeight: 600 }, children: a.pqc ? "PQC ✓" : "PQC ✗" })] }), open && ps && (_jsxs("div", { style: { padding: "0 14px 12px", borderTop: `1px solid ${L.borderLight}`, paddingTop: 10, background: L.insetBg }, children: [Object.values(ps.criteria).map((c) => (_jsxs("div", { style: { display: "flex", alignItems: "center", gap: 8, fontSize: 9, marginBottom: 4 }, children: [_jsx("span", { style: { color: c.pass ? "#16a34a" : c.pts > 0 ? "#b45309" : "#dc2626", width: 10, fontWeight: 700 }, children: c.pass ? "✓" : c.pts > 0 ? "~" : "✗" }), _jsx("span", { style: { color: L.text2, flex: 1 }, children: c.label }), _jsxs("span", { style: { color: L.text1, fontFamily: "'DM Mono',monospace", fontWeight: 600 }, children: [c.pts, "/", c.max] })] }, c.label))), _jsx("div", { style: { fontSize: 8, color: L.text3, marginTop: 6, fontStyle: "italic" }, children: ps.active ? "Kyber hybrid active — ACTIVE status confirmed." : ps.score >= 70 ? "Address remaining criteria then deploy Kyber hybrid." : "Significant gaps — fix cert key and wildcard first." })] }))] }));
+    return (_jsxs("div", { style: { borderBottom: `1px solid ${L.borderLight}`, background: L.panelBg, transition: "background 0.15s" }, onMouseEnter: e => (e.currentTarget.style.background = L.subtleBg), onMouseLeave: e => (e.currentTarget.style.background = L.panelBg), children: [_jsxs("div", { onClick: () => setOpen(o => !o), style: { padding: "10px 14px", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center" }, children: [_jsxs("div", { style: { display: "flex", alignItems: "center", gap: 8, minWidth: 0, flex: 1 }, children: [_jsxs("span", { style: { fontFamily: "'DM Mono',monospace", fontSize: 9, color: L.text4, flexShrink: 0 }, children: ["#", i + 1] }), _jsx("span", { style: { fontSize: 12, color: L.blue, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontWeight: 500 }, children: a.app }), a.isPublic && _jsx("span", { style: { fontSize: 7, color: L.cyan, border: `1px solid ${L.cyan}55`, borderRadius: 2, padding: "1px 4px", flexShrink: 0, background: `${L.cyan}10` }, children: "PUB" })] }), _jsxs("div", { style: { display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }, children: [ps && _jsx("span", { style: { fontSize: 8, fontWeight: 700, color: ps.color, border: `1px solid ${ps.color}55`, borderRadius: 2, padding: "1px 5px", background: `${ps.color}10` }, children: ps.active ? "ACTIVE" : `${ps.score}/100` }), _jsx("span", { style: { fontSize: 8, fontWeight: 700, color: riskVariant(a.risk), border: `1px solid ${riskVariant(a.risk)}44`, borderRadius: 3, padding: "2px 7px", background: `${riskVariant(a.risk)}0d` }, children: a.risk }), _jsx("span", { style: { fontSize: 10, color: L.text4 }, children: open ? "▲" : "▼" })] })] }), _jsxs("div", { style: { padding: "0 14px 10px", display: "flex", gap: 10, flexWrap: "wrap" }, children: [_jsx("span", { style: { fontSize: 9, color: L.text3 }, children: a.assetType }), _jsxs("span", { style: { fontSize: 9, color: L.cyan, fontWeight: 600 }, children: [a.days, "d"] }), _jsx("span", { style: { fontSize: 9, color: L.orange, fontWeight: 600 }, children: fmtINR(a.cost) }), _jsx("span", { style: { fontSize: 9, color: a.pqc ? L.green : L.red, fontWeight: 600 }, children: a.pqc ? "PQC ✓" : "PQC ✗" })] }), open && ps && (_jsxs("div", { style: { padding: "0 14px 12px", borderTop: `1px solid ${L.borderLight}`, paddingTop: 10, background: L.insetBg }, children: [Object.values(ps.criteria).map((c) => (_jsxs("div", { style: { display: "flex", alignItems: "center", gap: 8, fontSize: 9, marginBottom: 4 }, children: [_jsx("span", { style: { color: c.pass ? "#16a34a" : c.pts > 0 ? "#b45309" : "#dc2626", width: 10, fontWeight: 700 }, children: c.pass ? "✓" : c.pts > 0 ? "~" : "✗" }), _jsx("span", { style: { color: L.text2, flex: 1 }, children: c.label }), _jsxs("span", { style: { color: L.text1, fontFamily: "'DM Mono',monospace", fontWeight: 600 }, children: [c.pts, "/", c.max] })] }, c.label))), _jsx("div", { style: { fontSize: 8, color: L.text3, marginTop: 6, fontStyle: "italic" }, children: ps.active ? "Kyber hybrid active — ACTIVE status confirmed." : ps.score >= 70 ? "Address remaining criteria then deploy Kyber hybrid." : "Significant gaps — fix cert key and wildcard first." })] }))] }));
 }
 // ── Main Page ─────────────────────────────────────────────────────────────────
 export default function PQCReadinessPage() {
@@ -447,56 +291,25 @@ export default function PQCReadinessPage() {
     const [loading, setLoading] = useState(true);
     const [fetchError, setFetchError] = useState(false);
     const [fromCache, setFromCache] = useState(false);
-    const [cacheAge, setCacheAge] = useState(null);
+    const [cachedAt, setCachedAt] = useState(null);
     const [teamSize, setTeamSize] = useState(2);
     const [devRate, setDevRate] = useState(DEV_RATE_USD);
     const [domainInput, setDomainInput] = useState("");
     const [activeDomain, setActiveDomain] = useState("");
     const [clientName, setClientName] = useState("");
+    const [secureModeOn, setSecureModeOn] = useState(false);
+    const [secureModeLoading, setSecureModeLoading] = useState(true);
     const bp = useBreakpoint(), isMobile = bp === "mobile", isTablet = bp === "tablet", isDesktop = bp === "desktop";
-    // ── Data fetch with cache ───────────────────────────────────────────────────
-    const loadData = async (forceRefresh = false) => {
-        setLoading(true);
-        setFetchError(false);
-        // Try cache first (unless force-refreshing)
-        if (!forceRefresh) {
-            const cachedCbom = cacheGet(CACHE_KEY_CBOM);
-            const cachedAssets = cacheGet(CACHE_KEY_ASSETS);
-            if (cachedCbom && cachedAssets) {
-                const merged = buildMerged(cachedCbom, cachedAssets);
-                if (merged.length)
-                    setCbomData(merged);
-                if (cachedAssets?.assets?.length)
-                    setAssets(cachedAssets.assets);
-                setFromCache(true);
-                setCacheAge(cacheAge => cacheAge); // will be read fresh below
-                setLoading(false);
-                return;
-            }
-        }
-        // Fetch from API
-        try {
-            const [cbom, assetsData] = await Promise.all([
-                fetch(`${API}/cbom`).then(r => { if (!r.ok)
-                    throw new Error(); return r.json(); }),
-                fetch(`${API}/assets`).then(r => { if (!r.ok)
-                    throw new Error(); return r.json(); }),
-            ]);
-            cacheSet(CACHE_KEY_CBOM, cbom);
-            cacheSet(CACHE_KEY_ASSETS, assetsData);
-            const merged = buildMerged(cbom, assetsData);
-            if (merged.length)
-                setCbomData(merged);
-            if (assetsData?.assets?.length)
-                setAssets(assetsData.assets);
-            setFromCache(false);
-        }
-        catch {
-            setFetchError(true);
-            // fall through — displayCbom/displayAssets will use MOCK below
-        }
-        setLoading(false);
-    };
+    // ── Fetch secure mode status on mount ────────────────────────────────────
+    useEffect(() => {
+        fetch(`${API}/secure-mode/status`)
+            .then(r => r.ok ? r.json() : null)
+            .then(d => { if (d?.enabled !== undefined)
+            setSecureModeOn(Boolean(d.enabled)); })
+            .catch(() => { })
+            .finally(() => setSecureModeLoading(false));
+    }, []);
+    // ── Merge helper (normal mode only) ──────────────────────────────────────
     function buildMerged(cbom, assetsData) {
         const registeredMap = {};
         (assetsData?.assets ?? []).forEach((a) => { if (a.name)
@@ -510,40 +323,124 @@ export default function PQCReadinessPage() {
         const cbomDomains = new Set(cbomApps.map((a) => a.app));
         const registeredOnly = (assetsData?.assets ?? [])
             .filter((a) => a.id && !cbomDomains.has(a.name))
-            .map((a) => ({ app: a.name, keylen: a.keylen || "—", cipher: a.cipher || "—", tls: a.tls || "—", ca: a.ca || "—", status: a.risk === "weak" ? "weak" : "ok", pqc: false, pqc_support: "none", key_exchange_group: a.key_exchange_group || null, is_wildcard: a.is_wildcard ?? null, criticality: a.criticality, owner: a.owner, compliance_scope: a.compliance_scope, financial_exposure: a.financial_exposure }));
+            .map((a) => ({
+            app: a.name, keylen: a.keylen || "—", cipher: a.cipher || "—",
+            tls: a.tls || "—", ca: a.ca || "—",
+            status: a.risk === "weak" ? "weak" : "ok",
+            pqc: false, pqc_support: "none",
+            key_exchange_group: a.key_exchange_group || null,
+            is_wildcard: a.is_wildcard ?? null,
+            criticality: a.criticality, owner: a.owner,
+            compliance_scope: a.compliance_scope, financial_exposure: a.financial_exposure,
+        }));
         return [...cbomApps, ...registeredOnly];
     }
-    useEffect(() => { loadData(); }, []);
-    // Update cache age display after load
-    useEffect(() => {
-        if (fromCache) {
-            setCacheAge(cacheAge_(CACHE_KEY_CBOM));
+    // ── Data fetch with cache ─────────────────────────────────────────────────
+    const loadData = async (forceRefresh = false) => {
+        setLoading(true);
+        setFetchError(false);
+        if (secureModeOn) {
+            // ── SECURE MODE: /ghost/assets ONLY ──────────────────────────────────
+            if (!forceRefresh) {
+                const cached = cacheGet(CACHE_KEY_GHOST);
+                if (cached) {
+                    // Map ghost assets → CBOM app shape
+                    const apps = (cached?.assets ?? []).map((a) => ({
+                        app: a.name, keylen: a.keylen || "—", cipher: a.cipher || "—",
+                        tls: a.tls || "—", ca: a.ca || "—",
+                        status: a.risk === "weak" ? "weak" : "ok",
+                        pqc: false, pqc_support: "none",
+                        key_exchange_group: a.key_exchange_group || null,
+                        is_wildcard: a.is_wildcard ?? null,
+                    }));
+                    setCbomData(apps);
+                    setAssets(cached?.assets ?? []);
+                    setFromCache(true);
+                    setCachedAt(cacheAgeLabel(CACHE_KEY_GHOST));
+                    setLoading(false);
+                    return;
+                }
+            }
+            try {
+                const d = await fetch(`${API}/ghost/assets`).then(r => {
+                    if (!r.ok)
+                        throw new Error();
+                    return r.json();
+                });
+                cacheSet(CACHE_KEY_GHOST, d);
+                const apps = (d?.assets ?? []).map((a) => ({
+                    app: a.name, keylen: a.keylen || "—", cipher: a.cipher || "—",
+                    tls: a.tls || "—", ca: a.ca || "—",
+                    status: a.risk === "weak" ? "weak" : "ok",
+                    pqc: false, pqc_support: "none",
+                    key_exchange_group: a.key_exchange_group || null,
+                    is_wildcard: a.is_wildcard ?? null,
+                }));
+                setCbomData(apps);
+                setAssets(d?.assets ?? []);
+                setFromCache(false);
+                setCachedAt(null);
+            }
+            catch {
+                setFetchError(true);
+            }
         }
-    }, [fromCache]);
-    function cacheAge_(key) {
-        try {
-            const raw = localStorage.getItem(key);
-            if (!raw)
-                return null;
-            const entry = JSON.parse(raw);
-            const mins = Math.round((Date.now() - entry.ts) / 60000);
-            if (mins < 60)
-                return `${mins}m ago`;
-            return `${Math.round(mins / 60)}h ago`;
+        else {
+            // ── NORMAL MODE: /cbom + /assets ──────────────────────────────────────
+            if (!forceRefresh) {
+                const cachedCbom = cacheGet(CACHE_KEY_CBOM);
+                const cachedAssets = cacheGet(CACHE_KEY_ASSETS);
+                if (cachedCbom && cachedAssets) {
+                    const merged = buildMerged(cachedCbom, cachedAssets);
+                    if (merged.length)
+                        setCbomData(merged);
+                    if (cachedAssets?.assets?.length)
+                        setAssets(cachedAssets.assets);
+                    setFromCache(true);
+                    setCachedAt(cacheAgeLabel(CACHE_KEY_CBOM));
+                    setLoading(false);
+                    return;
+                }
+            }
+            try {
+                const [cbom, assetsData] = await Promise.all([
+                    fetch(`${API}/cbom`).then(r => { if (!r.ok)
+                        throw new Error(); return r.json(); }),
+                    fetch(`${API}/assets`).then(r => { if (!r.ok)
+                        throw new Error(); return r.json(); }),
+                ]);
+                cacheSet(CACHE_KEY_CBOM, cbom);
+                cacheSet(CACHE_KEY_ASSETS, assetsData);
+                const merged = buildMerged(cbom, assetsData);
+                if (merged.length)
+                    setCbomData(merged);
+                if (assetsData?.assets?.length)
+                    setAssets(assetsData.assets);
+                setFromCache(false);
+                setCachedAt(null);
+            }
+            catch {
+                setFetchError(true);
+            }
         }
-        catch {
-            return null;
-        }
-    }
+        setLoading(false);
+    };
     function handleForceRefresh() {
-        cacheClear();
+        cacheClearAll();
         setFromCache(false);
-        setCacheAge(null);
+        setCachedAt(null);
         loadData(true);
     }
+    // Wait for secure mode status before first load
+    useEffect(() => {
+        if (!secureModeLoading)
+            loadData();
+    }, [secureModeOn, secureModeLoading]);
     const displayCbom = cbomData.length ? cbomData : MOCK_CBOM;
     const displayAssets = assets.length ? assets : MOCK_ASSETS;
-    const scopedCbom = activeDomain ? displayCbom.filter((a) => appMatchesDomain(a.app ?? "", activeDomain)) : displayCbom;
+    const scopedCbom = activeDomain
+        ? displayCbom.filter((a) => appMatchesDomain(a.app ?? "", activeDomain))
+        : displayCbom;
     const uniqueCbom = scopedCbom.filter((a, i, arr) => arr.findIndex((b) => b.app === a.app) === i);
     const withPQCScore = uniqueCbom.map((app) => {
         const analysis = fullAnalysis(app.cipher ?? "", app.tls ?? "", app.key_exchange_group ?? null);
@@ -595,7 +492,7 @@ export default function PQCReadinessPage() {
     function exportCSV() {
         const rows = [
             ["Priority", "App", "Asset Type", "Risk", "Key Length", "Cipher", "TLS", "CA", "PQC Score", "PQC Label", "Days", "Cost (INR)", "Public", "PQC Active"],
-            ...enriched.map((a, i) => [i + 1, a.app, a.assetType, a.risk, a.keylen, a.cipher, a.tls, a.ca, a.pqcScore?.score ?? 0, a.pqcScore?.active ? "ACTIVE" : a.pqcScore?.label ?? "—", a.days, fmtINRFull(a.cost), a.isPublic ? "Yes" : "No", a.pqc ? "Yes" : "No"])
+            ...enriched.map((a, i) => [i + 1, a.app, a.assetType, a.risk, a.keylen, a.cipher, a.tls, a.ca, a.pqcScore?.score ?? 0, a.pqcScore?.active ? "ACTIVE" : a.pqcScore?.label ?? "—", a.days, fmtINRFull(a.cost), a.isPublic ? "Yes" : "No", a.pqc ? "Yes" : "No"]),
         ];
         const csv = rows.map((r) => r.join(",")).join("\n");
         const blob = new Blob([csv], { type: "text/csv" });
@@ -605,6 +502,7 @@ export default function PQCReadinessPage() {
         el.download = `rebel-pqc-${activeDomain || "all"}.csv`;
         el.click();
     }
+    const activeEndpointLabel = secureModeOn ? "→ /ghost/assets" : "→ /assets + /cbom";
     const gaugeSize = isMobile ? 160 : 200;
     const metricCols = isMobile ? "1fr 1fr" : isTablet ? "repeat(3,1fr)" : "repeat(5,1fr)";
     const scoreColor = migrationScore >= 70 ? L.green : migrationScore >= 40 ? L.yellow : L.red;
@@ -613,12 +511,17 @@ export default function PQCReadinessPage() {
         @keyframes fadeIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
         @keyframes shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
         input[type=range]{accent-color:${L.blue};}
-        input[type=range]::-webkit-slider-thumb{background:${L.blue};}
         * { box-sizing: border-box; }
         ::-webkit-scrollbar{width:5px;height:5px;}
         ::-webkit-scrollbar-track{background:${L.insetBg};}
         ::-webkit-scrollbar-thumb{background:${L.border};border-radius:3px;}
-      ` }), _jsxs(LPanel, { children: [_jsx(LPanelHeader, { left: "REPORT SCOPE \u2014 CLIENT DOMAIN FILTER", right: fromCache ? _jsx(CacheBadge, { age: cacheAge, onRefresh: handleForceRefresh }) : undefined }), _jsxs("div", { style: { padding: 14, display: "flex", flexDirection: "column", gap: 12 }, children: [_jsxs("div", { style: { display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 10 }, children: [_jsxs("div", { children: [_jsx("div", { style: { fontSize: 8, color: L.text3, letterSpacing: ".12em", marginBottom: 5, textTransform: "uppercase", fontWeight: 600 }, children: "CLIENT DOMAIN" }), _jsxs("div", { style: { display: "flex", gap: 6 }, children: [_jsx("input", { value: domainInput, onChange: e => setDomainInput(e.target.value), onKeyDown: e => e.key === "Enter" && applyDomain(), placeholder: "e.g. barclays.com", style: { ...LS.input, flex: 1 } }), _jsx("button", { style: { ...LS.btn, background: `${L.blue}15`, borderColor: `${L.blue}40`, color: L.blue }, onClick: applyDomain, children: "APPLY" }), activeDomain && _jsx("button", { style: { ...LS.btn }, onClick: clearFilter, children: "CLEAR" })] })] }), _jsxs("div", { children: [_jsx("div", { style: { fontSize: 8, color: L.text3, letterSpacing: ".12em", marginBottom: 5, textTransform: "uppercase", fontWeight: 600 }, children: "CLIENT NAME (for PDF)" }), _jsx("input", { value: clientName, onChange: e => setClientName(e.target.value), placeholder: "e.g. Barclays Bank PLC", style: { ...LS.input, width: "100%" } })] })] }), _jsxs("div", { style: { display: "flex", alignItems: "center", gap: 8 }, children: [_jsx("span", { style: { fontSize: 7, fontFamily: "'DM Mono',monospace", color: L.text4, letterSpacing: ".08em" }, children: "API" }), _jsxs("span", { style: { fontSize: 8, fontFamily: "'DM Mono',monospace", color: fetchError ? L.red : L.green, fontWeight: 600 }, children: [fetchError ? "✗" : "✓", " ", API] }), fetchError && _jsx("span", { style: { fontSize: 8, color: L.red }, children: "\u2014 showing demo data" }), loading && _jsx("span", { style: { fontSize: 8, color: L.blue, animation: "fadeIn 0.3s ease" }, children: "fetching\u2026" })] }), activeDomain && (_jsxs("div", { style: { display: "flex", alignItems: "center", gap: 10, background: `${L.blue}0a`, border: `1px solid ${L.blue}25`, borderRadius: 5, padding: "7px 12px" }, children: [_jsx("span", { style: { fontSize: 9, color: L.text3, fontWeight: 600 }, children: "ACTIVE SCOPE" }), _jsxs("span", { style: { fontFamily: "'DM Mono',monospace", fontSize: 10, color: L.blue, fontWeight: 600 }, children: ["*.", normaliseDomain(activeDomain)] }), _jsxs("span", { style: { fontSize: 9, color: L.text3, marginLeft: "auto" }, children: [_jsx("b", { style: { color: L.text1 }, children: uniqueCbom.length }), " apps \u00B7 ", _jsx("b", { style: { color: L.red }, children: enriched.length }), " need migration"] })] })), activeDomain && uniqueCbom.length === 0 && !loading && (_jsxs("div", { style: { background: `${L.red}0a`, border: `1px solid ${L.red}25`, borderRadius: 5, padding: "8px 12px", fontSize: 10, color: L.text2 }, children: ["\u26A0 No assets found for ", _jsxs("b", { style: { color: L.red }, children: ["*.", normaliseDomain(activeDomain)] })] }))] })] }), unmatchedCount > 0 && !loading && (_jsxs("div", { style: { background: `${L.yellow}10`, border: `1px solid ${L.yellow}40`, borderRadius: 5, padding: "8px 14px", display: "flex", alignItems: "center", gap: 10 }, children: [_jsx("span", { style: { color: L.yellow, fontSize: 14 }, children: "\u26A0" }), _jsxs("span", { style: { fontSize: 10, color: L.text2 }, children: [_jsx("b", { style: { color: L.yellow }, children: unmatchedCount }), " asset", unmatchedCount > 1 ? "s" : "", " unmatched \u2014 defaulted to \"Other\"."] })] })), _jsx("div", { style: { display: "grid", gridTemplateColumns: metricCols, gap: isMobile ? 8 : 9 }, children: loading
+      ` }), secureModeOn && _jsx(SecureModeBanner, {}), _jsxs(LPanel, { children: [_jsx(LPanelHeader, { left: "REPORT SCOPE \u2014 CLIENT DOMAIN FILTER", right: fromCache ? _jsx(CacheBadge, { age: cachedAt, onRefresh: handleForceRefresh }) : undefined }), _jsxs("div", { style: { padding: 14, display: "flex", flexDirection: "column", gap: 12 }, children: [_jsxs("div", { style: { display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 10 }, children: [_jsxs("div", { children: [_jsx("div", { style: { fontSize: 8, color: L.text3, letterSpacing: ".12em", marginBottom: 5, textTransform: "uppercase", fontWeight: 600 }, children: "CLIENT DOMAIN" }), _jsxs("div", { style: { display: "flex", gap: 6 }, children: [_jsx("input", { value: domainInput, onChange: e => setDomainInput(e.target.value), onKeyDown: e => e.key === "Enter" && applyDomain(), placeholder: "e.g. barclays.com", style: { ...LS.input, flex: 1 } }), _jsx("button", { style: { ...LS.btn, background: `${L.blue}15`, borderColor: `${L.blue}40`, color: L.blue }, onClick: applyDomain, children: "APPLY" }), activeDomain && _jsx("button", { style: { ...LS.btn }, onClick: clearFilter, children: "CLEAR" })] })] }), _jsxs("div", { children: [_jsx("div", { style: { fontSize: 8, color: L.text3, letterSpacing: ".12em", marginBottom: 5, textTransform: "uppercase", fontWeight: 600 }, children: "CLIENT NAME (for PDF)" }), _jsx("input", { value: clientName, onChange: e => setClientName(e.target.value), placeholder: "e.g. Barclays Bank PLC", style: { ...LS.input, width: "100%" } })] })] }), _jsxs("div", { style: { display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }, children: [_jsx("span", { style: { fontSize: 7, fontFamily: "'DM Mono',monospace", color: L.text4, letterSpacing: ".08em" }, children: "API" }), _jsxs("span", { style: { fontSize: 8, fontFamily: "'DM Mono',monospace", color: fetchError ? L.red : L.green, fontWeight: 600 }, children: [fetchError ? "✗" : "✓", " ", API] }), _jsx("span", { style: {
+                                            fontSize: 8, fontFamily: "'DM Mono',monospace", fontWeight: 700,
+                                            color: secureModeOn ? L.purple : L.cyan,
+                                            background: secureModeOn ? `${L.purple}10` : `${L.cyan}10`,
+                                            border: `1px solid ${secureModeOn ? L.purple : L.cyan}44`,
+                                            borderRadius: 3, padding: "2px 6px", letterSpacing: ".04em",
+                                        }, children: activeEndpointLabel }), fetchError && _jsx("span", { style: { fontSize: 8, color: L.red }, children: "\u2014 showing demo data" }), loading && _jsx("span", { style: { fontSize: 8, color: L.blue }, children: "fetching\u2026" })] }), activeDomain && (_jsxs("div", { style: { display: "flex", alignItems: "center", gap: 10, background: `${L.blue}0a`, border: `1px solid ${L.blue}25`, borderRadius: 5, padding: "7px 12px" }, children: [_jsx("span", { style: { fontSize: 9, color: L.text3, fontWeight: 600 }, children: "ACTIVE SCOPE" }), _jsxs("span", { style: { fontFamily: "'DM Mono',monospace", fontSize: 10, color: L.blue, fontWeight: 600 }, children: ["*.", normaliseDomain(activeDomain)] }), _jsxs("span", { style: { fontSize: 9, color: L.text3, marginLeft: "auto" }, children: [_jsx("b", { style: { color: L.text1 }, children: uniqueCbom.length }), " apps \u00B7 ", _jsx("b", { style: { color: L.red }, children: enriched.length }), " need migration"] })] })), activeDomain && uniqueCbom.length === 0 && !loading && (_jsxs("div", { style: { background: `${L.red}0a`, border: `1px solid ${L.red}25`, borderRadius: 5, padding: "8px 12px", fontSize: 10, color: L.text2 }, children: ["\u26A0 No assets found for ", _jsxs("b", { style: { color: L.red }, children: ["*.", normaliseDomain(activeDomain)] })] }))] })] }), unmatchedCount > 0 && !loading && (_jsxs("div", { style: { background: `${L.yellow}10`, border: `1px solid ${L.yellow}40`, borderRadius: 5, padding: "8px 14px", display: "flex", alignItems: "center", gap: 10 }, children: [_jsx("span", { style: { color: L.yellow, fontSize: 14 }, children: "\u26A0" }), _jsxs("span", { style: { fontSize: 10, color: L.text2 }, children: [_jsx("b", { style: { color: L.yellow }, children: unmatchedCount }), " asset", unmatchedCount > 1 ? "s" : "", " unmatched \u2014 defaulted to \"Other\"."] })] })), _jsx("div", { style: { display: "grid", gridTemplateColumns: metricCols, gap: isMobile ? 8 : 9 }, children: loading
                     ? Array.from({ length: 5 }).map((_, i) => _jsx(SkeletonMetricCard, {}, i))
                     : _jsxs(_Fragment, { children: [_jsx(LMetricCard, { label: "MIGRATION SCORE", value: `${migrationScore}/100`, sub: "Migration progress", color: scoreColor }), _jsx(LMetricCard, { label: "NEED MIGRATION", value: enriched.length, sub: "Weak assets", color: L.red }), _jsx(LMetricCard, { label: "CRITICAL", value: critCount, sub: "Immediate action", color: L.red }), _jsx(LMetricCard, { label: "EST. DAYS", value: calDays, sub: `${teamSize} dev team`, color: L.cyan }), _jsx("div", { style: isMobile ? { gridColumn: "1/-1" } : {}, children: _jsx(LMetricCard, { label: "EST. COST (INR)", value: fmtINR(totalCost), sub: `At ${fmtINR(devRate)}/day`, color: L.orange }) })] }) }), _jsx("div", { style: { display: "grid", gridTemplateColumns: isDesktop ? "1fr 1fr" : "1fr", gap: isMobile ? 8 : 10 }, children: loading
                     ? _jsxs(_Fragment, { children: [_jsx(SkeletonGaugePanel, {}), _jsx(SkeletonGaugePanel, {})] })
@@ -637,7 +540,7 @@ export default function PQCReadinessPage() {
                                 const color = level === "Critical" ? L.red : level === "High" ? L.orange : level === "Medium" ? L.yellow : L.green;
                                 const bg = level === "Critical" ? "#fff5f5" : level === "High" ? "#fff7ed" : level === "Medium" ? "#fffbeb" : "#f0fdf4";
                                 return (_jsxs("div", { style: { background: bg, border: `1px solid ${color}22`, borderRadius: 6, padding: 12 }, children: [_jsxs("div", { style: { display: "flex", justifyContent: "space-between", marginBottom: 8 }, children: [_jsx("span", { style: { fontSize: 9, color, letterSpacing: ".12em", fontWeight: 700, textTransform: "uppercase" }, children: level }), _jsx("span", { style: { fontFamily: "'DM Mono',monospace", fontSize: 15, color, fontWeight: 800 }, children: count })] }), _jsx("div", { style: { height: 4, background: `${color}20`, borderRadius: 2 }, children: _jsx("div", { style: { height: "100%", width: `${pct}%`, background: color, borderRadius: 2, transition: "width 0.8s ease" } }) }), _jsxs("div", { style: { fontSize: 8, color: L.text3, marginTop: 6, fontWeight: 500 }, children: [enriched.filter((a) => a.risk === level).reduce((s, a) => s + a.days, 0), " dev days"] })] }, level));
-                            }) })] }), _jsxs(LPanel, { children: [_jsx(LPanelHeader, { left: "MIGRATION ROADMAP", right: !loading && _jsxs("div", { style: { display: "flex", gap: 6 }, children: [_jsx("button", { style: { ...LS.btn, fontSize: isMobile ? 9 : 11 }, onClick: exportCSV, children: "\u2193 CSV" }), _jsx("button", { style: { ...LS.btn, fontSize: isMobile ? 9 : 11, background: `${L.blue}15`, borderColor: `${L.blue}40`, color: L.blue, fontWeight: 700 }, onClick: () => exportAuditPDF(enriched, migrationScore, pqcReady, total, totalDays, calDays, totalCost, teamSize, devRate, dateStr, clientName, activeDomain, milestones), children: isMobile ? "⬡ PDF" : "⬡ AUDIT PDF" })] }) }), _jsxs("div", { style: { display: "block" }, className: "pqc-show-cards", children: [_jsx("style", { children: `@media(min-width:900px){.pqc-show-cards{display:none!important;}}` }), _jsx("div", { style: { maxHeight: isMobile ? 400 : 520, overflowY: "auto" }, children: loading
+                            }) })] }), _jsxs(LPanel, { children: [_jsx(LPanelHeader, { left: "MIGRATION ROADMAP", right: !loading && (_jsxs("div", { style: { display: "flex", gap: 6, alignItems: "center" }, children: [secureModeOn && (_jsx("span", { style: { fontSize: 7, color: L.purple, fontFamily: "monospace", fontWeight: 700, border: `1px solid ${L.purple}44`, borderRadius: 3, padding: "2px 6px", background: `${L.purple}0a` }, children: "\uD83D\uDD12 GHOST" })), _jsx("button", { style: { ...LS.btn, fontSize: isMobile ? 9 : 11 }, onClick: exportCSV, children: "\u2193 CSV" }), _jsx("button", { style: { ...LS.btn, fontSize: isMobile ? 9 : 11, background: `${L.blue}15`, borderColor: `${L.blue}40`, color: L.blue, fontWeight: 700 }, onClick: () => exportAuditPDF({ enriched, migrationScore, pqcReady, total, totalDays, calDays, totalCostINR: totalCost, teamSize, devRateINR: devRate, completionDate: dateStr, clientName, clientDomain: activeDomain, milestones }), children: isMobile ? "⬡ PDF" : "⬡ AUDIT PDF" })] })) }), _jsxs("div", { style: { display: "block" }, className: "pqc-show-cards", children: [_jsx("style", { children: `@media(min-width:900px){.pqc-show-cards{display:none!important;}}` }), _jsx("div", { style: { maxHeight: isMobile ? 400 : 520, overflowY: "auto" }, children: loading
                                     ? _jsx(SkeletonRoadmapCards, { count: 5 })
                                     : enriched.length
                                         ? enriched.map((a, i) => _jsx(RoadmapCard, { a: a, i: i }, i))
@@ -645,10 +548,12 @@ export default function PQCReadinessPage() {
                                                 ? _jsx(SkeletonTableRows, { count: 7 })
                                                 : enriched.map((a, i) => {
                                                     const ps = a.pqcScore;
-                                                    return (_jsxs("tr", { style: { borderBottom: `1px solid ${L.borderLight}`, background: i % 2 === 0 ? L.panelBg : L.subtleBg }, children: [_jsx("td", { style: { padding: "7px 8px", fontFamily: "'DM Mono',monospace", fontSize: 9, color: L.text4 }, children: i + 1 }), _jsx("td", { style: { padding: "7px 8px", color: L.blue, fontSize: 10, fontWeight: 500 }, children: a.app }), _jsx("td", { style: { padding: "7px 8px" }, children: _jsx("span", { style: { fontSize: 8, color: L.text3, background: L.insetBg, border: `1px solid ${L.border}`, borderRadius: 3, padding: "1px 5px", fontWeight: 600 }, children: a.assetType }) }), _jsx("td", { style: { padding: "7px 8px" }, children: _jsx("span", { style: { fontSize: 8, fontWeight: 700, color: a.risk === "Critical" ? L.red : a.risk === "High" ? L.orange : a.risk === "Medium" ? L.yellow : L.green, background: a.risk === "Critical" ? "#fef2f2" : a.risk === "High" ? "#fff7ed" : a.risk === "Medium" ? "#fffbeb" : "#f0fdf4", border: `1px solid ${a.risk === "Critical" ? L.red : a.risk === "High" ? L.orange : a.risk === "Medium" ? L.yellow : L.green}33`, borderRadius: 3, padding: "1px 6px" }, children: a.risk }) }), _jsx("td", { style: { padding: "7px 8px", fontSize: 10, fontWeight: 600, fontFamily: "'DM Mono',monospace", color: a.keylen?.startsWith("1024") ? L.red : a.keylen?.startsWith("2048") ? L.yellow : L.green }, children: a.keylen }), _jsx("td", { style: { padding: "7px 8px", fontSize: 9, color: L.text3, maxWidth: 140, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }, children: a.cipher }), _jsx("td", { style: { padding: "7px 8px" }, children: _jsxs("span", { style: { fontSize: 8, fontWeight: 600, color: a.tls === "1.0" ? L.red : a.tls === "1.2" ? L.yellow : L.green }, children: ["TLS ", a.tls] }) }), _jsx("td", { style: { padding: "7px 8px", fontSize: 9, color: L.text3 }, children: a.ca }), _jsx("td", { style: { padding: "7px 8px", textAlign: "center" }, children: ps && _jsx("span", { style: { fontSize: 8, fontWeight: 700, color: ps.color, border: `1px solid ${ps.color}44`, borderRadius: 3, padding: "1px 5px", background: `${ps.color}10` }, children: ps.active ? "ACTIVE" : `${ps.score}/100` }) }), _jsxs("td", { style: { padding: "7px 8px", fontFamily: "'DM Mono',monospace", fontSize: 10, color: L.cyan, fontWeight: 600 }, children: [a.days, "d"] }), _jsx("td", { style: { padding: "7px 8px", fontFamily: "'DM Mono',monospace", fontSize: 10, color: L.orange, fontWeight: 700 }, children: fmtINR(a.cost) }), _jsx("td", { style: { padding: "7px 8px", textAlign: "center", fontSize: 13 }, children: a.isPublic ? _jsx("span", { style: { color: L.cyan }, children: "\u25CF" }) : _jsx("span", { style: { color: L.text4 }, children: "\u25CB" }) }), _jsx("td", { style: { padding: "7px 8px", textAlign: "center", fontSize: 13 }, children: a.pqc ? _jsx("span", { style: { color: L.green }, children: "\u2713" }) : _jsx("span", { style: { color: L.red }, children: "\u2717" }) })] }, i));
+                                                    const riskColor = a.risk === "Critical" ? L.red : a.risk === "High" ? L.orange : a.risk === "Medium" ? L.yellow : L.green;
+                                                    const riskBg = a.risk === "Critical" ? "#fef2f2" : a.risk === "High" ? "#fff7ed" : a.risk === "Medium" ? "#fffbeb" : "#f0fdf4";
+                                                    return (_jsxs("tr", { style: { borderBottom: `1px solid ${L.borderLight}`, background: i % 2 === 0 ? L.panelBg : L.subtleBg }, onMouseEnter: e => (e.currentTarget.style.background = L.insetBg), onMouseLeave: e => (e.currentTarget.style.background = i % 2 === 0 ? L.panelBg : L.subtleBg), children: [_jsx("td", { style: { padding: "7px 8px", fontFamily: "'DM Mono',monospace", fontSize: 9, color: L.text4 }, children: i + 1 }), _jsx("td", { style: { padding: "7px 8px", color: L.blue, fontSize: 10, fontWeight: 500 }, children: a.app }), _jsx("td", { style: { padding: "7px 8px" }, children: _jsx("span", { style: { fontSize: 8, color: L.text3, background: L.insetBg, border: `1px solid ${L.border}`, borderRadius: 3, padding: "1px 5px", fontWeight: 600 }, children: a.assetType }) }), _jsx("td", { style: { padding: "7px 8px" }, children: _jsx("span", { style: { fontSize: 8, fontWeight: 700, color: riskColor, background: riskBg, border: `1px solid ${riskColor}33`, borderRadius: 3, padding: "1px 6px" }, children: a.risk }) }), _jsx("td", { style: { padding: "7px 8px", fontSize: 10, fontWeight: 600, fontFamily: "'DM Mono',monospace", color: a.keylen?.startsWith("1024") ? L.red : a.keylen?.startsWith("2048") ? L.yellow : L.green }, children: a.keylen }), _jsx("td", { style: { padding: "7px 8px", fontSize: 9, color: L.text3, maxWidth: 140, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }, children: a.cipher }), _jsx("td", { style: { padding: "7px 8px" }, children: _jsxs("span", { style: { fontSize: 8, fontWeight: 600, color: a.tls === "1.0" ? L.red : a.tls === "1.2" ? L.yellow : L.green }, children: ["TLS ", a.tls] }) }), _jsx("td", { style: { padding: "7px 8px", fontSize: 9, color: L.text3 }, children: a.ca }), _jsx("td", { style: { padding: "7px 8px", textAlign: "center" }, children: ps && _jsx("span", { style: { fontSize: 8, fontWeight: 700, color: ps.color, border: `1px solid ${ps.color}44`, borderRadius: 3, padding: "1px 5px", background: `${ps.color}10` }, children: ps.active ? "ACTIVE" : `${ps.score}/100` }) }), _jsxs("td", { style: { padding: "7px 8px", fontFamily: "'DM Mono',monospace", fontSize: 10, color: L.cyan, fontWeight: 600 }, children: [a.days, "d"] }), _jsx("td", { style: { padding: "7px 8px", fontFamily: "'DM Mono',monospace", fontSize: 10, color: L.orange, fontWeight: 700 }, children: fmtINR(a.cost) }), _jsx("td", { style: { padding: "7px 8px", textAlign: "center", fontSize: 13 }, children: a.isPublic ? _jsx("span", { style: { color: L.cyan }, children: "\u25CF" }) : _jsx("span", { style: { color: L.text4 }, children: "\u25CB" }) }), _jsx("td", { style: { padding: "7px 8px", textAlign: "center", fontSize: 13 }, children: a.pqc ? _jsx("span", { style: { color: L.green }, children: "\u2713" }) : _jsx("span", { style: { color: L.red }, children: "\u2717" }) })] }, i));
                                                 }) })] }) })] }), _jsx("div", { style: { padding: "8px 14px", borderTop: `1px solid ${L.borderLight}`, display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8, background: L.subtleBg, borderRadius: "0 0 8px 8px" }, children: loading
                             ? _jsx(Shimmer, { w: 220, h: 10 })
-                            : _jsxs(_Fragment, { children: [_jsxs("span", { style: { fontSize: 10, color: L.text2 }, children: [_jsx("b", { style: { color: L.text1 }, children: enriched.length }), " to migrate \u00B7", " ", _jsxs("b", { style: { color: L.cyan }, children: [totalDays, "d"] }), " dev \u00B7", " ", _jsx("b", { style: { color: L.orange }, children: fmtINR(totalCost) })] }), !isMobile && _jsx("span", { style: { fontSize: 9, color: L.text3 }, children: "Ranked: public-facing \u2192 risk \u2192 cost" })] }) })] }), _jsxs(LPanel, { children: [_jsx(LPanelHeader, { left: "REMEDIATION GUIDE" }), _jsx("div", { style: { padding: 14, display: "grid", gridTemplateColumns: isMobile ? "1fr" : isTablet ? "1fr 1fr" : "repeat(3,1fr)", gap: 10 }, children: loading
+                            : _jsxs(_Fragment, { children: [_jsxs("span", { style: { fontSize: 10, color: L.text2 }, children: [_jsx("b", { style: { color: L.text1 }, children: enriched.length }), " to migrate \u00B7", " ", _jsxs("b", { style: { color: L.cyan }, children: [totalDays, "d"] }), " dev \u00B7", " ", _jsx("b", { style: { color: L.orange }, children: fmtINR(totalCost) }), secureModeOn && _jsx("span", { style: { marginLeft: 8, fontSize: 8, color: L.purple, fontWeight: 600 }, children: "\u00B7 ghost mode" })] }), !isMobile && _jsx("span", { style: { fontSize: 9, color: L.text3 }, children: "Ranked: public-facing \u2192 risk \u2192 cost" })] }) })] }), _jsxs(LPanel, { children: [_jsx(LPanelHeader, { left: "REMEDIATION GUIDE" }), _jsx("div", { style: { padding: 14, display: "grid", gridTemplateColumns: isMobile ? "1fr" : isTablet ? "1fr 1fr" : "repeat(3,1fr)", gap: 10 }, children: loading
                             ? Array.from({ length: 3 }).map((_, i) => (_jsxs("div", { style: { border: `1px solid ${L.border}`, borderRadius: 6, padding: 12, background: L.subtleBg }, children: [_jsxs("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }, children: [_jsx(Shimmer, { w: 120, h: 10 }), _jsx(Shimmer, { w: 20, h: 20 })] }), _jsx(Shimmer, { w: "90%", h: 9, style: { marginBottom: 6 } }), _jsx(Shimmer, { w: "75%", h: 8, style: { marginBottom: 12 } }), [80, 65, 90, 70, 55].map((w, j) => _jsx(Shimmer, { w: `${w}%`, h: 8, style: { marginBottom: 5 } }, j))] }, i)))
                             : [
                                 { title: "Upgrade cert key", color: L.red, bg: "#fff5f5", border: `${L.red}25`, icon: "⬡", items: enriched.filter((a) => !(a.pqcScore?.criteria?.certKey4096?.pass)).map((a) => a.app), fix: "Deploy RSA-4096 or EC P-384 — 70/100 pts" },

@@ -13,6 +13,8 @@ import PQCReadinessPage from "./components/Modules/PQCReadiness.js";
 import CyberRatingPage from "./components/Modules/CyberRating.js";
 import ReportingPage from "./components/Modules/Reporting.js";
 import { ThemeProvider } from './components/context/ThemeContext.js'
+import KeyRotationPanel from "./components/Modules/KeyRotationPanel";
+
 
 
 export default function App() {
@@ -34,6 +36,8 @@ export default function App() {
             <Route path="pqc-readiness" element={<PQCReadinessPage />} />
             <Route path="rating" element={<CyberRatingPage />} />
             <Route path="reporting" element={<ReportingPage />} />
+
+            <Route path="/key-rotation" element={<KeyRotationPanel />} />
             <Route path="settings/assets" element={<AssetRegistryPage />} />
           </Route>
         </Routes>
