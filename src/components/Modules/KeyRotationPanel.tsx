@@ -46,9 +46,9 @@ export interface KRScanResult {
 }
 
 interface Props {
-  assets:  any[];
-  apiBase: string;
-  style?:  React.CSSProperties;
+  assets?:  any[];
+  apiBase?: string;
+  style?:   React.CSSProperties;
 }
 
 // ── Theme — identical to PQCReadiness ─────────────────────────────────────────
