@@ -13,7 +13,7 @@ import PQCReadinessPage from "./components/Modules/PQCReadiness.js";
 import CyberRatingPage from "./components/Modules/CyberRating.js";
 import ReportingPage from "./components/Modules/Reporting.js";
 import { ThemeProvider } from './components/context/ThemeContext.js'
-import KeyRotationPanel from "./components/Modules/KeyRotationPanel";
+import KeyRotationPanel from "./components/Modules/KeyRotationPanel.js";
 
 
 
