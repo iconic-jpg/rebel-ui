@@ -13,6 +13,7 @@ const NAV_ITEMS = [
     { path: "/pqc-readiness", label: "PQC Readiness", icon: "◐", section: null },
     { path: "/rating", label: "Cyber Rating", icon: "✦", section: "REPORTS" },
     { path: "/reporting", label: "Reporting", icon: "▣", section: null },
+    { path: "/key-rotation", label: "Key Rotation", icon: "↻", section: null },
 ];
 const L = {
     accent: "#0ea5e9",

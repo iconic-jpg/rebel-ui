@@ -38,6 +38,7 @@ export default function App() {
             <Route path="reporting" element={<ReportingPage />} />
 
             <Route path="/key-rotation" element={<KeyRotationPanel />} />
+
             <Route path="settings/assets" element={<AssetRegistryPage />} />
           </Route>
         </Routes>
