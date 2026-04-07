@@ -15,6 +15,7 @@ import ReportingPage from "./components/Modules/Reporting.js";
 import { ThemeProvider } from './components/context/ThemeContext.js'
 import KeyRotationPanel from "./components/Modules/KeyRotationPanel.js";
 
+const API_BASE = "https://r3bel-production.up.railway.app";
 
 
 export default function App() {
