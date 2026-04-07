@@ -7,6 +7,10 @@
 import { useState, useEffect } from "react";
 import type React from "react";
 
+const API =
+  (typeof import.meta !== "undefined" && (import.meta as any).env?.VITE_API_BASE) ||
+  "https://r3bel-production.up.railway.app";
+
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 export interface KRRecord {
@@ -328,7 +332,7 @@ export default function KeyRotationPanel({ assets, apiBase, style = {} }: Props)
 
   // ── Secure mode status (same pattern as PQCReadiness) ────────────────────
   useEffect(() => {
-    fetch(`${apiBase}/secure-mode/status`)
+    fetch(`$API/secure-mode/status`)
       .then(r => r.ok ? r.json() : null)
       .then(d => { if (d?.enabled !== undefined) setSecureModeOn(Boolean(d.enabled)); })
       .catch(() => {})
@@ -353,7 +357,7 @@ export default function KeyRotationPanel({ assets, apiBase, style = {} }: Props)
 
     // In secure mode use ghost assets; normal mode uses passed assets
     const sourceAssets = secureModeOn
-      ? await fetch(`${apiBase}/ghost/assets`)
+      ? await fetch(`${API}/ghost/assets`)
           .then(r => r.ok ? r.json() : null)
           .then(d => d?.assets ?? [])
           .catch(() => [])
@@ -365,7 +369,7 @@ export default function KeyRotationPanel({ assets, apiBase, style = {} }: Props)
     }
 
     try {
-      const res = await fetch(`${apiBase}/api/key-rotation/scan`, {
+      const res = await fetch(`${API}/api/key-rotation/scan`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ target: "rebel-scan", assets: toKRAssets(sourceAssets) }),
