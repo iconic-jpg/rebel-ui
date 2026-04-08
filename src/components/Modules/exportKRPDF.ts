@@ -631,13 +631,11 @@ export function buildKRAuditHTML(result: KRScanResult, opts: ExportKRPDFOptions)
   <div class="cover-flex">
     <div>
       <!-- Brand mark -->
-      <div style="display:flex;align-items:center;gap:13px;margin-bottom:12px;">
-        <svg width="30" height="30" viewBox="0 0 30 30" xmlns="http://www.w3.org/2000/svg">
-          <rect x="2" y="2" width="26" height="26" rx="2" fill="none" stroke="#1e3a8a" stroke-width="1.8"/>
-          <rect x="7" y="7" width="16" height="16" rx="1" fill="#dbeafe" stroke="#3b82f6" stroke-width="1"/>
-          <circle cx="13" cy="13" r="3" fill="none" stroke="#1e3a8a" stroke-width="1.5"/>
-          <line x1="16" y1="16" x2="22" y2="22" stroke="#1e3a8a" stroke-width="1.5" stroke-linecap="round"/>
-          <line x1="19" y1="19" x2="21" y2="17" stroke="#1e3a8a" stroke-width="1" stroke-linecap="round"/>
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;">
+        <svg width="28" height="28" viewBox="0 0 28 28" xmlns="http://www.w3.org/2000/svg">
+          <polygon points="14,2 26,8 26,20 14,26 2,20 2,8" fill="none" stroke="#1e40af" stroke-width="1.8"/>
+          <polygon points="14,7 21,11 21,17 14,21 7,17 7,11" fill="#dbeafe" stroke="#3b82f6" stroke-width="1"/>
+          <circle cx="14" cy="14" r="2.8" fill="#1e40af"/>
         </svg>
         <div>
           <div class="brand">REBEL</div>
