@@ -1,53 +1,13 @@
 /**
- * KeyRotationPanel.tsx
+ * KeyRotationPanel.jsx
  * REBEL — Key Rotation proof-of-rotation audit panel
- * Matches PQCReadiness theme, cache layer, secure-mode, and skeleton patterns exactly.
+ * PDF export via ExportKRPDF.jsx (download, not new tab)
  */
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
+import { exportKRPDF } from "./ExportKRPDF.jsx";
 
-import React, { useCallback } from "react";
-// ── Types ─────────────────────────────────────────────────────────────────────
-
-export interface KRRecord {
-  asset_id:            string;
-  key_type:            string;
-  key_identifier:      string;
-  last_rotated_at:     string | null;
-  rotation_source:     string;
-  days_since_rotation: number | null;
-  status:              "COMPLIANT" | "OVERDUE" | "CRITICAL" | "NEVER_ROTATED" | "UNKNOWN";
-  regulatory_flags:    string[];
-  attestation_hash:    string;
-  evidence_path:       string;
-  remediation_days:    number;
-  remediation_cost:    number;
-}
-
-export interface KRScanResult {
-  scan_id:    string;
-  target:     string;
-  scanned_at: string;
-  records:    KRRecord[];
-  summary: {
-    total_keys:          number;
-    compliant:           number;
-    overdue:             number;
-    critical:            number;
-    never_rotated:       number;
-    unknown:             number;
-    overall_risk:        string;
-    frameworks_breached: string[];
-  };
-}
-
-interface Props {
-  assets?:  any[];
-  apiBase?: string;
-  style?:  React.CSSProperties;
-}
-
-// ── Theme — identical to PQCReadiness ─────────────────────────────────────────
+// ── Theme ─────────────────────────────────────────────────────────────────────
 const L = {
   pageBg:      "#f5f7fa",
   panelBg:     "#ffffff",
@@ -86,53 +46,52 @@ const LS = {
     fontSize:      11,
     fontWeight:    600,
     letterSpacing: ".06em",
-  } as React.CSSProperties,
+    fontFamily:    "inherit",
+  },
 };
 
-// ── Cache config (same TTL pattern as PQCReadiness) ───────────────────────────
-const CACHE_TTL_MS  = 12 * 60 * 60 * 1000;
-const CACHE_KEY_KR  = "rebel_cache_kr_scan";
+// ── Cache config ──────────────────────────────────────────────────────────────
+const CACHE_TTL_MS = 12 * 60 * 60 * 1000;
+const CACHE_KEY_KR = "rebel_cache_kr_scan";
 
-interface CacheEntry<T> { ts: number; data: T; }
-
-function cacheGet<T>(key: string): T | null {
+function cacheGet(key) {
   try {
     const raw = localStorage.getItem(key);
     if (!raw) return null;
-    const entry: CacheEntry<T> = JSON.parse(raw);
+    const entry = JSON.parse(raw);
     if (Date.now() - entry.ts > CACHE_TTL_MS) { localStorage.removeItem(key); return null; }
     return entry.data;
   } catch { return null; }
 }
-function cacheSet<T>(key: string, data: T): void {
+function cacheSet(key, data) {
   try { localStorage.setItem(key, JSON.stringify({ ts: Date.now(), data })); } catch {}
 }
-function cacheAgeLabel(key: string): string | null {
+function cacheAgeLabel(key) {
   try {
     const raw = localStorage.getItem(key);
     if (!raw) return null;
-    const entry: CacheEntry<unknown> = JSON.parse(raw);
+    const entry = JSON.parse(raw);
     const mins = Math.round((Date.now() - entry.ts) / 60000);
     return mins < 60 ? `${mins}m ago` : `${Math.round(mins / 60)}h ago`;
   } catch { return null; }
 }
 
-// ── Status helpers ────────────────────────────────────────────────────────────
-const STATUS_COLOR: Record<string, string> = {
+// ── Status maps ───────────────────────────────────────────────────────────────
+const STATUS_COLOR = {
   COMPLIANT:     L.green,
   OVERDUE:       L.orange,
   CRITICAL:      L.red,
   NEVER_ROTATED: L.red,
   UNKNOWN:       L.text3,
 };
-const STATUS_BG: Record<string, string> = {
+const STATUS_BG = {
   COMPLIANT:     "#f0fdf4",
   OVERDUE:       "#fff7ed",
   CRITICAL:      "#fef2f2",
   NEVER_ROTATED: "#fef2f2",
   UNKNOWN:       L.subtleBg,
 };
-const STATUS_LABEL: Record<string, string> = {
+const STATUS_LABEL = {
   COMPLIANT:     "Compliant",
   OVERDUE:       "Overdue",
   CRITICAL:      "Critical",
@@ -140,13 +99,13 @@ const STATUS_LABEL: Record<string, string> = {
   UNKNOWN:       "Unknown",
 };
 
-// ── Map assets → KR scan request (same asset shape as rest of app) ────────────
-function toKRAssets(assets: any[]) {
-  return assets.map((a) => ({
+// ── Asset mapper ──────────────────────────────────────────────────────────────
+function toKRAssets(assets) {
+  return (assets || []).map((a) => ({
     asset_id:        a.id   ?? a.name ?? "unknown",
-    key_type:        a.type === "HSM" ? "HSM"
-                   : a.type === "Database" ? "DATABASE"
-                   : a.cipher?.includes("TLS") ? "TLS_CERT"
+    key_type:        a.type === "HSM"           ? "HSM"
+                   : a.type === "Database"      ? "DATABASE"
+                   : a.cipher?.includes("TLS")  ? "TLS_CERT"
                    : "APP_CONFIG",
     key_identifier:  a.name ?? a.id ?? "unknown",
     last_rotated_at: a.last_rotated_at ?? null,
@@ -156,10 +115,7 @@ function toKRAssets(assets: any[]) {
 }
 
 // ── Shared small components ───────────────────────────────────────────────────
-
-function Shimmer({ w = "100%", h = 16, radius = 4, style = {} }: {
-  w?: string | number; h?: number; radius?: number; style?: React.CSSProperties;
-}) {
+function Shimmer({ w = "100%", h = 16, radius = 4, style = {} }) {
   return (
     <div style={{
       width: w, height: h, borderRadius: radius, flexShrink: 0,
@@ -171,20 +127,22 @@ function Shimmer({ w = "100%", h = 16, radius = 4, style = {} }: {
   );
 }
 
-function LPanelHeader({ left, right }: { left: string; right?: React.ReactNode }) {
+function LPanelHeader({ left, right }) {
   return (
     <div style={{
       display: "flex", justifyContent: "space-between", alignItems: "center",
       padding: "10px 14px", borderBottom: `1px solid ${L.borderLight}`,
       background: L.subtleBg, borderRadius: "8px 8px 0 0",
     }}>
-      <span style={{ fontSize: 9, fontWeight: 700, color: L.text3, letterSpacing: ".14em", textTransform: "uppercase" }}>{left}</span>
+      <span style={{ fontSize: 9, fontWeight: 700, color: L.text3, letterSpacing: ".14em", textTransform: "uppercase" }}>
+        {left}
+      </span>
       {right}
     </div>
   );
 }
 
-function StatusBadge({ status }: { status: string }) {
+function StatusBadge({ status }) {
   const color = STATUS_COLOR[status] ?? L.text3;
   const bg    = STATUS_BG[status]    ?? L.subtleBg;
   const label = STATUS_LABEL[status] ?? status;
@@ -199,7 +157,7 @@ function StatusBadge({ status }: { status: string }) {
   );
 }
 
-function RegBadge({ text }: { text: string }) {
+function RegBadge({ text }) {
   return (
     <span style={{
       fontSize: 7, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".08em",
@@ -211,44 +169,36 @@ function RegBadge({ text }: { text: string }) {
   );
 }
 
-function CacheBadge({ age, onRefresh }: { age: string | null; onRefresh: () => void }) {
+function CacheBadge({ age, onRefresh }) {
   if (!age) return null;
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-      <span style={{ fontSize: 8, fontWeight: 600, color: L.text3, background: L.insetBg, border: `1px solid ${L.border}`, borderRadius: 3, padding: "2px 7px", letterSpacing: ".06em" }}>
+      <span style={{
+        fontSize: 8, fontWeight: 600, color: L.text3, background: L.insetBg,
+        border: `1px solid ${L.border}`, borderRadius: 3, padding: "2px 7px", letterSpacing: ".06em",
+      }}>
         CACHED · {age}
       </span>
-      <button onClick={onRefresh} style={{ ...LS.btn, fontSize: 9, padding: "3px 8px", color: L.blue, borderColor: `${L.blue}40`, background: `${L.blue}0d` }}>
+      <button
+        onClick={onRefresh}
+        style={{ ...LS.btn, fontSize: 9, padding: "3px 8px", color: L.blue, borderColor: `${L.blue}40`, background: `${L.blue}0d` }}
+      >
         ↺ REFRESH
       </button>
     </div>
   );
 }
 
-// ── Skeleton rows ─────────────────────────────────────────────────────────────
-function SkeletonTableRows({ count = 5 }: { count?: number }) {
-  return (
-    <>
-      {Array.from({ length: count }).map((_, i) => (
-        <tr key={i} style={{ borderBottom: `1px solid ${L.borderLight}`, background: i % 2 === 0 ? L.panelBg : L.subtleBg }}>
-          <td style={{ padding: "8px" }}><Shimmer w={130} h={9} /></td>
-          <td style={{ padding: "8px" }}><Shimmer w={70}  h={9} /></td>
-          <td style={{ padding: "8px" }}><Shimmer w={40}  h={9} /></td>
-          <td style={{ padding: "8px" }}><Shimmer w={80}  h={9} /></td>
-          <td style={{ padding: "8px" }}><Shimmer w={60}  h={18} radius={3} /></td>
-          <td style={{ padding: "8px" }}><Shimmer w={80}  h={18} radius={3} /></td>
-          <td style={{ padding: "8px" }}><Shimmer w={110} h={9} /></td>
-        </tr>
-      ))}
-    </>
-  );
-}
-
+// ── Skeleton components ───────────────────────────────────────────────────────
 function SkeletonSummaryStrip() {
   return (
     <div style={{ display: "flex", borderBottom: `1px solid ${L.border}` }}>
-      {[0,1,2,3,4].map(i => (
-        <div key={i} style={{ flex: 1, padding: "10px 12px", borderRight: i < 4 ? `1px solid ${L.border}` : "none", display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
+      {[0, 1, 2, 3, 4].map(i => (
+        <div key={i} style={{
+          flex: 1, padding: "10px 12px",
+          borderRight: i < 4 ? `1px solid ${L.border}` : "none",
+          display: "flex", flexDirection: "column", alignItems: "center", gap: 6,
+        }}>
           <Shimmer w={40} h={7} />
           <Shimmer w={28} h={20} />
         </div>
@@ -257,76 +207,36 @@ function SkeletonSummaryStrip() {
   );
 }
 
-// ── Exported HTML section (called from exportPDF.ts) ──────────────────────────
-export function exportKRSection(result: KRScanResult): string {
-  if (!result?.records?.length) return "";
-  const s = result.summary;
-
-  const rowsHtml = result.records.map((r, i) => {
-    const sc   = STATUS_COLOR[r.status] ?? L.text3;
-    const days = r.days_since_rotation != null ? `${r.days_since_rotation}d` : "Never";
-    const flags = r.regulatory_flags.join(", ") || "—";
-    const attest = r.attestation_hash.slice(0, 16) + "…";
-    const bg = i % 2 === 0 ? "#ffffff" : "#fafafa";
-    return `<tr style="background:${bg};border-bottom:1px solid #f1f5f9;">
-      <td style="padding:6px 8px;font-size:7.5pt;font-family:'JetBrains Mono',monospace;color:#1e40af;font-weight:600;">${r.key_identifier}</td>
-      <td style="padding:6px 8px;font-size:7.5pt;color:#475569;">${r.key_type}</td>
-      <td style="padding:6px 8px;font-size:7.5pt;font-family:'JetBrains Mono',monospace;font-weight:700;color:${sc};">${days}</td>
-      <td style="padding:6px 8px;font-size:7pt;color:#64748b;">${r.rotation_source}</td>
-      <td style="padding:6px 8px;"><span style="font-size:6.5pt;font-weight:700;color:${sc};background:${STATUS_BG[r.status]};border:1px solid ${sc}44;border-radius:3px;padding:2px 5px;text-transform:uppercase;letter-spacing:.06em;">${STATUS_LABEL[r.status] ?? r.status}</span></td>
-      <td style="padding:6px 8px;font-size:6.5pt;color:#64748b;">${flags}</td>
-      <td style="padding:6px 8px;font-size:6.5pt;font-family:'JetBrains Mono',monospace;color:#94a3b8;">${attest}</td>
-    </tr>`;
-  }).join("");
-
-  return `
-    <div style="page-break-before:always;"></div>
-    <h2 style="font-size:7.5pt;font-weight:700;text-transform:uppercase;letter-spacing:.18em;
-               color:#1e40af;border-bottom:1px solid #e2e8f0;padding-bottom:6px;margin-bottom:12px;">
-      Key Rotation Verification — Proof-of-Rotation Audit
-    </h2>
-    <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;">
-      ${[
-        ["Total keys", s.total_keys, L.blue],
-        ["Compliant",  s.compliant,  L.green],
-        ["Overdue",    s.overdue,    L.orange],
-        ["Critical",   (s.critical ?? 0) + (s.never_rotated ?? 0), L.red],
-        ["Unknown",    s.unknown,    L.text3],
-      ].map(([label, val, color]) => `
-        <div style="border:1px solid #e2e8f0;border-radius:4px;padding:8px 12px;background:#fafafa;min-width:80px;">
-          <div style="font-size:6pt;color:#94a3b8;text-transform:uppercase;letter-spacing:.14em;margin-bottom:3px;">${label}</div>
-          <div style="font-family:'JetBrains Mono',monospace;font-size:16pt;font-weight:700;color:${color};line-height:1;">${val}</div>
-        </div>`).join("")}
-    </div>
-    <table style="width:100%;border-collapse:collapse;font-size:8pt;">
-      <thead>
-        <tr style="background:#f8fafc;border-bottom:2px solid #e2e8f0;">
-          ${["Key identifier","Type","Days since","Source","Status","Reg. flags","Attestation"]
-            .map(h => `<th style="padding:6px 8px;font-size:6pt;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#64748b;text-align:left;">${h}</th>`)
-            .join("")}
-        </tr>
-      </thead>
-      <tbody>${rowsHtml}</tbody>
-    </table>
-    <p style="font-size:7pt;color:#94a3b8;margin-top:8px;line-height:1.7;">
-      Attestation hashes are HMAC-SHA256 over key identity + rotation timestamp.
-      SPREADSHEET/NONE sources are flagged regardless of stated rotation date.
-      Scan ID: ${result.scan_id}
-    </p>`;
+function SkeletonTableRows({ count = 5 }) {
+  return Array.from({ length: count }).map((_, i) => (
+    <tr key={i} style={{ borderBottom: `1px solid ${L.borderLight}`, background: i % 2 === 0 ? L.panelBg : L.subtleBg }}>
+      <td style={{ padding: "8px" }}><Shimmer w={130} h={9} /></td>
+      <td style={{ padding: "8px" }}><Shimmer w={70}  h={9} /></td>
+      <td style={{ padding: "8px" }}><Shimmer w={40}  h={9} /></td>
+      <td style={{ padding: "8px" }}><Shimmer w={80}  h={9} /></td>
+      <td style={{ padding: "8px" }}><Shimmer w={60}  h={18} radius={3} /></td>
+      <td style={{ padding: "8px" }}><Shimmer w={80}  h={18} radius={3} /></td>
+      <td style={{ padding: "8px" }}><Shimmer w={110} h={9} /></td>
+    </tr>
+  ));
 }
 
 // ── Main component ────────────────────────────────────────────────────────────
-export default function KeyRotationPanel({ assets, apiBase, style = {} }: Props) {
-  const [result,    setResult]    = useState<KRScanResult | null>(null);
-  const [loading,   setLoading]   = useState(true);
-  const [error,     setError]     = useState(false);
-  const [tableOpen, setTableOpen] = useState(true);
-  const [fromCache, setFromCache] = useState(false);
-  const [cachedAt,  setCachedAt]  = useState<string | null>(null);
-  const [secureModeOn, setSecureModeOn] = useState(false);
+/**
+ * @param {{ assets?: any[], apiBase?: string, clientName?: string, style?: object }} props
+ */
+export default function KeyRotationPanel({ assets, apiBase = "", clientName = "", style = {} }) {
+  const [result,            setResult]            = useState(null);
+  const [loading,           setLoading]           = useState(true);
+  const [error,             setError]             = useState(false);
+  const [tableOpen,         setTableOpen]         = useState(true);
+  const [fromCache,         setFromCache]         = useState(false);
+  const [cachedAt,          setCachedAt]          = useState(null);
+  const [secureModeOn,      setSecureModeOn]      = useState(false);
   const [secureModeLoading, setSecureModeLoading] = useState(true);
+  const [pdfExporting,      setPdfExporting]      = useState(false);
 
-  // ── Secure mode status (same pattern as PQCReadiness) ────────────────────
+  // ── Secure mode status ────────────────────────────────────────────────────
   useEffect(() => {
     fetch(`${apiBase}/secure-mode/status`)
       .then(r => r.ok ? r.json() : null)
@@ -337,48 +247,56 @@ export default function KeyRotationPanel({ assets, apiBase, style = {} }: Props)
 
   // ── Fetch with cache ──────────────────────────────────────────────────────
   const loadKR = useCallback(async (forceRefresh = false) => {
-  setLoading(true);
-  setError(false);
+    setLoading(true);
+    setError(false);
 
-  if (!forceRefresh) {
-    const cached = cacheGet<KRScanResult>(CACHE_KEY_KR);
-    if (cached) {
-      setResult(cached);
-      setFromCache(true);
-      setCachedAt(cacheAgeLabel(CACHE_KEY_KR));
-      setLoading(false);
-      return;
+    if (!forceRefresh) {
+      const cached = cacheGet(CACHE_KEY_KR);
+      if (cached) {
+        setResult(cached);
+        setFromCache(true);
+        setCachedAt(cacheAgeLabel(CACHE_KEY_KR));
+        setLoading(false);
+        return;
+      }
     }
-  }
 
-  const sourceAssets: any[] = secureModeOn
-    ? await fetch(`${apiBase}/ghost/assets`)
-        .then(r => r.ok ? r.json() : null)
-        .then(d => Array.isArray(d?.assets) ? d.assets : [])
-        .catch(() => [])
-    : (Array.isArray(assets) ? assets : []);
+    const sourceAssets = secureModeOn
+      ? await fetch(`${apiBase}/ghost/assets`)
+          .then(r => r.ok ? r.json() : null)
+          .then(d => Array.isArray(d?.assets) ? d.assets : [])
+          .catch(() => [])
+      : (Array.isArray(assets) ? assets : []);
 
-  try {
-    const res = await fetch(`${apiBase}/api/key-rotation/scan`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ target: "rebel-scan", assets: toKRAssets(sourceAssets) }),
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data: KRScanResult = await res.json();
-    data.records = Array.isArray(data.records) ? data.records : [];
-    data.summary = data.summary ?? { total_keys: 0, compliant: 0, overdue: 0, critical: 0, never_rotated: 0, unknown: 0, overall_risk: "LOW", frameworks_breached: [] };
-    data.summary.frameworks_breached = Array.isArray(data.summary.frameworks_breached) ? data.summary.frameworks_breached : [];
-    cacheSet(CACHE_KEY_KR, data);
-    setResult(data);
-    setFromCache(false);
-    setCachedAt(null);
-  } catch {
-    setError(true);
-  } finally {
-    setLoading(false);
-  }
-}, [secureModeOn, apiBase, assets]); // ← all captured values listed here
+    try {
+      const res = await fetch(`${apiBase}/api/key-rotation/scan`, {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({ target: "rebel-scan", assets: toKRAssets(sourceAssets) }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      data.records = Array.isArray(data.records) ? data.records : [];
+      data.summary = data.summary ?? {
+        total_keys: 0, compliant: 0, overdue: 0, critical: 0,
+        never_rotated: 0, unknown: 0, overall_risk: "LOW", frameworks_breached: [],
+      };
+      data.summary.frameworks_breached = Array.isArray(data.summary.frameworks_breached)
+        ? data.summary.frameworks_breached : [];
+      cacheSet(CACHE_KEY_KR, data);
+      setResult(data);
+      setFromCache(false);
+      setCachedAt(null);
+    } catch {
+      setError(true);
+    } finally {
+      setLoading(false);
+    }
+  }, [secureModeOn, apiBase, assets]);
+
+  useEffect(() => {
+    if (!secureModeLoading) loadKR();
+  }, [secureModeOn, secureModeLoading]);
 
   function handleRefresh() {
     localStorage.removeItem(CACHE_KEY_KR);
@@ -387,57 +305,110 @@ export default function KeyRotationPanel({ assets, apiBase, style = {} }: Props)
     loadKR(true);
   }
 
-  useEffect(() => {
-    if (!secureModeLoading) loadKR();
-  }, [secureModeOn, secureModeLoading]);
+  // ── PDF export — calls ExportKRPDF which triggers a file download ─────────
+  function handleExportPDF() {
+    if (!result || pdfExporting) return;
+    setPdfExporting(true);
+    try {
+      exportKRPDF(result, {
+        clientName:   clientName || "",
+        clientDomain: result.target || "",
+      });
+    } finally {
+      setTimeout(() => setPdfExporting(false), 1200);
+    }
+  }
 
-  const s = result?.summary;
-  const critCount  = (s?.critical ?? 0) + (s?.never_rotated ?? 0);
-  const riskColor  = s?.overall_risk === "CRITICAL" ? L.red
-                   : s?.overall_risk === "HIGH"     ? L.orange
-                   : s?.overall_risk === "MEDIUM"   ? L.yellow
-                   : L.green;
+  // ── Derived state ─────────────────────────────────────────────────────────
+  const s         = result?.summary;
+  const critCount = (s?.critical ?? 0) + (s?.never_rotated ?? 0);
+  const riskColor = s?.overall_risk === "CRITICAL" ? L.red
+                  : s?.overall_risk === "HIGH"     ? L.orange
+                  : s?.overall_risk === "MEDIUM"   ? L.yellow
+                  : L.green;
 
   const activeEndpointLabel = secureModeOn ? "→ /ghost/assets" : "→ /api/key-rotation/scan";
 
+  // ── Shared PDF button style helper ────────────────────────────────────────
+  const pdfBtnStyle = (compact = false) => ({
+    ...LS.btn,
+    fontSize:    compact ? 9 : 10,
+    padding:     compact ? "3px 9px" : "5px 12px",
+    color:       !result ? L.text4 : L.blue,
+    borderColor: !result ? L.border : `${L.blue}40`,
+    background:  !result ? L.subtleBg : `${L.blue}0d`,
+    fontWeight:  700,
+    opacity:     !result ? 0.45 : 1,
+    cursor:      !result ? "not-allowed" : "pointer",
+    display:     "flex",
+    alignItems:  "center",
+    gap:         4,
+    transition:  "opacity 0.15s, background 0.15s",
+  });
+
   return (
-    <div style={{ background: L.pageBg, minHeight: "100vh", padding: "20px 16px", display: "flex", flexDirection: "column", gap: 12, fontFamily: "'DM Sans', system-ui, sans-serif", color: L.text1, ...style }}>
+    <div style={{
+      background: L.pageBg, minHeight: "100vh", padding: "20px 16px",
+      display: "flex", flexDirection: "column", gap: 12,
+      fontFamily: "'DM Sans', system-ui, sans-serif", color: L.text1,
+      ...style,
+    }}>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=DM+Mono:wght@400;500;600&display=swap');
-        @keyframes shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
+        @keyframes shimmer { 0%{background-position:200% 0} 100%{background-position:-200% 0} }
+        @keyframes spin     { to { transform: rotate(360deg); } }
         * { box-sizing: border-box; }
-        ::-webkit-scrollbar{width:5px;height:5px;}
-        ::-webkit-scrollbar-track{background:${L.insetBg};}
-        ::-webkit-scrollbar-thumb{background:${L.border};border-radius:3px;}
+        ::-webkit-scrollbar       { width:5px; height:5px; }
+        ::-webkit-scrollbar-track { background:${L.insetBg}; }
+        ::-webkit-scrollbar-thumb { background:${L.border}; border-radius:3px; }
       `}</style>
 
       {/* ── SECURE MODE BANNER ── */}
       {secureModeOn && (
-        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 14px", background: `${L.purple}0d`, border: `1px solid ${L.purple}44`, borderRadius: 6 }}>
-          <span style={{ fontSize: 9, color: L.purple, fontWeight: 800, letterSpacing: ".14em", textTransform: "uppercase" }}>🔒 SECURE MODE ACTIVE</span>
+        <div style={{
+          display: "flex", alignItems: "center", gap: 8, padding: "8px 14px",
+          background: `${L.purple}0d`, border: `1px solid ${L.purple}44`, borderRadius: 6,
+        }}>
+          <span style={{ fontSize: 9, color: L.purple, fontWeight: 800, letterSpacing: ".14em", textTransform: "uppercase" }}>
+            🔒 SECURE MODE ACTIVE
+          </span>
           <span style={{ fontSize: 9, color: L.purple, opacity: 0.75 }}>·</span>
-          <span style={{ fontSize: 9, color: L.purple, fontFamily: "'DM Mono', monospace" }}>/ghost/assets — anonymised data</span>
+          <span style={{ fontSize: 9, color: L.purple, fontFamily: "'DM Mono', monospace" }}>
+            /ghost/assets — anonymised data
+          </span>
         </div>
       )}
 
-      {/* ── SUMMARY METRICS ── */}
+      {/* ── SUMMARY PANEL ── */}
       <div style={{ ...LS.panel }}>
         <LPanelHeader
           left="KEY ROTATION — PROOF-OF-ROTATION AUDIT"
           right={
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+
               {fromCache && <CacheBadge age={cachedAt} onRefresh={handleRefresh} />}
+
               {s && (
-                <span style={{ fontSize: 8, fontWeight: 700, color: riskColor, background: `${riskColor}14`, border: `1px solid ${riskColor}44`, borderRadius: 3, padding: "2px 7px" }}>
+                <span style={{
+                  fontSize: 8, fontWeight: 700, color: riskColor,
+                  background: `${riskColor}14`, border: `1px solid ${riskColor}44`,
+                  borderRadius: 3, padding: "2px 7px",
+                }}>
                   {s.overall_risk}
                 </span>
               )}
-              <span style={{ fontSize: 8, fontFamily: "'DM Mono',monospace", fontWeight: 700,
-                color: secureModeOn ? L.purple : error ? L.red : L.green,
+
+              <span style={{
+                fontSize: 8, fontFamily: "'DM Mono',monospace", fontWeight: 700,
+                color:      secureModeOn ? L.purple : error ? L.red : L.green,
                 background: secureModeOn ? `${L.purple}10` : error ? `${L.red}10` : `${L.green}10`,
-                border: `1px solid ${secureModeOn ? L.purple : error ? L.red : L.green}44`,
+                border:    `1px solid ${secureModeOn ? L.purple : error ? L.red : L.green}44`,
                 borderRadius: 3, padding: "2px 6px", letterSpacing: ".04em",
-              }}>{activeEndpointLabel}</span>
+              }}>
+                {activeEndpointLabel}
+              </span>
+
+              {/* Scan button */}
               <button
                 onClick={handleRefresh}
                 disabled={loading}
@@ -445,6 +416,20 @@ export default function KeyRotationPanel({ assets, apiBase, style = {} }: Props)
               >
                 {loading ? "Scanning…" : "⟳ Run KR Scan"}
               </button>
+
+              {/* Export PDF — header */}
+              <button
+                onClick={handleExportPDF}
+                disabled={!result || pdfExporting}
+                title="Downloads audit HTML — open in browser → Save as PDF"
+                style={pdfBtnStyle(true)}
+              >
+                {pdfExporting
+                  ? <><span style={{ display: "inline-block", animation: "spin 0.7s linear infinite" }}>⟳</span> Exporting…</>
+                  : <>⬇ AUDIT PDF</>
+                }
+              </button>
+
             </div>
           }
         />
@@ -455,26 +440,37 @@ export default function KeyRotationPanel({ assets, apiBase, style = {} }: Props)
           : s && (
             <div style={{ display: "flex", borderBottom: `1px solid ${L.border}`, overflowX: "auto" }}>
               {([
-                ["Total",     s.total_keys,  L.blue],
-                ["Compliant", s.compliant,   L.green],
-                ["Overdue",   s.overdue,     L.orange],
-                ["Critical",  critCount,     L.red],
-                ["Unknown",   s.unknown,     L.text3],
-              ] as [string, number, string][]).map(([label, val, color], i) => (
-                <div key={label} style={{ flex: 1, minWidth: 72, padding: "10px 12px", borderRight: i < 4 ? `1px solid ${L.border}` : "none", textAlign: "center" }}>
-                  <div style={{ fontSize: 7, color: L.text3, textTransform: "uppercase", letterSpacing: ".1em", marginBottom: 3 }}>{label}</div>
-                  <div style={{ fontFamily: "'DM Mono',monospace", fontSize: 18, fontWeight: 800, color, lineHeight: 1 }}>{val}</div>
+                ["Total",     s.total_keys, L.blue],
+                ["Compliant", s.compliant,  L.green],
+                ["Overdue",   s.overdue,    L.orange],
+                ["Critical",  critCount,    L.red],
+                ["Unknown",   s.unknown,    L.text3],
+              ]).map(([label, val, color], i) => (
+                <div key={label} style={{
+                  flex: 1, minWidth: 72, padding: "10px 12px",
+                  borderRight: i < 4 ? `1px solid ${L.border}` : "none",
+                  textAlign: "center",
+                }}>
+                  <div style={{ fontSize: 7, color: L.text3, textTransform: "uppercase", letterSpacing: ".1em", marginBottom: 3 }}>
+                    {label}
+                  </div>
+                  <div style={{ fontFamily: "'DM Mono',monospace", fontSize: 18, fontWeight: 800, color, lineHeight: 1 }}>
+                    {val}
+                  </div>
                 </div>
               ))}
             </div>
           )
         }
 
-        {/* Regulatory flags */}
+        {/* Regulatory breach chips */}
         {!loading && (s?.frameworks_breached ?? []).length > 0 && (
-          <div style={{ padding: "7px 14px", borderBottom: `1px solid ${L.border}`, background: `${L.red}08`, display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+          <div style={{
+            padding: "7px 14px", borderBottom: `1px solid ${L.border}`,
+            background: `${L.red}08`, display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center",
+          }}>
             <span style={{ fontSize: 7.5, fontWeight: 700, color: L.red }}>Frameworks breached:</span>
-            {(s!.frameworks_breached ?? []).map(f => <RegBadge key={f} text={f} />)}
+            {s.frameworks_breached.map(f => <RegBadge key={f} text={f} />)}
           </div>
         )}
 
@@ -485,7 +481,7 @@ export default function KeyRotationPanel({ assets, apiBase, style = {} }: Props)
           </div>
         )}
 
-        {/* Empty state */}
+        {/* Empty */}
         {!result && !loading && !error && (
           <div style={{ padding: "24px 14px", textAlign: "center", fontSize: 10, color: L.text3 }}>
             Click <strong style={{ color: L.blue }}>⟳ Run KR Scan</strong> to audit key rotation across all assets.
@@ -503,17 +499,19 @@ export default function KeyRotationPanel({ assets, apiBase, style = {} }: Props)
             {loading
               ? Array.from({ length: 4 }).map((_, i) => (
                   <div key={i} style={{ borderRadius: 6, padding: 12, border: `1px solid ${L.border}`, background: L.subtleBg }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}><Shimmer w={55} h={9} /><Shimmer w={24} h={20} /></div>
+                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
+                      <Shimmer w={55} h={9} /><Shimmer w={24} h={20} />
+                    </div>
                     <Shimmer w="100%" h={4} radius={2} style={{ marginBottom: 8 }} />
                     <Shimmer w={60} h={8} />
                   </div>
                 ))
               : s && ([
-                  ["COMPLIANT",     s.compliant,      L.green,  "#f0fdf4", `${L.green}22`],
-                  ["OVERDUE",       s.overdue,        L.orange, "#fff7ed", `${L.orange}25`],
-                  ["CRITICAL",      critCount,        L.red,    "#fef2f2", `${L.red}25`],
-                  ["UNKNOWN",       s.unknown,        L.text3,  L.subtleBg, `${L.border}`],
-                ] as [string, number, string, string, string][]).map(([label, count, color, bg, border]) => {
+                  ["COMPLIANT", s.compliant, L.green,  "#f0fdf4", `${L.green}22`],
+                  ["OVERDUE",   s.overdue,   L.orange, "#fff7ed", `${L.orange}25`],
+                  ["CRITICAL",  critCount,   L.red,    "#fef2f2", `${L.red}25`],
+                  ["UNKNOWN",   s.unknown,   L.text3,  L.subtleBg, L.border],
+                ]).map(([label, count, color, bg, border]) => {
                   const pct = s.total_keys ? Math.round(count / s.total_keys * 100) : 0;
                   return (
                     <div key={label} style={{ background: bg, border: `1px solid ${border}`, borderRadius: 6, padding: 12 }}>
@@ -533,7 +531,7 @@ export default function KeyRotationPanel({ assets, apiBase, style = {} }: Props)
         </div>
       )}
 
-      {/* ── RECORDS TABLE ── */}
+      {/* ── KEY RECORDS TABLE ── */}
       {(loading || result) && (
         <div style={{ ...LS.panel }}>
           <LPanelHeader
@@ -556,25 +554,32 @@ export default function KeyRotationPanel({ assets, apiBase, style = {} }: Props)
                 <thead>
                   <tr style={{ background: L.subtleBg, borderBottom: `2px solid ${L.border}` }}>
                     {["Key Identifier", "Type", "Days Since", "Source", "Status", "Reg. Flags", "Attestation"].map(h => (
-                      <th key={h} style={{ padding: "7px 8px", fontSize: 8, fontWeight: 700, color: L.text3, textTransform: "uppercase", letterSpacing: ".08em", textAlign: "left", whiteSpace: "nowrap" }}>{h}</th>
+                      <th key={h} style={{ padding: "7px 8px", fontSize: 8, fontWeight: 700, color: L.text3, textTransform: "uppercase", letterSpacing: ".08em", textAlign: "left", whiteSpace: "nowrap" }}>
+                        {h}
+                      </th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
                   {loading
                     ? <SkeletonTableRows count={6} />
-                    : result!.records.map((r, i) => {
+                    : result.records.map((r, i) => {
                         const sc   = STATUS_COLOR[r.status] ?? L.text3;
                         const days = r.days_since_rotation != null ? `${r.days_since_rotation}d` : "Never";
                         return (
-                          <tr key={r.asset_id} style={{ borderBottom: `1px solid ${L.borderLight}`, background: i % 2 === 0 ? L.panelBg : L.subtleBg }}
+                          <tr
+                            key={r.asset_id}
+                            style={{ borderBottom: `1px solid ${L.borderLight}`, background: i % 2 === 0 ? L.panelBg : L.subtleBg }}
                             onMouseEnter={e => (e.currentTarget.style.background = L.insetBg)}
-                            onMouseLeave={e => (e.currentTarget.style.background = i % 2 === 0 ? L.panelBg : L.subtleBg)}>
+                            onMouseLeave={e => (e.currentTarget.style.background = i % 2 === 0 ? L.panelBg : L.subtleBg)}
+                          >
                             <td style={{ padding: "7px 8px", color: L.blue, fontWeight: 600, fontFamily: "'DM Mono',monospace", fontSize: 9, maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                               {r.key_identifier}
                             </td>
                             <td style={{ padding: "7px 8px" }}>
-                              <span style={{ fontSize: 8, color: L.text3, background: L.insetBg, border: `1px solid ${L.border}`, borderRadius: 3, padding: "1px 5px", fontWeight: 600 }}>{r.key_type}</span>
+                              <span style={{ fontSize: 8, color: L.text3, background: L.insetBg, border: `1px solid ${L.border}`, borderRadius: 3, padding: "1px 5px", fontWeight: 600 }}>
+                                {r.key_type}
+                              </span>
                             </td>
                             <td style={{ padding: "7px 8px", fontFamily: "'DM Mono',monospace", fontWeight: 700, color: sc, fontSize: 10 }}>
                               {days}
@@ -588,7 +593,9 @@ export default function KeyRotationPanel({ assets, apiBase, style = {} }: Props)
                             <td style={{ padding: "7px 8px" }}>
                               <div style={{ display: "flex", gap: 3, flexWrap: "wrap" }}>
                                 {r.regulatory_flags.map(f => <RegBadge key={f} text={f} />)}
-                                {r.regulatory_flags.length === 0 && <span style={{ fontSize: 8, color: L.green, fontWeight: 600 }}>✓ None</span>}
+                                {r.regulatory_flags.length === 0 && (
+                                  <span style={{ fontSize: 8, color: L.green, fontWeight: 600 }}>✓ None</span>
+                                )}
                               </div>
                             </td>
                             <td style={{ padding: "7px 8px", fontFamily: "'DM Mono',monospace", fontSize: 7, color: L.text4 }}>
@@ -603,21 +610,49 @@ export default function KeyRotationPanel({ assets, apiBase, style = {} }: Props)
             </div>
           )}
 
-          <div style={{ padding: "8px 14px", borderTop: `1px solid ${L.borderLight}`, display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8, background: L.subtleBg, borderRadius: "0 0 8px 8px" }}>
+          {/* ── TABLE FOOTER ── */}
+          <div style={{
+            padding: "8px 14px", borderTop: `1px solid ${L.borderLight}`,
+            display: "flex", justifyContent: "space-between", alignItems: "center",
+            flexWrap: "wrap", gap: 8,
+            background: L.subtleBg, borderRadius: "0 0 8px 8px",
+          }}>
             {loading
               ? <Shimmer w={200} h={9} />
-              : <span style={{ fontSize: 10, color: L.text2 }}>
-                  <b style={{ color: L.text1 }}>{s?.total_keys ?? 0}</b> keys · {" "}
-                  <b style={{ color: L.green }}>{s?.compliant ?? 0}</b> compliant · {" "}
+              : (
+                <span style={{ fontSize: 10, color: L.text2 }}>
+                  <b style={{ color: L.text1 }}>{s?.total_keys ?? 0}</b> keys ·{" "}
+                  <b style={{ color: L.green }}>{s?.compliant ?? 0}</b> compliant ·{" "}
                   <b style={{ color: L.red }}>{critCount}</b> critical
-                  {secureModeOn && <span style={{ marginLeft: 8, fontSize: 8, color: L.purple, fontWeight: 600 }}>· ghost mode</span>}
+                  {secureModeOn && (
+                    <span style={{ marginLeft: 8, fontSize: 8, color: L.purple, fontWeight: 600 }}>· ghost mode</span>
+                  )}
                 </span>
+              )
             }
-            {result && (
-              <span style={{ fontSize: 9, color: L.text3, fontFamily: "'DM Mono',monospace" }}>
-                Scan ID: {result.scan_id}
-              </span>
-            )}
+
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              {result && (
+                <span style={{ fontSize: 9, color: L.text3, fontFamily: "'DM Mono',monospace" }}>
+                  Scan ID: {result.scan_id}
+                </span>
+              )}
+
+              {/* Export PDF — footer */}
+              {result && (
+                <button
+                  onClick={handleExportPDF}
+                  disabled={pdfExporting}
+                  title="Downloads audit HTML — open in browser → Save as PDF"
+                  style={pdfBtnStyle(false)}
+                >
+                  {pdfExporting
+                    ? <><span style={{ display: "inline-block", animation: "spin 0.7s linear infinite" }}>⟳</span> Exporting…</>
+                    : <>⬇ Export PDF</>
+                  }
+                </button>
+              )}
+            </div>
           </div>
         </div>
       )}

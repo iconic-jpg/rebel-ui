@@ -910,11 +910,15 @@ export function buildKRAuditHTML(result: KRScanResult, opts: ExportKRPDFOptions)
 
 // ── Entry point ───────────────────────────────────────────────────────────────
 
-export function exportKRPDF(result: KRScanResult, opts: ExportKRPDFOptions): void {
+export function exportKRPDF(result, opts) {
   const html = buildKRAuditHTML(result, opts);
   const blob = new Blob([html], { type: "text/html;charset=utf-8" });
   const url  = URL.createObjectURL(blob);
-  const win  = window.open(url, "_blank");
-  if (win) win.focus();
+  const a    = document.createElement("a");
+  a.href     = url;
+  a.download = `REBEL-KR-Audit-${opts.clientDomain || "scan"}-${new Date().toISOString().split("T")[0]}.html`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
   setTimeout(() => URL.revokeObjectURL(url), 15_000);
 }
