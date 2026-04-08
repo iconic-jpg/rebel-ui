@@ -5,7 +5,7 @@
  */
 
 import { useState, useEffect, useCallback } from "react";
-import { exportKRPDF } from "./exportKRPDF.js";
+import { exportKRPDF } from "./ExportKRPDF.js";
 
 // ── Theme ─────────────────────────────────────────────────────────────────────
 const L = {
@@ -127,7 +127,7 @@ function Shimmer({ w = "100%", h = 16, radius = 4, style = {} }) {
   );
 }
 
-function LPanelHeader({ left, right = null }) {
+function LPanelHeader({ left, right }) {
   return (
     <div style={{
       display: "flex", justifyContent: "space-between", alignItems: "center",
