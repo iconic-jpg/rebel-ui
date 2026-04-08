@@ -6,7 +6,7 @@
 
 import { useState, useEffect } from "react";
 import type React from "react";
-
+import React, { useCallback } from "react";
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 export interface KRRecord {
