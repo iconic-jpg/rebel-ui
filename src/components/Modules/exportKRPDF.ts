@@ -6,9 +6,14 @@
  *   DORA Art. 9.4 (KLM) · FFIEC · MAS TRM 9.2.4 · BaFin BAIT § 7
  *   NIS2 Art. 21 · ISO 27001:2022 A.8.24 · PCI-DSS 4.0 Req. 3.7
  *
- * Usage (from KeyRotationPanel.tsx or PQCReadiness.tsx):
+ * Usage (from KeyRotationPanel.tsx):
  *   import { exportKRPDF } from "./exportKRPDF";
- *   exportKRPDF(krScanResult, { clientName: "Acme Bank", clientDomain: "acmebank.eu" });
+ *   exportKRPDF(filteredResult, { clientName: "Acme Bank", clientDomain: "acmebank.eu" });
+ *
+ * IMPORTANT: Pass the *filtered* KRScanResult from the panel (records already
+ * sliced to domain/status/source selection, summary recomputed from that slice).
+ * overall_risk is re-derived here from the recomputed summary — never trusted
+ * from the original scan payload.
  *
  * Note: remediation_cost in KRRecord is expected in USD — converted to INR here.
  */
@@ -42,23 +47,27 @@ const STATUS_LABEL: Record<string, string> = {
 };
 
 const STATUS_ORDER: Record<KRStatus, number> = {
-  CRITICAL:     0,
+  CRITICAL:      0,
   NEVER_ROTATED: 1,
   OVERDUE:       2,
   UNKNOWN:       3,
   COMPLIANT:     4,
 };
 
-/** Regulatory frameworks mapped to their formal citation strings */
-const FRAMEWORK_CITE: Record<string, string> = {
-  FFIEC:        "FFIEC IT Examination Handbook — Information Security",
-  "MAS TRM":    "MAS TRM 2021 § 9.2.4 Cryptographic Key Management",
-  BaFin:        "BaFin BAIT § 7.3 Cryptographic Procedures",
-  DORA:         "DORA Art. 9.4 — Cryptographic Controls",
-  NIS2:         "NIS2 Directive Art. 21 — Security Measures",
-  "ISO 27001":  "ISO/IEC 27001:2022 A.8.24 Use of Cryptography",
-  "PCI-DSS":    "PCI-DSS v4.0 Req. 3.7 — Cryptographic Key Management",
-};
+// ── Risk deriver ──────────────────────────────────────────────────────────────
+// Always computed fresh from the (possibly filtered) summary counts.
+// Never trusts result.summary.overall_risk from the original scan payload,
+// since the filter may have changed which keys are in scope.
+
+type RiskLevel = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+
+function deriveRisk(s: KRScanResult["summary"]): RiskLevel {
+  const crit = (s.critical ?? 0) + (s.never_rotated ?? 0);
+  if (crit > 0)                                return "CRITICAL";
+  if ((s.overdue ?? 0) > 0)                    return "HIGH";
+  if ((s.unknown ?? 0) > s.total_keys * 0.3)  return "MEDIUM";
+  return "LOW";
+}
 
 // ── Formatters ────────────────────────────────────────────────────────────────
 
@@ -87,13 +96,6 @@ function fmtDate(iso: string | null | undefined): string {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-
-function riskBadgeCls(risk: string): string {
-  return risk === "CRITICAL" ? "badge-red"
-       : risk === "HIGH"     ? "badge-orange"
-       : risk === "MEDIUM"   ? "badge-yellow"
-       : "badge-green";
-}
 
 function statusBadge(status: string): string {
   const col = STATUS_COLOR[status] ?? "#64748b";
@@ -133,8 +135,8 @@ function buildCSS(): string {
     .page-break  { page-break-before: always; }
     .avoid-break { page-break-inside: avoid; }
 
-    .mono { font-family: 'IBM Plex Mono', 'Courier New', monospace; }
-    .right { text-align: right; }
+    .mono   { font-family: 'IBM Plex Mono', 'Courier New', monospace; }
+    .right  { text-align: right; }
     .center { text-align: center; }
 
     /* ── Print button ── */
@@ -201,10 +203,19 @@ function buildCSS(): string {
       text-transform: uppercase; letter-spacing: .16em;
       font-weight: 700; margin-bottom: 5px;
     }
-    .client-name { font-size: 13pt; font-weight: 700; color: #0a0f1e; letter-spacing: -.01em; }
+    .client-name  { font-size: 13pt; font-weight: 700; color: #0a0f1e; letter-spacing: -.01em; }
     .client-domain {
       font-family: 'IBM Plex Mono', monospace;
       font-size: 7.5pt; color: #475569; margin-top: 4px;
+    }
+
+    /* ── Filter notice ── */
+    .filter-notice {
+      display: flex; align-items: flex-start; gap: 10px;
+      border-left: 3px solid #0284c7;
+      background: #f0f9ff; padding: 9px 13px;
+      font-size: 7.5pt; color: #0c4a6e;
+      margin-bottom: 10px; border-radius: 0 3px 3px 0; font-weight: 500;
     }
 
     /* ── Meta strip ── */
@@ -214,7 +225,7 @@ function buildCSS(): string {
       margin-bottom: 14px; overflow: hidden;
     }
     .meta-item {
-      flex: 1; min-width: 110px;
+      flex: 1; min-width: 100px;
       padding: 8px 13px; border-right: 1px solid #e2e8f0;
     }
     .meta-item:last-child { border-right: none; }
@@ -245,9 +256,7 @@ function buildCSS(): string {
     }
 
     /* ── Divider ── */
-    hr.section-rule {
-      border: none; border-top: 1px solid #e2e8f0; margin-bottom: 18px;
-    }
+    hr.section-rule { border: none; border-top: 1px solid #e2e8f0; margin-bottom: 18px; }
 
     /* ── Section headings ── */
     .section { margin-bottom: 22px; }
@@ -259,19 +268,12 @@ function buildCSS(): string {
     }
     h3 {
       font-size: 7.5pt; font-weight: 700; color: #334155;
-      text-transform: uppercase; letter-spacing: .12em;
-      margin-bottom: 8px;
+      text-transform: uppercase; letter-spacing: .12em; margin-bottom: 8px;
     }
 
-    /* ── Risk gauge / KPI row ── */
-    .kpi-row {
-      display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px;
-      margin-bottom: 12px;
-    }
-    .kpi-wide {
-      display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
-      margin-bottom: 12px;
-    }
+    /* ── KPI row ── */
+    .kpi-row  { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin-bottom: 12px; }
+    .kpi-wide { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 12px; }
     .kpi {
       border: 1px solid #e2e8f0; border-radius: 3px;
       padding: 10px 12px; background: #fafafa;
@@ -281,35 +283,20 @@ function buildCSS(): string {
       text-transform: uppercase; letter-spacing: .15em;
       font-weight: 700; margin-bottom: 4px;
     }
-    .kpi-val {
-      font-family: 'IBM Plex Mono', monospace;
-      font-size: 20pt; font-weight: 700; line-height: 1;
-    }
-    .kpi-sub { font-size: 7pt; color: #64748b; margin-top: 4px; font-weight: 500; }
+    .kpi-val  { font-family: 'IBM Plex Mono', monospace; font-size: 20pt; font-weight: 700; line-height: 1; }
+    .kpi-sub  { font-size: 7pt; color: #64748b; margin-top: 4px; font-weight: 500; }
 
-    /* ── Overall risk display ── */
+    /* ── Risk gauge panel ── */
     .risk-panel {
       border: 1px solid #e2e8f0; border-radius: 3px;
       padding: 12px 16px; text-align: center; background: #fafafa;
     }
-    .risk-score-label {
-      font-size: 5.5pt; color: #94a3b8;
-      text-transform: uppercase; letter-spacing: .15em; font-weight: 700;
-      margin-bottom: 6px;
-    }
-    .risk-score-val {
-      font-family: 'IBM Plex Mono', monospace;
-      font-size: 28pt; font-weight: 700; line-height: 1;
-    }
 
-    /* ── Framework breach list ── */
-    .framework-row {
-      display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px;
-    }
+    /* ── Framework breach chips ── */
+    .framework-row { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px; }
     .framework-chip {
       font-size: 6pt; font-weight: 700; text-transform: uppercase;
-      letter-spacing: .08em; padding: 3px 8px; border-radius: 2px;
-      border: 1px solid;
+      letter-spacing: .08em; padding: 3px 8px; border-radius: 2px; border: 1px solid;
     }
 
     /* ── Regulatory mapping table ── */
@@ -334,14 +321,14 @@ function buildCSS(): string {
       letter-spacing: .12em; color: #64748b;
       border-bottom: 2px solid #e2e8f0; text-align: left; white-space: nowrap;
     }
-    table.keys td { padding: 6px 8px; border-bottom: 1px solid #f1f5f9; vertical-align: middle; }
+    table.keys td   { padding: 6px 8px; border-bottom: 1px solid #f1f5f9; vertical-align: middle; }
     table.keys tr:nth-child(even) td { background: #fafafa; }
     table.keys tfoot td {
       padding: 7px 8px; border-top: 2px solid #e2e8f0;
       font-weight: 700; background: #f8fafc; font-size: 7.5pt;
     }
 
-    /* ── Attestation evidence box ── */
+    /* ── Evidence box ── */
     .evidence-box {
       background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 3px;
       padding: 10px 13px; font-size: 7.5pt; color: #334155;
@@ -353,11 +340,8 @@ function buildCSS(): string {
     }
 
     /* ── Remediation cards ── */
-    .rem-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
-    .rem-card {
-      border: 1px solid #e2e8f0; border-top: 3px solid;
-      padding: 12px; border-radius: 0 0 3px 3px;
-    }
+    .rem-grid  { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+    .rem-card  { border: 1px solid #e2e8f0; border-top: 3px solid; padding: 12px; border-radius: 0 0 3px 3px; }
     .rem-title { font-size: 8pt; font-weight: 700; margin-bottom: 5px; }
     .rem-body  { font-size: 7.5pt; color: #475569; margin-bottom: 10px; line-height: 1.6; font-weight: 500; }
     .rem-count { font-family: 'IBM Plex Mono', monospace; font-size: 20pt; font-weight: 700; float: right; line-height: 1; }
@@ -412,7 +396,7 @@ function buildCSS(): string {
 
 // ── Gauge SVG ─────────────────────────────────────────────────────────────────
 
-function buildGaugeSVG(risk: string): string {
+function buildGaugeSVG(risk: RiskLevel): string {
   const levels: Record<string, { pct: number; col: string }> = {
     CRITICAL: { pct: 0.95, col: "#dc2626" },
     HIGH:     { pct: 0.72, col: "#c2410c" },
@@ -420,17 +404,17 @@ function buildGaugeSVG(risk: string): string {
     LOW:      { pct: 0.2,  col: "#16a34a" },
   };
   const { pct, col } = levels[risk] ?? { pct: 0.5, col: "#64748b" };
-  const clamped = Math.min(0.998, Math.max(0.002, pct));
+  const clamped  = Math.min(0.998, Math.max(0.002, pct));
   const r = 52, cx = 68, cy = 70;
-  const tx1 = (cx - r).toFixed(2), ty1 = cy.toFixed(2);
-  const tx2 = (cx + r).toFixed(2), ty2 = cy.toFixed(2);
+  const tx1 = (cx - r).toFixed(2);
+  const tx2 = (cx + r).toFixed(2);
   const endAngle = Math.PI * (1 - clamped);
   const x2 = (cx + r * Math.cos(endAngle)).toFixed(2);
   const y2 = (cy - r * Math.sin(endAngle)).toFixed(2);
   const la = clamped > 0.5 ? 1 : 0;
   return `<svg width="136" height="86" viewBox="0 0 136 86" xmlns="http://www.w3.org/2000/svg">
-  <path d="M ${tx1} ${ty1} A ${r} ${r} 0 0 1 ${tx2} ${ty2}" fill="none" stroke="#e2e8f0" stroke-width="10" stroke-linecap="round"/>
-  <path d="M ${tx1} ${ty1} A ${r} ${r} 0 ${la} 1 ${x2} ${y2}" fill="none" stroke="${col}" stroke-width="10" stroke-linecap="round"/>
+  <path d="M ${tx1} ${cy} A ${r} ${r} 0 0 1 ${tx2} ${cy}" fill="none" stroke="#e2e8f0" stroke-width="10" stroke-linecap="round"/>
+  <path d="M ${tx1} ${cy} A ${r} ${r} 0 ${la} 1 ${x2} ${y2}" fill="none" stroke="${col}" stroke-width="10" stroke-linecap="round"/>
   <text x="${cx}" y="${cy - 4}" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="18" font-weight="700" fill="${col}">${risk}</text>
   <text x="${cx}" y="${cy + 12}" text-anchor="middle" font-family="IBM Plex Sans,sans-serif" font-size="6" font-weight="600" fill="#94a3b8" letter-spacing="1.5">OVERALL RISK</text>
 </svg>`;
@@ -439,18 +423,29 @@ function buildGaugeSVG(risk: string): string {
 // ── Options ───────────────────────────────────────────────────────────────────
 
 export interface ExportKRPDFOptions {
-  clientName:   string;
-  clientDomain: string;
+  clientName:    string;
+  clientDomain:  string;
+  /** Optional: label shown in filter notice, e.g. "payments.acmebank.com" */
+  activeFilter?: string;
+  activeStatus?: string;
+  activeSource?: string;
 }
 
 // ── Main HTML builder ─────────────────────────────────────────────────────────
 
 export function buildKRAuditHTML(result: KRScanResult, opts: ExportKRPDFOptions): string {
-  const { clientName, clientDomain } = opts;
-  const s = result.summary;
+  const { clientName, clientDomain, activeFilter, activeStatus, activeSource } = opts;
 
-  const now         = new Date();
-  const timestamp   = now.toLocaleString("en-IN", {
+  // ── Re-derive everything from the filtered result ─────────────────────────
+  // result.records is already the filtered slice from KeyRotationPanel.
+  // result.summary is recomputed from that slice in handleExportPDF.
+  // We re-derive overall_risk here so the gauge always matches actual counts.
+  const s           = result.summary;
+  const overallRisk = deriveRisk(s);   // ← never uses s.overall_risk
+  const critCount   = (s.critical ?? 0) + (s.never_rotated ?? 0);
+
+  const now       = new Date();
+  const timestamp = now.toLocaleString("en-IN", {
     year: "numeric", month: "long", day: "numeric",
     hour: "2-digit", minute: "2-digit", timeZoneName: "short",
   });
@@ -458,13 +453,32 @@ export function buildKRAuditHTML(result: KRScanResult, opts: ExportKRPDFOptions)
   const reportId    = `REBEL-KR-${scanDate.replace(/-/g, "")}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
   const displayName = clientName.trim() || (clientDomain ? normaliseDomain(clientDomain) : "All Assets");
   const scopeStr    = clientDomain ? normaliseDomain(clientDomain) : "All Assets";
-  const critCount   = s.critical + s.never_rotated;
 
-  // ── Total remediation cost (USD → INR) ──────────────────────────────────────
+  // ── Totals from filtered records only ─────────────────────────────────────
   const totalCostINR = Math.round(
     result.records.reduce((acc: number, r: KRRecord) => acc + (r.remediation_cost ?? 0), 0) * INR_RATE,
   );
   const totalDays = result.records.reduce((acc: number, r: KRRecord) => acc + (r.remediation_days ?? 0), 0);
+
+  // ── Active filter notice (shown when export is from a filtered view) ───────
+  const filterParts: string[] = [];
+  if (activeFilter)  filterParts.push(`Scope: <strong>${normaliseDomain(activeFilter)}</strong>`);
+  if (activeStatus && activeStatus !== "ALL") filterParts.push(`Status: <strong>${activeStatus}</strong>`);
+  if (activeSource && activeSource !== "ALL") filterParts.push(`Source: <strong>${activeSource}</strong>`);
+
+  const filterNoticeHTML = filterParts.length > 0 ? `
+    <div class="filter-notice">
+      <span>⚠ <strong>Filtered View:</strong> This report covers ${result.records.length} of the total scanned keys.
+      Active filters — ${filterParts.join(" · ")}.
+      Full inventory available in the unfiltered scan (Scan ID: ${result.scan_id}).</span>
+    </div>` : "";
+
+  // ── Recompute frameworks_breached from filtered records ────────────────────
+  // s.frameworks_breached was set in handleExportPDF; we also derive it here
+  // directly from record flags so it can never be stale.
+  const derivedFrameworks = Array.from(
+    new Set(result.records.flatMap((r: KRRecord) => r.regulatory_flags))
+  ).filter(Boolean);
 
   // ── Regulatory mapping rows ────────────────────────────────────────────────
   const allFrameworks: Array<{ art: string; title: string; desc: string; status: string }> = [
@@ -525,8 +539,8 @@ export function buildKRAuditHTML(result: KRScanResult, opts: ExportKRPDFOptions)
     </tr>`;
   }).join("");
 
-  // ── Key inventory rows ─────────────────────────────────────────────────────
-  const keyRows = result.records
+  // ── Key inventory rows — only filtered records ─────────────────────────────
+  const keyRows = [...result.records]
     .sort((a: KRRecord, b: KRRecord) =>
       (STATUS_ORDER[a.status] ?? 9) - (STATUS_ORDER[b.status] ?? 9)
     )
@@ -535,9 +549,7 @@ export function buildKRAuditHTML(result: KRScanResult, opts: ExportKRPDFOptions)
       const days    = r.days_since_rotation != null ? `${r.days_since_rotation}d` : "Never";
       const lastRot = fmtDate(r.last_rotated_at);
       const flags   = r.regulatory_flags.length
-        ? r.regulatory_flags.map((f: string) =>
-            `<span class="badge badge-red">${f}</span>`
-          ).join(" ")
+        ? r.regulatory_flags.map((f: string) => `<span class="badge badge-red">${f}</span>`).join(" ")
         : `<span style="color:#16a34a;font-size:7pt;font-weight:600;">✓ None</span>`;
       const costINR = Math.round((r.remediation_cost ?? 0) * INR_RATE);
       const attest  = r.attestation_hash.slice(0, 18) + "…";
@@ -563,7 +575,7 @@ export function buildKRAuditHTML(result: KRScanResult, opts: ExportKRPDFOptions)
       </tr>`;
     }).join("");
 
-  // ── Remediation action cards ───────────────────────────────────────────────
+  // ── Remediation cards — built from filtered records ───────────────────────
   const remCards = [
     {
       color: "#dc2626",
@@ -602,15 +614,34 @@ export function buildKRAuditHTML(result: KRScanResult, opts: ExportKRPDFOptions)
     </div>`;
   }).join("");
 
-  // ── Framework breach chips ─────────────────────────────────────────────────
-  const breachChips = s.frameworks_breached.length > 0
-    ? s.frameworks_breached.map((f: string) => `
+  // ── Framework breach chips — from derived (filtered) list ─────────────────
+  const breachChips = derivedFrameworks.length > 0
+    ? derivedFrameworks.map((f: string) => `
         <span class="framework-chip" style="color:#dc2626;background:#fef2f2;border-color:#fecaca;">
           ${f}
         </span>`).join("")
     : `<span class="framework-chip" style="color:#16a34a;background:#f0fdf4;border-color:#bbf7d0;">
         ✓ No Framework Breaches
       </span>`;
+
+  // ── Audit opinion — uses re-derived risk and filtered counts ──────────────
+  const opinionHTML = critCount > 0
+    ? `Based on the automated scan conducted on ${fmtDate(result.scanned_at)},
+       the${filterParts.length ? " filtered" : ""} scope has
+       <strong style="color:#dc2626;">${critCount} cryptographic key${critCount > 1 ? "s" : ""}</strong>
+       in a Critical or Never-Rotated state, constituting a material breach of
+       ${derivedFrameworks.slice(0, 3).join(", ") || "applicable regulatory"} obligations.
+       Immediate remediation is required prior to the next regulatory review cycle.
+       SPREADSHEET-sourced attestation records must be replaced with system-generated
+       evidence as a matter of priority.`
+    : s.overdue > 0
+    ? `The scan identified <strong style="color:#c2410c;">${s.overdue} overdue key${s.overdue > 1 ? "s" : ""}</strong>
+       requiring rotation within the current sprint cycle. No critical failures were detected.
+       Remediation of overdue items is required to maintain full compliance posture.`
+    : `All cryptographic keys in the${filterParts.length ? " filtered" : ""} scope are within defined
+       rotation periods and carry system-generated attestation evidence. The organisation demonstrates a
+       <strong style="color:#16a34a;">COMPLIANT</strong> key lifecycle management posture
+       as of the scan date. Continued monitoring is recommended.`;
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -625,12 +656,11 @@ export function buildKRAuditHTML(result: KRScanResult, opts: ExportKRPDFOptions)
 
 <div class="doc">
 
-  <!-- ── COVER ─────────────────────────────────────────────────────────────── -->
+  <!-- ── COVER ──────────────────────────────────────────────────────────────── -->
   <div class="cover-stripe"></div>
 
   <div class="cover-flex">
     <div>
-      <!-- Brand mark -->
       <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;">
         <svg width="28" height="28" viewBox="0 0 28 28" xmlns="http://www.w3.org/2000/svg">
           <polygon points="14,2 26,8 26,20 14,26 2,20 2,8" fill="none" stroke="#1e40af" stroke-width="1.8"/>
@@ -676,11 +706,18 @@ export function buildKRAuditHTML(result: KRScanResult, opts: ExportKRPDFOptions)
       <div class="meta-label">Scope</div>
       <div class="meta-val">${scopeStr}</div>
     </div>
+    <div class="meta-item">
+      <div class="meta-label">Overall Risk</div>
+      <div class="meta-val" style="color:${STATUS_COLOR[overallRisk] ?? "#64748b"};">${overallRisk}</div>
+    </div>
     <div class="meta-item" style="border-right:none;">
       <div class="meta-label">Keys in Scope</div>
       <div class="meta-val">${s.total_keys}</div>
     </div>
   </div>
+
+  <!-- Filter notice (only shown when filters were active) -->
+  ${filterNoticeHTML}
 
   <!-- Classification notices -->
   <div class="classification">
@@ -698,21 +735,21 @@ export function buildKRAuditHTML(result: KRScanResult, opts: ExportKRPDFOptions)
 
   <hr class="section-rule"/>
 
-  <!-- ── 1. EXECUTIVE SUMMARY ──────────────────────────────────────────────── -->
+  <!-- ── 1. EXECUTIVE SUMMARY ───────────────────────────────────────────────── -->
   <div class="section avoid-break">
     <h2>1. Executive Summary</h2>
     <div style="display:grid;grid-template-columns:200px 1fr;gap:14px;align-items:start;">
 
-      <!-- Gauge -->
+      <!-- Gauge — uses re-derived risk, never stale scan value -->
       <div class="risk-panel">
-        ${buildGaugeSVG(s.overall_risk)}
+        ${buildGaugeSVG(overallRisk)}
         <div style="margin-top:8px;font-size:7pt;color:#64748b;font-weight:500;line-height:1.7;">
           <strong>${s.total_keys}</strong> keys assessed<br/>
           Scan completed: <strong>${fmtDate(result.scanned_at)}</strong>
         </div>
       </div>
 
-      <!-- KPIs -->
+      <!-- KPIs — all from filtered summary -->
       <div>
         <div class="kpi-row">
           <div class="kpi">
@@ -750,12 +787,11 @@ export function buildKRAuditHTML(result: KRScanResult, opts: ExportKRPDFOptions)
           </div>
           <div class="kpi" style="background:#fef2f2;border-color:#fecaca;">
             <div class="kpi-label">Frameworks Breached</div>
-            <div class="kpi-val" style="font-size:17pt;color:#dc2626;">${s.frameworks_breached.length}</div>
-            <div class="kpi-sub">${s.frameworks_breached.slice(0, 3).join(" · ") || "None"}</div>
+            <div class="kpi-val" style="font-size:17pt;color:#dc2626;">${derivedFrameworks.length}</div>
+            <div class="kpi-sub">${derivedFrameworks.slice(0, 3).join(" · ") || "None"}</div>
           </div>
         </div>
 
-        <!-- Framework breach chips -->
         <div style="margin-top:4px;">
           <div style="font-size:5.5pt;color:#94a3b8;text-transform:uppercase;letter-spacing:.15em;
                       font-weight:700;margin-bottom:6px;">Regulatory breach status</div>
@@ -808,7 +844,7 @@ export function buildKRAuditHTML(result: KRScanResult, opts: ExportKRPDFOptions)
 
   <!-- ── 4. KEY ROTATION INVENTORY ─────────────────────────────────────────── -->
   <div class="section">
-    <h2>4. Cryptographic Key Rotation Inventory — Ranked by Risk</h2>
+    <h2>4. Cryptographic Key Rotation Inventory — Ranked by Risk${filterParts.length ? ` (Filtered: ${filterParts.join(", ")})` : ""}</h2>
     <table class="keys">
       <thead>
         <tr>
@@ -828,7 +864,7 @@ export function buildKRAuditHTML(result: KRScanResult, opts: ExportKRPDFOptions)
       <tbody>${keyRows}</tbody>
       <tfoot>
         <tr>
-          <td colspan="9" style="color:#334155;">Totals</td>
+          <td colspan="9" style="color:#334155;">Totals — ${result.records.length} key${result.records.length !== 1 ? "s" : ""} in this report</td>
           <td class="mono right" style="color:#0369a1;">${totalDays}d</td>
           <td class="mono right" style="color:#92400e;">${fmtINR(totalCostINR)}</td>
         </tr>
@@ -862,25 +898,7 @@ export function buildKRAuditHTML(result: KRScanResult, opts: ExportKRPDFOptions)
   <!-- ── 6. AUDIT OPINION ───────────────────────────────────────────────────── -->
   <div class="section avoid-break">
     <h2>6. Auditor Opinion & Conclusion</h2>
-    <div style="font-size:8.5pt;color:#334155;line-height:1.9;">
-      ${critCount > 0
-        ? `Based on the automated scan conducted on ${fmtDate(result.scanned_at)},
-           the organisation has <strong style="color:#dc2626;">${critCount} cryptographic keys</strong>
-           in a Critical or Never-Rotated state, constituting a material breach of
-           ${s.frameworks_breached.slice(0, 3).join(", ")} obligations.
-           Immediate remediation is required prior to the next regulatory review cycle.
-           SPREADSHEET-sourced attestation records must be replaced with system-generated
-           evidence as a matter of priority.`
-        : s.overdue > 0
-        ? `The scan identified <strong style="color:#c2410c;">${s.overdue} overdue keys</strong>
-           requiring rotation within the current sprint cycle. No critical failures were detected.
-           Remediation of overdue items is required to maintain full compliance posture.`
-        : `All cryptographic keys in scope are within defined rotation periods and carry
-           system-generated attestation evidence. The organisation demonstrates a
-           <strong style="color:#16a34a;">COMPLIANT</strong> key lifecycle management posture
-           as of the scan date. Continued monitoring is recommended.`
-      }
-    </div>
+    <div style="font-size:8.5pt;color:#334155;line-height:1.9;">${opinionHTML}</div>
   </div>
 
   <!-- ── SIGNATURES ─────────────────────────────────────────────────────────── -->
@@ -899,6 +917,7 @@ export function buildKRAuditHTML(result: KRScanResult, opts: ExportKRPDFOptions)
     &nbsp;·&nbsp; Report ID: ${reportId} &nbsp;·&nbsp; Scan ID: ${result.scan_id}
     <br/>
     ${displayName}${clientDomain ? ` &nbsp;·&nbsp; Scope: ${scopeStr}` : ""}
+    &nbsp;·&nbsp; Overall Risk: ${overallRisk}
     &nbsp;·&nbsp; Generated: ${timestamp}
     <br/>
     RESTRICTED &amp; CONFIDENTIAL — Intended solely for the named organisation and designated auditors.
@@ -918,7 +937,7 @@ export function exportKRPDF(result: KRScanResult, opts: ExportKRPDFOptions): voi
   const url  = URL.createObjectURL(blob);
   const a    = document.createElement("a");
   a.href     = url;
-  a.download = `REBEL-KR-Audit-${opts.clientDomain || "scan"}-${new Date().toISOString().split("T")[0]}.html`;
+  a.download = `REBEL-KR-Audit-${normaliseDomain(opts.clientDomain || opts.clientName || "scan")}-${new Date().toISOString().split("T")[0]}.html`;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
