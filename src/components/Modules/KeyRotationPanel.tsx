@@ -350,13 +350,11 @@ export default function KeyRotationPanel({
       }
     }
 
-    const sourceAssets: RawAsset[] = secureModeOn
+    const sourceAssets = secureModeOn
       ? await fetch(`${apiBase}/ghost/assets`)
           .then(r => r.ok ? r.json() : null)
-          .then((d: { assets?: RawAsset[] } | null) =>
-            Array.isArray(d?.assets) ? d!.assets! : []
-          )
-          .catch((): RawAsset[] => [])
+          .then(d => Array.isArray(d?.assets) ? d.assets : [])
+          .catch(() => [])
       : (Array.isArray(assets) ? assets : []);
 
     try {
@@ -366,30 +364,16 @@ export default function KeyRotationPanel({
         body:    JSON.stringify({ target: "rebel-scan", assets: toKRAssets(sourceAssets) }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json() as Partial<KRScanResult>;
-
-      const safeData: KRScanResult = {
-        scan_id: data.scan_id ?? "",
-        target:  data.target  ?? "",
-        records: Array.isArray(data.records) ? data.records : [],
-        summary: data.summary ?? {
-          total_keys:         0,
-          compliant:          0,
-          overdue:            0,
-          critical:           0,
-          never_rotated:      0,
-          unknown:            0,
-          overall_risk:       "LOW",
-          frameworks_breached: [],
-        },
+      const data = await res.json();
+      data.records = Array.isArray(data.records) ? data.records : [];
+      data.summary = data.summary ?? {
+        total_keys: 0, compliant: 0, overdue: 0, critical: 0,
+        never_rotated: 0, unknown: 0, overall_risk: "LOW", frameworks_breached: [],
       };
-      safeData.summary.frameworks_breached =
-        Array.isArray(safeData.summary.frameworks_breached)
-          ? safeData.summary.frameworks_breached
-          : [];
-
-      cacheSet(CACHE_KEY_KR, safeData);
-      setResult(safeData);
+      data.summary.frameworks_breached = Array.isArray(data.summary.frameworks_breached)
+        ? data.summary.frameworks_breached : [];
+      cacheSet(CACHE_KEY_KR, data);
+      setResult(data);
       setFromCache(false);
       setCachedAt(null);
     } catch {
@@ -399,9 +383,6 @@ export default function KeyRotationPanel({
     }
   }, [secureModeOn, apiBase, assets]);
 
-  useEffect(() => {
-    if (!secureModeLoading) loadKR();
-  }, [secureModeOn, secureModeLoading]);  // eslint-disable-line react-hooks/exhaustive-deps
 
   function handleRefresh() {
     localStorage.removeItem(CACHE_KEY_KR);
