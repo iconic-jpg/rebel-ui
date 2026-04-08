@@ -909,8 +909,7 @@ export function buildKRAuditHTML(result: KRScanResult, opts: ExportKRPDFOptions)
 }
 
 // ── Entry point ───────────────────────────────────────────────────────────────
-
-export function exportKRPDF(result, opts) {
+export function exportKRPDF(result, opts = {}) {
   const html = buildKRAuditHTML(result, opts);
   const blob = new Blob([html], { type: "text/html;charset=utf-8" });
   const url  = URL.createObjectURL(blob);
