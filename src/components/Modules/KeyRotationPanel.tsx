@@ -42,8 +42,8 @@ export interface KRScanResult {
 }
 
 interface Props {
-  assets:  any[];
-  apiBase: string;
+  assets?:  any[];
+  apiBase?: string;
   style?:  React.CSSProperties;
 }
 
