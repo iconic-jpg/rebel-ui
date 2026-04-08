@@ -13,10 +13,13 @@ export interface KRRecord {
   key_identifier:      string;
   key_type:            string;
   days_since_rotation: number | null;
+  last_rotated_at?:    string | null;
   rotation_source:     string;
   status:              KRStatus;
   regulatory_flags:    string[];
   attestation_hash:    string;
+  remediation_cost?:   number;
+  remediation_days?:   number;
 }
 
 export type KRStatus = "COMPLIANT" | "OVERDUE" | "CRITICAL" | "NEVER_ROTATED" | "UNKNOWN";
@@ -33,10 +36,11 @@ export interface KRSummary {
 }
 
 export interface KRScanResult {
-  scan_id: string;
-  target:  string;
-  summary: KRSummary;
-  records: KRRecord[];
+  scan_id:    string;
+  target:     string;
+  scanned_at?: string;
+  summary:    KRSummary;
+  records:    KRRecord[];
 }
 
 interface RawAsset {
