@@ -473,19 +473,6 @@ export default function KeyRotationPanel({
   }
 
   // ── PDF export ────────────────────────────────────────────────────────────
-  function handleExportPDF() {
-    if (!result || pdfExporting) return;
-    setPdfExporting(true);
-    try {
-      exportKRPDF(result, {
-        clientName:   activeClientName || clientName || "",
-        clientDomain: activeDomain || result.target || "",
-      });
-    } finally {
-      setTimeout(() => setPdfExporting(false), 1200);
-    }
-  }
-
   // ── Derived + filtered records ────────────────────────────────────────────
   const s         = result?.summary;
   const critCount = (s?.critical ?? 0) + (s?.never_rotated ?? 0);
@@ -511,6 +498,41 @@ export default function KeyRotationPanel({
   const filteredRecords = sourceFilter === "ALL"
     ? statusFiltered
     : statusFiltered.filter(r => r.rotation_source === sourceFilter);
+
+  // ── PDF export — passes filtered slice + recomputed summary ──────────────
+  // overall_risk is re-derived inside exportKRPDF from the recomputed counts,
+  // so the gauge and audit opinion always reflect what the user sees on screen.
+  function handleExportPDF() {
+    if (!result || pdfExporting) return;
+    setPdfExporting(true);
+    try {
+      const filteredResult: KRScanResult = {
+        ...result,
+        records: filteredRecords,
+        summary: {
+          ...result.summary,
+          total_keys:    filteredRecords.length,
+          compliant:     filteredRecords.filter(r => r.status === "COMPLIANT").length,
+          overdue:       filteredRecords.filter(r => r.status === "OVERDUE").length,
+          critical:      filteredRecords.filter(r => r.status === "CRITICAL").length,
+          never_rotated: filteredRecords.filter(r => r.status === "NEVER_ROTATED").length,
+          unknown:       filteredRecords.filter(r => r.status === "UNKNOWN").length,
+          frameworks_breached: Array.from(
+            new Set(filteredRecords.flatMap(r => r.regulatory_flags))
+          ).filter(Boolean),
+        },
+      };
+      exportKRPDF(filteredResult, {
+        clientName:    activeClientName || clientName || "",
+        clientDomain:  activeDomain || result.target || "",
+        activeFilter:  activeDomain   || undefined,
+        activeStatus:  statusFilter !== "ALL" ? statusFilter : undefined,
+        activeSource:  sourceFilter !== "ALL" ? sourceFilter : undefined,
+      });
+    } finally {
+      setTimeout(() => setPdfExporting(false), 1200);
+    }
+  }
 
   // Counts for filter pills (against domain-filtered only, not status-filtered)
   const statusCounts: Record<string, number> = {
