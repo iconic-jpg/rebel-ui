@@ -13,7 +13,7 @@
  * Note: remediation_cost in KRRecord is expected in USD — converted to INR here.
  */
 
-import type { KRScanResult, KRRecord } from "./KeyRotationPanel.js";
+import type { KRScanResult, KRRecord, KRStatus } from "./KeyRotationPanel.js";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -39,6 +39,14 @@ const STATUS_LABEL: Record<string, string> = {
   CRITICAL:      "Critical",
   NEVER_ROTATED: "Never Rotated",
   UNKNOWN:       "Unknown",
+};
+
+const STATUS_ORDER: Record<KRStatus, number> = {
+  CRITICAL:     0,
+  NEVER_ROTATED: 1,
+  OVERDUE:       2,
+  UNKNOWN:       3,
+  COMPLIANT:     4,
 };
 
 /** Regulatory frameworks mapped to their formal citation strings */
@@ -67,7 +75,7 @@ function normaliseDomain(raw: string): string {
     .replace(/\/.*$/, "");
 }
 
-function fmtDate(iso: string | null): string {
+function fmtDate(iso: string | null | undefined): string {
   if (!iso) return "—";
   try {
     return new Date(iso).toLocaleDateString("en-GB", {
@@ -450,18 +458,16 @@ export function buildKRAuditHTML(result: KRScanResult, opts: ExportKRPDFOptions)
   const reportId    = `REBEL-KR-${scanDate.replace(/-/g, "")}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
   const displayName = clientName.trim() || (clientDomain ? normaliseDomain(clientDomain) : "All Assets");
   const scopeStr    = clientDomain ? normaliseDomain(clientDomain) : "All Assets";
-  const riskColor   = STATUS_COLOR[s.overall_risk] ?? "#64748b";
   const critCount   = s.critical + s.never_rotated;
 
   // ── Total remediation cost (USD → INR) ──────────────────────────────────────
   const totalCostINR = Math.round(
-    result.records.reduce((acc, r) => acc + (r.remediation_cost ?? 0), 0) * INR_RATE,
+    result.records.reduce((acc: number, r: KRRecord) => acc + (r.remediation_cost ?? 0), 0) * INR_RATE,
   );
-  const totalDays = result.records.reduce((acc, r) => acc + (r.remediation_days ?? 0), 0);
+  const totalDays = result.records.reduce((acc: number, r: KRRecord) => acc + (r.remediation_days ?? 0), 0);
 
   // ── Regulatory mapping rows ────────────────────────────────────────────────
-  // Built from frameworks_breached + always showing key ones for EU audits
-  const allFrameworks = [
+  const allFrameworks: Array<{ art: string; title: string; desc: string; status: string }> = [
     {
       art: "DORA Art. 9.4",
       title: "Cryptographic Key Lifecycle Management",
@@ -472,7 +478,7 @@ export function buildKRAuditHTML(result: KRScanResult, opts: ExportKRPDFOptions)
       art: "FFIEC IS",
       title: "Information Security — Key Management",
       desc: "Key rotation periods must be enforced by system controls; manual overrides must be exception-logged. Rotation source must be SYSTEM or HSM.",
-      status: result.records.some(r => r.rotation_source === "SPREADSHEET" || r.rotation_source === "NONE") ? "BREACH" : "COVERED",
+      status: result.records.some((r: KRRecord) => r.rotation_source === "SPREADSHEET" || r.rotation_source === "NONE") ? "BREACH" : "COVERED",
     },
     {
       art: "MAS TRM § 9.2.4",
@@ -484,7 +490,7 @@ export function buildKRAuditHTML(result: KRScanResult, opts: ExportKRPDFOptions)
       art: "BaFin BAIT § 7.3",
       title: "Cryptographic Procedures",
       desc: "Cryptographic key management must include defined key lifecycle, documented rotation intervals, and segregated evidence storage. SPREADSHEET sources constitute a material control failure.",
-      status: result.records.some(r => r.rotation_source === "SPREADSHEET") ? "BREACH" : "COVERED",
+      status: result.records.some((r: KRRecord) => r.rotation_source === "SPREADSHEET") ? "BREACH" : "COVERED",
     },
     {
       art: "NIS2 Art. 21",
@@ -521,16 +527,15 @@ export function buildKRAuditHTML(result: KRScanResult, opts: ExportKRPDFOptions)
 
   // ── Key inventory rows ─────────────────────────────────────────────────────
   const keyRows = result.records
-    .sort((a, b) => {
-      const order = { CRITICAL: 0, NEVER_ROTATED: 1, OVERDUE: 2, UNKNOWN: 3, COMPLIANT: 4 };
-      return (order[a.status] ?? 9) - (order[b.status] ?? 9);
-    })
-    .map((r, i) => {
+    .sort((a: KRRecord, b: KRRecord) =>
+      (STATUS_ORDER[a.status] ?? 9) - (STATUS_ORDER[b.status] ?? 9)
+    )
+    .map((r: KRRecord, i: number) => {
       const sc      = STATUS_COLOR[r.status] ?? "#64748b";
       const days    = r.days_since_rotation != null ? `${r.days_since_rotation}d` : "Never";
       const lastRot = fmtDate(r.last_rotated_at);
       const flags   = r.regulatory_flags.length
-        ? r.regulatory_flags.map(f =>
+        ? r.regulatory_flags.map((f: string) =>
             `<span class="badge badge-red">${f}</span>`
           ).join(" ")
         : `<span style="color:#16a34a;font-size:7pt;font-weight:600;">✓ None</span>`;
@@ -553,7 +558,7 @@ export function buildKRAuditHTML(result: KRScanResult, opts: ExportKRPDFOptions)
         <td style="font-size:7pt;">${flags}</td>
         <td style="font-family:'IBM Plex Mono',monospace;font-size:6.5pt;color:#94a3b8;
                    max-width:90px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${attest}</td>
-        <td class="mono right" style="color:#0369a1;font-weight:600;font-size:7.5pt;">${r.remediation_days}d</td>
+        <td class="mono right" style="color:#0369a1;font-weight:600;font-size:7.5pt;">${r.remediation_days ?? 0}d</td>
         <td class="mono right" style="color:#92400e;font-weight:700;font-size:7.5pt;">${fmtINR(costINR)}</td>
       </tr>`;
     }).join("");
@@ -564,23 +569,23 @@ export function buildKRAuditHTML(result: KRScanResult, opts: ExportKRPDFOptions)
       color: "#dc2626",
       title: "Rotate Never-Rotated Keys",
       body: "Keys with no recorded rotation event must be treated as compromised. Initiate emergency rotation and generate system audit trail immediately.",
-      items: result.records.filter(r => r.status === "NEVER_ROTATED").map(r => r.key_identifier),
+      items: result.records.filter((r: KRRecord) => r.status === "NEVER_ROTATED").map((r: KRRecord) => r.key_identifier),
     },
     {
       color: "#c2410c",
       title: "Address Critical Overdue Keys",
       body: "Keys exceeding maximum rotation age or bearing SPREADSHEET source attribution. Rotate and reclassify source to SYSTEM or HSM.",
-      items: result.records.filter(r => r.status === "CRITICAL").map(r => r.key_identifier),
+      items: result.records.filter((r: KRRecord) => r.status === "CRITICAL").map((r: KRRecord) => r.key_identifier),
     },
     {
       color: "#1e3a8a",
       title: "Remediate Overdue & Unknown Keys",
       body: "Schedule rotation within next sprint cycle. Ensure system-generated evidence is produced and stored in tamper-evident log.",
-      items: result.records.filter(r => r.status === "OVERDUE" || r.status === "UNKNOWN").map(r => r.key_identifier),
+      items: result.records.filter((r: KRRecord) => r.status === "OVERDUE" || r.status === "UNKNOWN").map((r: KRRecord) => r.key_identifier),
     },
   ].map(card => {
     const rows = card.items.length > 0
-      ? card.items.slice(0, 6).map(id =>
+      ? card.items.slice(0, 6).map((id: string) =>
           `<div class="rem-row"><span style="color:${card.color};flex-shrink:0;font-size:8pt;">▸</span>
            <span class="mono" style="font-size:7pt;">${id}</span></div>`
         ).join("") +
@@ -599,7 +604,7 @@ export function buildKRAuditHTML(result: KRScanResult, opts: ExportKRPDFOptions)
 
   // ── Framework breach chips ─────────────────────────────────────────────────
   const breachChips = s.frameworks_breached.length > 0
-    ? s.frameworks_breached.map(f => `
+    ? s.frameworks_breached.map((f: string) => `
         <span class="framework-chip" style="color:#dc2626;background:#fef2f2;border-color:#fecaca;">
           ${f}
         </span>`).join("")
@@ -630,7 +635,6 @@ export function buildKRAuditHTML(result: KRScanResult, opts: ExportKRPDFOptions)
         <svg width="30" height="30" viewBox="0 0 30 30" xmlns="http://www.w3.org/2000/svg">
           <rect x="2" y="2" width="26" height="26" rx="2" fill="none" stroke="#1e3a8a" stroke-width="1.8"/>
           <rect x="7" y="7" width="16" height="16" rx="1" fill="#dbeafe" stroke="#3b82f6" stroke-width="1"/>
-          <!-- Key icon -->
           <circle cx="13" cy="13" r="3" fill="none" stroke="#1e3a8a" stroke-width="1.5"/>
           <line x1="16" y1="16" x2="22" y2="22" stroke="#1e3a8a" stroke-width="1.5" stroke-linecap="round"/>
           <line x1="19" y1="19" x2="21" y2="17" stroke="#1e3a8a" stroke-width="1" stroke-linecap="round"/>
@@ -883,7 +887,7 @@ export function buildKRAuditHTML(result: KRScanResult, opts: ExportKRPDFOptions)
 
   <!-- ── SIGNATURES ─────────────────────────────────────────────────────────── -->
   <div class="sig-grid avoid-break">
-    ${["Lead Auditor", "Compliance Officer", "Authorised Signatory"].map(role => `
+    ${(["Lead Auditor", "Compliance Officer", "Authorised Signatory"] as const).map(role => `
     <div>
       <div class="sig-role">${role}</div>
       <div class="sig-line"></div>
@@ -909,7 +913,8 @@ export function buildKRAuditHTML(result: KRScanResult, opts: ExportKRPDFOptions)
 }
 
 // ── Entry point ───────────────────────────────────────────────────────────────
-export function exportKRPDF(result, opts = {}) {
+
+export function exportKRPDF(result: KRScanResult, opts: ExportKRPDFOptions): void {
   const html = buildKRAuditHTML(result, opts);
   const blob = new Blob([html], { type: "text/html;charset=utf-8" });
   const url  = URL.createObjectURL(blob);

@@ -1,11 +1,53 @@
 /**
- * KeyRotationPanel.jsx
+ * KeyRotationPanel.tsx
  * REBEL — Key Rotation proof-of-rotation audit panel
- * PDF export via ExportKRPDF.jsx (download, not new tab)
+ * PDF export via exportKRPDF.ts (download, not new tab)
  */
 
 import { useState, useEffect, useCallback } from "react";
-import { exportKRPDF } from "./ExportKRPDF.js";
+import { exportKRPDF } from "./exportKRPDF.js";
+
+// ── Shared types (also imported by exportKRPDF) ───────────────────────────────
+export interface KRRecord {
+  asset_id:            string;
+  key_identifier:      string;
+  key_type:            string;
+  days_since_rotation: number | null;
+  rotation_source:     string;
+  status:              KRStatus;
+  regulatory_flags:    string[];
+  attestation_hash:    string;
+}
+
+export type KRStatus = "COMPLIANT" | "OVERDUE" | "CRITICAL" | "NEVER_ROTATED" | "UNKNOWN";
+
+export interface KRSummary {
+  total_keys:         number;
+  compliant:          number;
+  overdue:            number;
+  critical:           number;
+  never_rotated:      number;
+  unknown:            number;
+  overall_risk:       "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+  frameworks_breached: string[];
+}
+
+export interface KRScanResult {
+  scan_id: string;
+  target:  string;
+  summary: KRSummary;
+  records: KRRecord[];
+}
+
+interface RawAsset {
+  id?:              string;
+  name?:            string;
+  type?:            string;
+  cipher?:          string;
+  last_rotated_at?: string | null;
+  rotation_source?: string;
+  evidence_path?:   string;
+}
 
 // ── Theme ─────────────────────────────────────────────────────────────────────
 const L = {
@@ -27,7 +69,7 @@ const L = {
   red:    "#dc2626",
   purple: "#7c3aed",
   border: "#e2e8f0",
-};
+} as const;
 
 const LS = {
   panel: {
@@ -42,56 +84,58 @@ const LS = {
     borderRadius:  4,
     color:         L.text2,
     padding:       "5px 11px",
-    cursor:        "pointer",
+    cursor:        "pointer" as const,
     fontSize:      11,
     fontWeight:    600,
     letterSpacing: ".06em",
     fontFamily:    "inherit",
   },
-};
+} as const;
 
 // ── Cache config ──────────────────────────────────────────────────────────────
 const CACHE_TTL_MS = 12 * 60 * 60 * 1000;
 const CACHE_KEY_KR = "rebel_cache_kr_scan";
 
-function cacheGet(key) {
+function cacheGet(key: string): KRScanResult | null {
   try {
     const raw = localStorage.getItem(key);
     if (!raw) return null;
-    const entry = JSON.parse(raw);
+    const entry = JSON.parse(raw) as { ts: number; data: KRScanResult };
     if (Date.now() - entry.ts > CACHE_TTL_MS) { localStorage.removeItem(key); return null; }
     return entry.data;
   } catch { return null; }
 }
-function cacheSet(key, data) {
+
+function cacheSet(key: string, data: KRScanResult): void {
   try { localStorage.setItem(key, JSON.stringify({ ts: Date.now(), data })); } catch {}
 }
-function cacheAgeLabel(key) {
+
+function cacheAgeLabel(key: string): string | null {
   try {
     const raw = localStorage.getItem(key);
     if (!raw) return null;
-    const entry = JSON.parse(raw);
+    const entry = JSON.parse(raw) as { ts: number };
     const mins = Math.round((Date.now() - entry.ts) / 60000);
     return mins < 60 ? `${mins}m ago` : `${Math.round(mins / 60)}h ago`;
   } catch { return null; }
 }
 
 // ── Status maps ───────────────────────────────────────────────────────────────
-const STATUS_COLOR = {
+const STATUS_COLOR: Record<KRStatus, string> = {
   COMPLIANT:     L.green,
   OVERDUE:       L.orange,
   CRITICAL:      L.red,
   NEVER_ROTATED: L.red,
   UNKNOWN:       L.text3,
 };
-const STATUS_BG = {
+const STATUS_BG: Record<KRStatus, string> = {
   COMPLIANT:     "#f0fdf4",
   OVERDUE:       "#fff7ed",
   CRITICAL:      "#fef2f2",
   NEVER_ROTATED: "#fef2f2",
   UNKNOWN:       L.subtleBg,
 };
-const STATUS_LABEL = {
+const STATUS_LABEL: Record<KRStatus, string> = {
   COMPLIANT:     "Compliant",
   OVERDUE:       "Overdue",
   CRITICAL:      "Critical",
@@ -100,12 +144,21 @@ const STATUS_LABEL = {
 };
 
 // ── Asset mapper ──────────────────────────────────────────────────────────────
-function toKRAssets(assets) {
+interface KRAssetInput {
+  asset_id:        string;
+  key_type:        string;
+  key_identifier:  string;
+  last_rotated_at: string | null;
+  rotation_source: string;
+  evidence_path:   string;
+}
+
+function toKRAssets(assets: RawAsset[]): KRAssetInput[] {
   return (assets || []).map((a) => ({
     asset_id:        a.id   ?? a.name ?? "unknown",
-    key_type:        a.type === "HSM"           ? "HSM"
-                   : a.type === "Database"      ? "DATABASE"
-                   : a.cipher?.includes("TLS")  ? "TLS_CERT"
+    key_type:        a.type === "HSM"            ? "HSM"
+                   : a.type === "Database"       ? "DATABASE"
+                   : a.cipher?.includes("TLS")   ? "TLS_CERT"
                    : "APP_CONFIG",
     key_identifier:  a.name ?? a.id ?? "unknown",
     last_rotated_at: a.last_rotated_at ?? null,
@@ -115,7 +168,14 @@ function toKRAssets(assets) {
 }
 
 // ── Shared small components ───────────────────────────────────────────────────
-function Shimmer({ w = "100%", h = 16, radius = 4, style = {} }) {
+interface ShimmerProps {
+  w?: number | string;
+  h?: number;
+  radius?: number;
+  style?: React.CSSProperties;
+}
+
+function Shimmer({ w = "100%", h = 16, radius = 4, style = {} }: ShimmerProps) {
   return (
     <div style={{
       width: w, height: h, borderRadius: radius, flexShrink: 0,
@@ -127,7 +187,12 @@ function Shimmer({ w = "100%", h = 16, radius = 4, style = {} }) {
   );
 }
 
-function LPanelHeader({ left, right }) {
+interface LPanelHeaderProps {
+  left:   string;
+  right?: React.ReactNode;
+}
+
+function LPanelHeader({ left, right }: LPanelHeaderProps) {
   return (
     <div style={{
       display: "flex", justifyContent: "space-between", alignItems: "center",
@@ -142,7 +207,7 @@ function LPanelHeader({ left, right }) {
   );
 }
 
-function StatusBadge({ status }) {
+function StatusBadge({ status }: { status: KRStatus }) {
   const color = STATUS_COLOR[status] ?? L.text3;
   const bg    = STATUS_BG[status]    ?? L.subtleBg;
   const label = STATUS_LABEL[status] ?? status;
@@ -157,7 +222,7 @@ function StatusBadge({ status }) {
   );
 }
 
-function RegBadge({ text }) {
+function RegBadge({ text }: { text: string }) {
   return (
     <span style={{
       fontSize: 7, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".08em",
@@ -169,7 +234,12 @@ function RegBadge({ text }) {
   );
 }
 
-function CacheBadge({ age, onRefresh }) {
+interface CacheBadgeProps {
+  age:       string | null;
+  onRefresh: () => void;
+}
+
+function CacheBadge({ age, onRefresh }: CacheBadgeProps) {
   if (!age) return null;
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -207,40 +277,55 @@ function SkeletonSummaryStrip() {
   );
 }
 
-function SkeletonTableRows({ count = 5 }) {
-  return Array.from({ length: count }).map((_, i) => (
-    <tr key={i} style={{ borderBottom: `1px solid ${L.borderLight}`, background: i % 2 === 0 ? L.panelBg : L.subtleBg }}>
-      <td style={{ padding: "8px" }}><Shimmer w={130} h={9} /></td>
-      <td style={{ padding: "8px" }}><Shimmer w={70}  h={9} /></td>
-      <td style={{ padding: "8px" }}><Shimmer w={40}  h={9} /></td>
-      <td style={{ padding: "8px" }}><Shimmer w={80}  h={9} /></td>
-      <td style={{ padding: "8px" }}><Shimmer w={60}  h={18} radius={3} /></td>
-      <td style={{ padding: "8px" }}><Shimmer w={80}  h={18} radius={3} /></td>
-      <td style={{ padding: "8px" }}><Shimmer w={110} h={9} /></td>
-    </tr>
-  ));
+function SkeletonTableRows({ count = 5 }: { count?: number }) {
+  return (
+    <>
+      {Array.from({ length: count }).map((_, i) => (
+        <tr key={i} style={{ borderBottom: `1px solid ${L.borderLight}`, background: i % 2 === 0 ? L.panelBg : L.subtleBg }}>
+          <td style={{ padding: "8px" }}><Shimmer w={130} h={9} /></td>
+          <td style={{ padding: "8px" }}><Shimmer w={70}  h={9} /></td>
+          <td style={{ padding: "8px" }}><Shimmer w={40}  h={9} /></td>
+          <td style={{ padding: "8px" }}><Shimmer w={80}  h={9} /></td>
+          <td style={{ padding: "8px" }}><Shimmer w={60}  h={18} radius={3} /></td>
+          <td style={{ padding: "8px" }}><Shimmer w={80}  h={18} radius={3} /></td>
+          <td style={{ padding: "8px" }}><Shimmer w={110} h={9} /></td>
+        </tr>
+      ))}
+    </>
+  );
 }
 
 // ── Main component ────────────────────────────────────────────────────────────
-/**
- * @param {{ assets?: any[], apiBase?: string, clientName?: string, style?: object }} props
- */
-export default function KeyRotationPanel({ assets, apiBase = "", clientName = "", style = {} }) {
-  const [result,            setResult]            = useState(null);
-  const [loading,           setLoading]           = useState(true);
-  const [error,             setError]             = useState(false);
-  const [tableOpen,         setTableOpen]         = useState(true);
-  const [fromCache,         setFromCache]         = useState(false);
-  const [cachedAt,          setCachedAt]          = useState(null);
-  const [secureModeOn,      setSecureModeOn]      = useState(false);
-  const [secureModeLoading, setSecureModeLoading] = useState(true);
-  const [pdfExporting,      setPdfExporting]      = useState(false);
+interface KeyRotationPanelProps {
+  assets?:     RawAsset[];
+  apiBase?:    string;
+  clientName?: string;
+  style?:      React.CSSProperties;
+}
+
+export default function KeyRotationPanel({
+  assets,
+  apiBase = "",
+  clientName = "",
+  style = {},
+}: KeyRotationPanelProps) {
+  const [result,            setResult]            = useState<KRScanResult | null>(null);
+  const [loading,           setLoading]           = useState<boolean>(true);
+  const [error,             setError]             = useState<boolean>(false);
+  const [tableOpen,         setTableOpen]         = useState<boolean>(true);
+  const [fromCache,         setFromCache]         = useState<boolean>(false);
+  const [cachedAt,          setCachedAt]          = useState<string | null>(null);
+  const [secureModeOn,      setSecureModeOn]      = useState<boolean>(false);
+  const [secureModeLoading, setSecureModeLoading] = useState<boolean>(true);
+  const [pdfExporting,      setPdfExporting]      = useState<boolean>(false);
 
   // ── Secure mode status ────────────────────────────────────────────────────
   useEffect(() => {
     fetch(`${apiBase}/secure-mode/status`)
       .then(r => r.ok ? r.json() : null)
-      .then(d => { if (d?.enabled !== undefined) setSecureModeOn(Boolean(d.enabled)); })
+      .then((d: { enabled?: boolean } | null) => {
+        if (d?.enabled !== undefined) setSecureModeOn(Boolean(d.enabled));
+      })
       .catch(() => {})
       .finally(() => setSecureModeLoading(false));
   }, [apiBase]);
@@ -261,11 +346,13 @@ export default function KeyRotationPanel({ assets, apiBase = "", clientName = ""
       }
     }
 
-    const sourceAssets = secureModeOn
+    const sourceAssets: RawAsset[] = secureModeOn
       ? await fetch(`${apiBase}/ghost/assets`)
           .then(r => r.ok ? r.json() : null)
-          .then(d => Array.isArray(d?.assets) ? d.assets : [])
-          .catch(() => [])
+          .then((d: { assets?: RawAsset[] } | null) =>
+            Array.isArray(d?.assets) ? d!.assets! : []
+          )
+          .catch((): RawAsset[] => [])
       : (Array.isArray(assets) ? assets : []);
 
     try {
@@ -275,16 +362,30 @@ export default function KeyRotationPanel({ assets, apiBase = "", clientName = ""
         body:    JSON.stringify({ target: "rebel-scan", assets: toKRAssets(sourceAssets) }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
-      data.records = Array.isArray(data.records) ? data.records : [];
-      data.summary = data.summary ?? {
-        total_keys: 0, compliant: 0, overdue: 0, critical: 0,
-        never_rotated: 0, unknown: 0, overall_risk: "LOW", frameworks_breached: [],
+      const data = await res.json() as Partial<KRScanResult>;
+
+      const safeData: KRScanResult = {
+        scan_id: data.scan_id ?? "",
+        target:  data.target  ?? "",
+        records: Array.isArray(data.records) ? data.records : [],
+        summary: data.summary ?? {
+          total_keys:         0,
+          compliant:          0,
+          overdue:            0,
+          critical:           0,
+          never_rotated:      0,
+          unknown:            0,
+          overall_risk:       "LOW",
+          frameworks_breached: [],
+        },
       };
-      data.summary.frameworks_breached = Array.isArray(data.summary.frameworks_breached)
-        ? data.summary.frameworks_breached : [];
-      cacheSet(CACHE_KEY_KR, data);
-      setResult(data);
+      safeData.summary.frameworks_breached =
+        Array.isArray(safeData.summary.frameworks_breached)
+          ? safeData.summary.frameworks_breached
+          : [];
+
+      cacheSet(CACHE_KEY_KR, safeData);
+      setResult(safeData);
       setFromCache(false);
       setCachedAt(null);
     } catch {
@@ -296,7 +397,7 @@ export default function KeyRotationPanel({ assets, apiBase = "", clientName = ""
 
   useEffect(() => {
     if (!secureModeLoading) loadKR();
-  }, [secureModeOn, secureModeLoading]);
+  }, [secureModeOn, secureModeLoading]);  // eslint-disable-line react-hooks/exhaustive-deps
 
   function handleRefresh() {
     localStorage.removeItem(CACHE_KEY_KR);
@@ -305,7 +406,7 @@ export default function KeyRotationPanel({ assets, apiBase = "", clientName = ""
     loadKR(true);
   }
 
-  // ── PDF export — calls ExportKRPDF which triggers a file download ─────────
+  // ── PDF export ─────────────────────────────────────────────────────────────
   function handleExportPDF() {
     if (!result || pdfExporting) return;
     setPdfExporting(true);
@@ -329,8 +430,8 @@ export default function KeyRotationPanel({ assets, apiBase = "", clientName = ""
 
   const activeEndpointLabel = secureModeOn ? "→ /ghost/assets" : "→ /api/key-rotation/scan";
 
-  // ── Shared PDF button style helper ────────────────────────────────────────
-  const pdfBtnStyle = (compact = false) => ({
+  // ── PDF button style helper ───────────────────────────────────────────────
+  const pdfBtnStyle = (compact = false): React.CSSProperties => ({
     ...LS.btn,
     fontSize:    compact ? 9 : 10,
     padding:     compact ? "3px 9px" : "5px 12px",
@@ -408,7 +509,6 @@ export default function KeyRotationPanel({ assets, apiBase = "", clientName = ""
                 {activeEndpointLabel}
               </span>
 
-              {/* Scan button */}
               <button
                 onClick={handleRefresh}
                 disabled={loading}
@@ -417,7 +517,6 @@ export default function KeyRotationPanel({ assets, apiBase = "", clientName = ""
                 {loading ? "Scanning…" : "⟳ Run KR Scan"}
               </button>
 
-              {/* Export PDF — header */}
               <button
                 onClick={handleExportPDF}
                 disabled={!result || pdfExporting}
@@ -439,13 +538,15 @@ export default function KeyRotationPanel({ assets, apiBase = "", clientName = ""
           ? <SkeletonSummaryStrip />
           : s && (
             <div style={{ display: "flex", borderBottom: `1px solid ${L.border}`, overflowX: "auto" }}>
-              {([
-                ["Total",     s.total_keys, L.blue],
-                ["Compliant", s.compliant,  L.green],
-                ["Overdue",   s.overdue,    L.orange],
-                ["Critical",  critCount,    L.red],
-                ["Unknown",   s.unknown,    L.text3],
-              ]).map(([label, val, color], i) => (
+              {(
+                [
+                  ["Total",     s.total_keys, L.blue],
+                  ["Compliant", s.compliant,  L.green],
+                  ["Overdue",   s.overdue,    L.orange],
+                  ["Critical",  critCount,    L.red],
+                  ["Unknown",   s.unknown,    L.text3],
+                ] as [string, number, string][]
+              ).map(([label, val, color], i) => (
                 <div key={label} style={{
                   flex: 1, minWidth: 72, padding: "10px 12px",
                   borderRight: i < 4 ? `1px solid ${L.border}` : "none",
@@ -470,7 +571,7 @@ export default function KeyRotationPanel({ assets, apiBase = "", clientName = ""
             background: `${L.red}08`, display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center",
           }}>
             <span style={{ fontSize: 7.5, fontWeight: 700, color: L.red }}>Frameworks breached:</span>
-            {s.frameworks_breached.map(f => <RegBadge key={f} text={f} />)}
+            {s!.frameworks_breached.map((f: string) => <RegBadge key={f} text={f} />)}
           </div>
         )}
 
@@ -506,15 +607,17 @@ export default function KeyRotationPanel({ assets, apiBase = "", clientName = ""
                     <Shimmer w={60} h={8} />
                   </div>
                 ))
-              : s && ([
-                  ["COMPLIANT", s.compliant, L.green,  "#f0fdf4", `${L.green}22`],
-                  ["OVERDUE",   s.overdue,   L.orange, "#fff7ed", `${L.orange}25`],
-                  ["CRITICAL",  critCount,   L.red,    "#fef2f2", `${L.red}25`],
-                  ["UNKNOWN",   s.unknown,   L.text3,  L.subtleBg, L.border],
-                ]).map(([label, count, color, bg, border]) => {
+              : s && (
+                  [
+                    ["COMPLIANT", s.compliant, L.green,  "#f0fdf4", `${L.green}22`],
+                    ["OVERDUE",   s.overdue,   L.orange, "#fff7ed", `${L.orange}25`],
+                    ["CRITICAL",  critCount,   L.red,    "#fef2f2", `${L.red}25`],
+                    ["UNKNOWN",   s.unknown,   L.text3,  L.subtleBg, L.border],
+                  ] as [string, number, string, string, string][]
+                ).map(([label, count, color, bg, borderColor]) => {
                   const pct = s.total_keys ? Math.round(count / s.total_keys * 100) : 0;
                   return (
-                    <div key={label} style={{ background: bg, border: `1px solid ${border}`, borderRadius: 6, padding: 12 }}>
+                    <div key={label} style={{ background: bg, border: `1px solid ${borderColor}`, borderRadius: 6, padding: 12 }}>
                       <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
                         <span style={{ fontSize: 9, color, letterSpacing: ".12em", fontWeight: 700, textTransform: "uppercase" }}>{label}</span>
                         <span style={{ fontFamily: "'DM Mono',monospace", fontSize: 16, color, fontWeight: 800 }}>{count}</span>
@@ -563,7 +666,7 @@ export default function KeyRotationPanel({ assets, apiBase = "", clientName = ""
                 <tbody>
                   {loading
                     ? <SkeletonTableRows count={6} />
-                    : result.records.map((r, i) => {
+                    : result!.records.map((r: KRRecord, i: number) => {
                         const sc   = STATUS_COLOR[r.status] ?? L.text3;
                         const days = r.days_since_rotation != null ? `${r.days_since_rotation}d` : "Never";
                         return (
@@ -592,7 +695,7 @@ export default function KeyRotationPanel({ assets, apiBase = "", clientName = ""
                             </td>
                             <td style={{ padding: "7px 8px" }}>
                               <div style={{ display: "flex", gap: 3, flexWrap: "wrap" }}>
-                                {r.regulatory_flags.map(f => <RegBadge key={f} text={f} />)}
+                                {r.regulatory_flags.map((f: string) => <RegBadge key={f} text={f} />)}
                                 {r.regulatory_flags.length === 0 && (
                                   <span style={{ fontSize: 8, color: L.green, fontWeight: 600 }}>✓ None</span>
                                 )}
@@ -638,7 +741,6 @@ export default function KeyRotationPanel({ assets, apiBase = "", clientName = ""
                 </span>
               )}
 
-              {/* Export PDF — footer */}
               {result && (
                 <button
                   onClick={handleExportPDF}
