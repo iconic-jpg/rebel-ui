@@ -7,10 +7,6 @@
 import { useState, useEffect } from "react";
 import type React from "react";
 
-const API =
-  (typeof import.meta !== "undefined" && (import.meta as any).env?.VITE_API_BASE) ||
-  "https://r3bel-production.up.railway.app";
-
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 export interface KRRecord {
@@ -46,9 +42,9 @@ export interface KRScanResult {
 }
 
 interface Props {
-  assets?:  any[];
-  apiBase?: string;
-  style?:   React.CSSProperties;
+  assets:  any[];
+  apiBase: string;
+  style?:  React.CSSProperties;
 }
 
 // ── Theme — identical to PQCReadiness ─────────────────────────────────────────
@@ -332,7 +328,7 @@ export default function KeyRotationPanel({ assets, apiBase, style = {} }: Props)
 
   // ── Secure mode status (same pattern as PQCReadiness) ────────────────────
   useEffect(() => {
-    fetch(`$API/secure-mode/status`)
+    fetch(`${apiBase}/secure-mode/status`)
       .then(r => r.ok ? r.json() : null)
       .then(d => { if (d?.enabled !== undefined) setSecureModeOn(Boolean(d.enabled)); })
       .catch(() => {})
@@ -356,26 +352,26 @@ export default function KeyRotationPanel({ assets, apiBase, style = {} }: Props)
     }
 
     // In secure mode use ghost assets; normal mode uses passed assets
-    const sourceAssets = secureModeOn
-      ? await fetch(`${API}/ghost/assets`)
+    // Note: assets=[] is valid — backend handles empty list and returns summary
+    const sourceAssets: any[] = secureModeOn
+      ? await fetch(`${apiBase}/ghost/assets`)
           .then(r => r.ok ? r.json() : null)
-          .then(d => d?.assets ?? [])
+          .then(d => Array.isArray(d?.assets) ? d.assets : [])
           .catch(() => [])
-      : assets;
-
-    if (!sourceAssets.length) {
-      setLoading(false);
-      return;
-    }
+      : (Array.isArray(assets) ? assets : []);
 
     try {
-      const res = await fetch(`${API}/api/key-rotation/scan`, {
+      const res = await fetch(`${apiBase}/api/key-rotation/scan`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ target: "rebel-scan", assets: toKRAssets(sourceAssets) }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data: KRScanResult = await res.json();
+      // Normalize — guard against undefined arrays if backend returns partial shape
+      data.records = Array.isArray(data.records) ? data.records : [];
+      data.summary = data.summary ?? { total_keys: 0, compliant: 0, overdue: 0, critical: 0, never_rotated: 0, unknown: 0, overall_risk: "LOW", frameworks_breached: [] };
+      data.summary.frameworks_breached = Array.isArray(data.summary.frameworks_breached) ? data.summary.frameworks_breached : [];
       cacheSet(CACHE_KEY_KR, data);
       setResult(data);
       setFromCache(false);
