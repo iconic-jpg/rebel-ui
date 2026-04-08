@@ -336,52 +336,49 @@ export default function KeyRotationPanel({ assets, apiBase, style = {} }: Props)
   }, [apiBase]);
 
   // ── Fetch with cache ──────────────────────────────────────────────────────
-  async function loadKR(forceRefresh = false) {
-    setLoading(true);
-    setError(false);
+  const loadKR = useCallback(async (forceRefresh = false) => {
+  setLoading(true);
+  setError(false);
 
-    if (!forceRefresh) {
-      const cached = cacheGet<KRScanResult>(CACHE_KEY_KR);
-      if (cached) {
-        setResult(cached);
-        setFromCache(true);
-        setCachedAt(cacheAgeLabel(CACHE_KEY_KR));
-        setLoading(false);
-        return;
-      }
-    }
-
-    // In secure mode use ghost assets; normal mode uses passed assets
-    // Note: assets=[] is valid — backend handles empty list and returns summary
-    const sourceAssets: any[] = secureModeOn
-      ? await fetch(`${apiBase}/ghost/assets`)
-          .then(r => r.ok ? r.json() : null)
-          .then(d => Array.isArray(d?.assets) ? d.assets : [])
-          .catch(() => [])
-      : (Array.isArray(assets) ? assets : []);
-
-    try {
-      const res = await fetch(`${apiBase}/api/key-rotation/scan`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ target: "rebel-scan", assets: toKRAssets(sourceAssets) }),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data: KRScanResult = await res.json();
-      // Normalize — guard against undefined arrays if backend returns partial shape
-      data.records = Array.isArray(data.records) ? data.records : [];
-      data.summary = data.summary ?? { total_keys: 0, compliant: 0, overdue: 0, critical: 0, never_rotated: 0, unknown: 0, overall_risk: "LOW", frameworks_breached: [] };
-      data.summary.frameworks_breached = Array.isArray(data.summary.frameworks_breached) ? data.summary.frameworks_breached : [];
-      cacheSet(CACHE_KEY_KR, data);
-      setResult(data);
-      setFromCache(false);
-      setCachedAt(null);
-    } catch {
-      setError(true);
-    } finally {
+  if (!forceRefresh) {
+    const cached = cacheGet<KRScanResult>(CACHE_KEY_KR);
+    if (cached) {
+      setResult(cached);
+      setFromCache(true);
+      setCachedAt(cacheAgeLabel(CACHE_KEY_KR));
       setLoading(false);
+      return;
     }
   }
+
+  const sourceAssets: any[] = secureModeOn
+    ? await fetch(`${apiBase}/ghost/assets`)
+        .then(r => r.ok ? r.json() : null)
+        .then(d => Array.isArray(d?.assets) ? d.assets : [])
+        .catch(() => [])
+    : (Array.isArray(assets) ? assets : []);
+
+  try {
+    const res = await fetch(`${apiBase}/api/key-rotation/scan`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ target: "rebel-scan", assets: toKRAssets(sourceAssets) }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data: KRScanResult = await res.json();
+    data.records = Array.isArray(data.records) ? data.records : [];
+    data.summary = data.summary ?? { total_keys: 0, compliant: 0, overdue: 0, critical: 0, never_rotated: 0, unknown: 0, overall_risk: "LOW", frameworks_breached: [] };
+    data.summary.frameworks_breached = Array.isArray(data.summary.frameworks_breached) ? data.summary.frameworks_breached : [];
+    cacheSet(CACHE_KEY_KR, data);
+    setResult(data);
+    setFromCache(false);
+    setCachedAt(null);
+  } catch {
+    setError(true);
+  } finally {
+    setLoading(false);
+  }
+}, [secureModeOn, apiBase, assets]); // ← all captured values listed here
 
   function handleRefresh() {
     localStorage.removeItem(CACHE_KEY_KR);
