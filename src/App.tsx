@@ -38,7 +38,7 @@ export default function App() {
             <Route path="rating" element={<CyberRatingPage />} />
             <Route path="reporting" element={<ReportingPage />} />
 
-            <Route path="key-rotation" element={<KeyRotationPanel apiBase={API_BASE} assets={[]} />} />
+            <Route path="key-rotation" element={<KeyRotationPanel  />} />
 
             <Route path="settings/assets" element={<AssetRegistryPage />} />
           </Route>
