@@ -5,7 +5,7 @@
  */
 
 import { useState, useEffect, useCallback } from "react";
-import { exportKRPDF } from "./ExportKRPDF.jsx";
+import { exportAuditPDF, type ExportPDFOptions } from "./exportPDF.js";
 
 // ── Theme ─────────────────────────────────────────────────────────────────────
 const L = {
