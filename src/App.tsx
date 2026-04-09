@@ -14,6 +14,7 @@ import CyberRatingPage from "./components/Modules/CyberRating.js";
 import ReportingPage from "./components/Modules/Reporting.js";
 import { ThemeProvider } from './components/context/ThemeContext.js'
 import KeyRotationPanel from "./components/Modules/KeyRotationPanel.js";
+import VCenterConnect from "./components/Modules/VCenterConnect.js";
 
 const API_BASE = "https://r3bel-production.up.railway.app";
 
@@ -39,6 +40,7 @@ export default function App() {
             <Route path="reporting" element={<ReportingPage />} />
 
             <Route path="key-rotation" element={<KeyRotationPanel apiBase={API_BASE} assets={[]} />} />
+            <Route path="vcenter" element={<VCenterConnect apiBase={API_BASE} />} />
 
             <Route path="settings/assets" element={<AssetRegistryPage />} />
           </Route>
