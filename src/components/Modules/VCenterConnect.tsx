@@ -1,5 +1,5 @@
 /**
- * VCenterConnect.jsx
+ * VCenterConnect.tsx
  * Rebel Platform — vCenter Infrastructure Connection
  *
  * Matches AppShell aesthetic exactly:
@@ -9,17 +9,17 @@
  *   - pageBg (#f1f5f9), panelBg (#fff), divider tokens
  *
  * Install:
- *   1. Copy to src/components/Modules/VCenterConnect.js
+ *   1. Copy to src/components/Modules/VCenterConnect.tsx
  *
- *   2. In App.js add:
- *      import VCenterConnect from "./components/Modules/VCenterConnect.js";
+ *   2. In App.tsx add:
+ *      import VCenterConnect from "./components/Modules/VCenterConnect";
  *      <Route path="vcenter" element={<VCenterConnect apiBase={API_BASE} />} />
  *
- *   3. In AppShell.js NAV_ITEMS add (under ASSET & PQC section):
+ *   3. In AppShell NAV_ITEMS add (under ASSET & PQC section):
  *      { path: "/vcenter", label: "vCenter", icon: "⬡", section: null }
  */
 
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, CSSProperties } from "react";
 
 // ── Design tokens — exact mirror of AppShell L object ─────────────────────────
 const L = {
@@ -44,12 +44,86 @@ const L = {
   warn:          "#d97706",
   warnDim:       "rgba(217,119,6,0.08)",
   warnBorder:    "rgba(217,119,6,0.28)",
-};
-const FO = "'Orbitron', monospace";   // headings / labels
+} as const;
+
+const FO = "'Orbitron', monospace";        // headings / labels
 const FM = "'Share Tech Mono', monospace"; // body / code
 
+// ── Types ─────────────────────────────────────────────────────────────────────
+
+interface VM {
+  name:        string;
+  ip:          string | null;
+  os:          string;
+  cluster:     string;
+  datacenter:  string;
+  power_state: "poweredOn" | "poweredOff" | string;
+}
+
+interface Datastore {
+  name:         string;
+  type:         string;
+  capacity_gb:  number;
+  free_gb:      number;
+  accessible:   boolean;
+}
+
+interface Cluster {
+  name:          string;
+  num_hosts:     number;
+  total_cpu_mhz: number;
+  total_mem_mb:  number;
+  ha_enabled:    boolean;
+  drs_enabled:   boolean;
+}
+
+interface Network {
+  name:       string;
+  type:       string;
+  num_vms:    number;
+  accessible: boolean;
+}
+
+interface AssetSummary {
+  total_vms:        number;
+  powered_on:       number;
+  powered_off:      number;
+  total_datastores: number;
+  total_clusters:   number;
+  total_networks:   number;
+}
+
+interface VCenterAssets {
+  virtual_machines: VM[];
+  datastores:       Datastore[];
+  clusters:         Cluster[];
+  networks:         Network[];
+  source?:          string;
+  host?:            string;
+  fetched_at?:      string;
+  normalized_assets?: VM[];
+  summary?:         AssetSummary;
+}
+
+interface VCenterSession {
+  connected:        boolean;
+  host:             string;
+  vcenter_version?: string;
+  full_name?:       string;
+  connected_at?:    string;
+  vm_count?:        number;
+  vm_preview?:      VM[];
+}
+
+interface StatusData {
+  session_active:   boolean;
+  alive:            boolean;
+  status:           string;
+  vcenter_version?: string;
+}
+
 // ── Demo dataset (mirrors DEMO_VMS in vmware_connector.py exactly) ─────────────
-const DEMO = {
+const DEMO: VCenterAssets = {
   virtual_machines: [
     { name:"prod-web-01",      ip:"10.10.1.11",  os:"Ubuntu 22.04 LTS",    cluster:"PROD-CLUSTER-A", datacenter:"DC-MUMBAI",   power_state:"poweredOn"  },
     { name:"prod-web-02",      ip:"10.10.1.12",  os:"Ubuntu 22.04 LTS",    cluster:"PROD-CLUSTER-A", datacenter:"DC-MUMBAI",   power_state:"poweredOn"  },
@@ -92,7 +166,7 @@ const DEMO = {
 
 // ── Primitive components ───────────────────────────────────────────────────────
 
-function OLabel({ children }) {
+function OLabel({ children }: { children: React.ReactNode }) {
   return (
     <div style={{ fontFamily:FO, fontSize:7.5, fontWeight:700, color:L.textMuted,
       letterSpacing:".2em", textTransform:"uppercase", padding:"10px 0 6px" }}>
@@ -101,14 +175,17 @@ function OLabel({ children }) {
   );
 }
 
-function Badge({ label, variant="neutral" }) {
-  const v = {
-    neutral: { bg:L.accentDim,    bd:L.accentBorder,    c:L.accent   },
-    success: { bg:L.successDim,   bd:L.successBorder,   c:L.success  },
-    danger:  { bg:L.dangerDim,    bd:L.dangerBorder,    c:L.danger   },
-    warn:    { bg:L.warnDim,      bd:L.warnBorder,      c:L.warn     },
-    ghost:   { bg:"rgba(99,102,241,0.08)", bd:"rgba(99,102,241,0.28)", c:"#6366f1" },
-  }[variant] || { bg:L.accentDim, bd:L.accentBorder, c:L.accent };
+type BadgeVariant = "neutral" | "success" | "danger" | "warn" | "ghost";
+
+function Badge({ label, variant = "neutral" }: { label: string; variant?: BadgeVariant }) {
+  const variants: Record<BadgeVariant, { bg: string; bd: string; c: string }> = {
+    neutral: { bg:L.accentDim,              bd:L.accentBorder,              c:L.accent   },
+    success: { bg:L.successDim,             bd:L.successBorder,             c:L.success  },
+    danger:  { bg:L.dangerDim,              bd:L.dangerBorder,              c:L.danger   },
+    warn:    { bg:L.warnDim,                bd:L.warnBorder,                c:L.warn     },
+    ghost:   { bg:"rgba(99,102,241,0.08)",  bd:"rgba(99,102,241,0.28)",     c:"#6366f1"  },
+  };
+  const v = variants[variant];
   return (
     <span style={{
       display:"inline-flex", alignItems:"center",
@@ -121,7 +198,7 @@ function Badge({ label, variant="neutral" }) {
   );
 }
 
-function Metric({ label, value, sub }) {
+function Metric({ label, value, sub }: { label: string; value: React.ReactNode; sub?: string }) {
   return (
     <div style={{ flex:1, minWidth:0, background:L.accentDim,
       border:`1px solid ${L.accentBorder}`, borderRadius:8, padding:"12px 14px" }}>
@@ -136,7 +213,7 @@ function Metric({ label, value, sub }) {
   );
 }
 
-function IBox({ icon, active }) {
+function IBox({ icon, active }: { icon: string; active?: boolean }) {
   return (
     <div style={{
       width:32, height:32, flexShrink:0,
@@ -148,7 +225,7 @@ function IBox({ icon, active }) {
   );
 }
 
-function PingDot({ color=L.success }) {
+function PingDot({ color = L.success }: { color?: string }) {
   return (
     <span style={{ position:"relative", display:"inline-flex", width:8, height:8, flexShrink:0 }}>
       <span style={{ position:"absolute", inset:0, borderRadius:"50%", background:color,
@@ -159,46 +236,80 @@ function PingDot({ color=L.success }) {
   );
 }
 
-function RInput({ label, type="text", value, onChange, placeholder, disabled }) {
+interface RInputProps {
+  label:       string;
+  type?:       string;
+  value:       string;
+  onChange:    (v: string) => void;
+  placeholder?: string;
+  disabled?:   boolean;
+}
+
+function RInput({ label, type = "text", value, onChange, placeholder, disabled }: RInputProps) {
   return (
     <div>
       <div style={{ fontFamily:FO, fontSize:7.5, fontWeight:700, color:L.textMuted,
         letterSpacing:".16em", textTransform:"uppercase", marginBottom:5 }}>
         {label}
       </div>
-      <input type={type} value={value} onChange={e => onChange(e.target.value)}
-        placeholder={placeholder} disabled={disabled} autoComplete="off"
+      <input
+        type={type}
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        placeholder={placeholder}
+        disabled={disabled}
+        autoComplete="off"
         style={{
           width:"100%", padding:"8px 10px", fontFamily:FM, fontSize:12,
           background: disabled ? "rgba(241,245,249,0.6)" : L.panelBg,
           border:`1px solid rgba(14,165,233,0.22)`, borderRadius:6,
           color:L.text, outline:"none", transition:"border-color 0.15s",
         }}
-        onFocus={e => e.target.style.borderColor = L.accent}
-        onBlur={e  => e.target.style.borderColor = "rgba(14,165,233,0.22)"}
+        onFocus={e => (e.target.style.borderColor = L.accent)}
+        onBlur={e  => (e.target.style.borderColor = "rgba(14,165,233,0.22)")}
       />
     </div>
   );
 }
 
-function RBtn({ children, onClick, disabled, variant="primary", style:xs={} }) {
-  const base = {
+type BtnVariant = "primary" | "secondary" | "danger";
+
+interface RBtnProps {
+  children:  React.ReactNode;
+  onClick?:  () => void;
+  disabled?: boolean;
+  variant?:  BtnVariant;
+  style?:    CSSProperties;
+}
+
+function RBtn({ children, onClick, disabled, variant = "primary", style: xs = {} }: RBtnProps) {
+  const base: CSSProperties = {
     display:"flex", alignItems:"center", justifyContent:"center", gap:7,
-    padding:"9px 18px", borderRadius:6, cursor:disabled?"not-allowed":"pointer",
+    padding:"9px 18px", borderRadius:6, cursor:disabled ? "not-allowed" : "pointer",
     fontFamily:FO, fontSize:8.5, fontWeight:700, letterSpacing:".14em",
-    transition:"all 0.15s", opacity:disabled?0.5:1,
+    transition:"all 0.15s", opacity:disabled ? 0.5 : 1,
   };
-  const vs = {
-    primary:   { background:disabled?L.accentDim:L.accent, border:`1px solid ${disabled?L.accentBorder:L.accentDark}`, color:disabled?L.accent:"#fff" },
+  const variants: Record<BtnVariant, CSSProperties> = {
+    primary:   { background:disabled ? L.accentDim : L.accent, border:`1px solid ${disabled ? L.accentBorder : L.accentDark}`, color:disabled ? L.accent : "#fff" },
     secondary: { background:L.accentDim, border:`1px solid ${L.accentBorder}`, color:L.textSec },
     danger:    { background:L.dangerDim, border:`1px solid ${L.dangerBorder}`, color:L.danger  },
-  }[variant] || {};
-  return <button onClick={disabled?undefined:onClick} style={{...base,...vs,...xs}}>{children}</button>;
+  };
+  return (
+    <button onClick={disabled ? undefined : onClick} style={{ ...base, ...variants[variant], ...xs }}>
+      {children}
+    </button>
+  );
 }
 
 // ── Table ─────────────────────────────────────────────────────────────────────
 
-function RTable({ rows=[], cols }) {
+interface Col<T = object> {
+  key:     string;
+  label:   string;
+  render?: (value: any, row: T) => React.ReactNode;
+}
+
+function RTable<T extends object>({ rows = [], cols }: { rows: T[]; cols: Col<T>[] }) {
   if (!rows.length) return (
     <div style={{ fontFamily:FM, fontSize:11, color:L.textFaint, padding:"14px 0" }}>NO DATA</div>
   );
@@ -219,16 +330,18 @@ function RTable({ rows=[], cols }) {
         </thead>
         <tbody>
           {rows.map((row, i) => (
-            <tr key={i}
+            <tr
+              key={i}
               style={{ borderBottom:`1px solid rgba(14,165,233,0.06)`, transition:"background 0.1s" }}
-              onMouseEnter={e => e.currentTarget.style.background = L.accentDim}
-              onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+              onMouseEnter={e => (e.currentTarget.style.background = L.accentDim)}
+              onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
+            >
               {cols.map(c => (
                 <td key={c.key} style={{
                   padding:"8px 10px", verticalAlign:"middle",
                   fontFamily:FM, fontSize:11, color:L.textSec,
                 }}>
-                  {c.render ? c.render(row[c.key], row) : (row[c.key] ?? "—")}
+                  {c.render ? c.render((row as any)[c.key], row) : ((row as any)[c.key] != null ? String((row as any)[c.key]) : "—")}
                 </td>
               ))}
             </tr>
@@ -241,7 +354,13 @@ function RTable({ rows=[], cols }) {
 
 // ── Tab bar ───────────────────────────────────────────────────────────────────
 
-function Tabs({ tabs, active, onChange }) {
+interface TabItem {
+  id:     string;
+  label:  string;
+  count?: number;
+}
+
+function Tabs({ tabs, active, onChange }: { tabs: TabItem[]; active: string; onChange: (id: string) => void }) {
   return (
     <div style={{ display:"flex", borderBottom:`1px solid ${L.divider}`, marginBottom:16 }}>
       {tabs.map(t => {
@@ -272,18 +391,31 @@ function Tabs({ tabs, active, onChange }) {
 
 // ── Inline badge helpers used in tables ───────────────────────────────────────
 
-const tb = (text, bg, bd, c) => (
+const tb = (text: string, bg: string, bd: string, c: string): React.ReactNode => (
   <span style={{ fontFamily:FO, fontSize:6.5, fontWeight:700, padding:"2px 7px",
     borderRadius:3, background:bg, border:`1px solid ${bd}`, color:c, letterSpacing:".1em" }}>
     {text}
   </span>
 );
 
-const clusterBadge  = v  => tb(v, L.accentDim, L.accentBorder, L.accent);
-const onOffBadge    = v  => tb(v?"ON":"OFF", v?L.successDim:L.accentDim, v?L.successBorder:L.divider, v?L.success:L.textFaint);
-const okFaultBadge  = v  => tb(v?"OK":"FAULT", v?L.successDim:L.dangerDim, v?L.successBorder:L.dangerBorder, v?L.success:L.danger);
-const typeBadge     = v  => tb(v, L.accentDim, L.accentBorder, L.accent);
-const powerBadge    = v  => tb(v==="poweredOn"?"ON":"OFF", v==="poweredOn"?L.successDim:L.accentDim, v==="poweredOn"?L.successBorder:L.divider, v==="poweredOn"?L.success:L.textFaint);
+const clusterBadge  = (v: string):  React.ReactNode => tb(v,              L.accentDim,  L.accentBorder,  L.accent);
+const onOffBadge    = (v: boolean): React.ReactNode => tb(v ? "ON":"OFF", v?L.successDim:L.accentDim, v?L.successBorder:L.divider, v?L.success:L.textFaint);
+const okFaultBadge  = (v: boolean): React.ReactNode => tb(v ? "OK":"FAULT", v?L.successDim:L.dangerDim, v?L.successBorder:L.dangerBorder, v?L.success:L.danger);
+const typeBadge     = (v: string):  React.ReactNode => tb(v,              L.accentDim,  L.accentBorder,  L.accent);
+const powerBadge    = (v: string):  React.ReactNode => tb(
+  v === "poweredOn" ? "ON" : "OFF",
+  v === "poweredOn" ? L.successDim  : L.accentDim,
+  v === "poweredOn" ? L.successBorder : L.divider,
+  v === "poweredOn" ? L.success     : L.textFaint,
+);
+
+// ── Props ─────────────────────────────────────────────────────────────────────
+
+interface VCenterConnectProps {
+  apiBase?:   string;
+  onAssets?:  (vms: VM[]) => void;
+  ghostMode?: boolean;
+}
 
 // ── Main component ─────────────────────────────────────────────────────────────
 
@@ -291,37 +423,39 @@ export default function VCenterConnect({
   apiBase   = "https://r3bel-production.up.railway.app",
   onAssets,
   ghostMode = false,
-}) {
+}: VCenterConnectProps) {
   const base = apiBase.replace(/\/$/, "");
 
-  const [host,       setHost]       = useState("");
-  const [user,       setUser]       = useState("");
-  const [pass,       setPass]       = useState("");
-  const [port,       setPort]       = useState("443");
-  const [selfSigned, setSelfSigned] = useState(true);
-  const [demoMode,   setDemoMode]   = useState(false);
+  const [host,       setHost]       = useState<string>("");
+  const [user,       setUser]       = useState<string>("");
+  const [pass,       setPass]       = useState<string>("");
+  const [port,       setPort]       = useState<string>("443");
+  const [selfSigned, setSelfSigned] = useState<boolean>(true);
+  const [demoMode,   setDemoMode]   = useState<boolean>(false);
 
-  const [session,    setSession]    = useState(null);
-  const [assets,     setAssets]     = useState(null);
-  const [statusData, setStatusData] = useState(null);
+  const [session,    setSession]    = useState<VCenterSession | null>(null);
+  const [assets,     setAssets]     = useState<VCenterAssets | null>(null);
+  const [statusData, setStatusData] = useState<StatusData | null>(null);
 
-  const [loading,       setLoading]       = useState(false);
-  const [loadingAssets, setLoadingAssets] = useState(false);
-  const [error,         setError]         = useState(null);
-  const [activeTab,     setActiveTab]     = useState("vms");
+  const [loading,       setLoading]       = useState<boolean>(false);
+  const [loadingAssets, setLoadingAssets] = useState<boolean>(false);
+  const [error,         setError]         = useState<string | null>(null);
+  const [activeTab,     setActiveTab]     = useState<string>("vms");
 
   // POST /vcenter/connect-vcenter
   const handleConnect = useCallback(async () => {
     setLoading(true); setError(null); setSession(null); setAssets(null); setStatusData(null);
 
     if (demoMode) {
-      await new Promise(r => setTimeout(r, 700));
+      await new Promise<void>(r => setTimeout(r, 700));
       setSession({
-        connected: true, host: "demo.vcenter.vestro.int",
-        vcenter_version: "7.0.3", full_name: "VMware vCenter Server 7.0.3",
-        connected_at: new Date().toISOString(),
-        vm_count: DEMO.virtual_machines.length,
-        vm_preview: DEMO.virtual_machines.slice(0, 5),
+        connected:       true,
+        host:            "demo.vcenter.vestro.int",
+        vcenter_version: "7.0.3",
+        full_name:       "VMware vCenter Server 7.0.3",
+        connected_at:    new Date().toISOString(),
+        vm_count:        DEMO.virtual_machines.length,
+        vm_preview:      DEMO.virtual_machines.slice(0, 5),
       });
       setLoading(false);
       return;
@@ -329,28 +463,36 @@ export default function VCenterConnect({
 
     try {
       const resp = await fetch(`${base}/vcenter/connect-vcenter`, {
-        method: "POST",
+        method:  "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ host, username:user, password:pass, port:parseInt(port), allow_self_signed:selfSigned }),
+        body:    JSON.stringify({ host, username:user, password:pass, port:parseInt(port), allow_self_signed:selfSigned }),
       });
-      if (!resp.ok) { const e = await resp.json(); throw new Error(e.detail?.error || e.detail || "Connection failed"); }
+      if (!resp.ok) {
+        const e = await resp.json();
+        throw new Error(e.detail?.error || e.detail || "Connection failed");
+      }
       setSession(await resp.json());
-    } catch (e) { setError(e.message); }
-    finally { setLoading(false); }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoading(false);
+    }
   }, [base, host, user, pass, port, selfSigned, demoMode]);
 
   // GET /vcenter/vcenter-assets
-  const handleFetchAssets = useCallback(async (forceRefresh=false) => {
+  const handleFetchAssets = useCallback(async (forceRefresh = false) => {
     setLoadingAssets(true); setError(null);
 
     if (demoMode) {
-      await new Promise(r => setTimeout(r, 500));
-      const d = {
-        ...DEMO, source:"mock", fetched_at: new Date().toISOString(),
+      await new Promise<void>(r => setTimeout(r, 500));
+      const d: VCenterAssets = {
+        ...DEMO,
+        source:     "mock",
+        fetched_at: new Date().toISOString(),
         summary: {
           total_vms:        DEMO.virtual_machines.length,
-          powered_on:       DEMO.virtual_machines.filter(v => v.power_state==="poweredOn").length,
-          powered_off:      DEMO.virtual_machines.filter(v => v.power_state!=="poweredOn").length,
+          powered_on:       DEMO.virtual_machines.filter(v => v.power_state === "poweredOn").length,
+          powered_off:      DEMO.virtual_machines.filter(v => v.power_state !== "poweredOn").length,
           total_datastores: DEMO.datastores.length,
           total_clusters:   DEMO.clusters.length,
           total_networks:   DEMO.networks.length,
@@ -363,14 +505,20 @@ export default function VCenterConnect({
     }
 
     try {
-      const p = new URLSearchParams({ demo:false, force_refresh:forceRefresh });
+      const p = new URLSearchParams({ demo: "false", force_refresh: String(forceRefresh) });
       const resp = await fetch(`${base}/vcenter/vcenter-assets?${p}`);
-      if (!resp.ok) { const e = await resp.json(); throw new Error(e.detail?.error || e.detail || "Fetch failed"); }
-      const d = await resp.json();
+      if (!resp.ok) {
+        const e = await resp.json();
+        throw new Error(e.detail?.error || e.detail || "Fetch failed");
+      }
+      const d: VCenterAssets = await resp.json();
       setAssets(d);
       if (onAssets && d.normalized_assets) onAssets(d.normalized_assets);
-    } catch (e) { setError(e.message); }
-    finally { setLoadingAssets(false); }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoadingAssets(false);
+    }
   }, [base, demoMode, onAssets]);
 
   // GET /vcenter/vcenter-status
@@ -382,23 +530,26 @@ export default function VCenterConnect({
     try {
       const resp = await fetch(`${base}/vcenter/vcenter-status`);
       setStatusData(await resp.json());
-    } catch { setStatusData({ session_active:false, alive:false, status:"error" }); }
+    } catch {
+      setStatusData({ session_active:false, alive:false, status:"error" });
+    }
   }, [base, demoMode]);
 
-  const canConnect = demoMode || (host && user && pass);
-  const tabConfig = assets ? [
-    { id:"vms",        label:"Virtual Machines", count:assets.virtual_machines?.length },
-    { id:"datastores", label:"Datastores",        count:assets.datastores?.length },
-    { id:"clusters",   label:"Clusters",          count:assets.clusters?.length },
-    { id:"networks",   label:"Networks",          count:assets.networks?.length },
+  const canConnect = demoMode || (!!host && !!user && !!pass);
+
+  const tabConfig: TabItem[] = assets ? [
+    { id:"vms",        label:"Virtual Machines", count: assets.virtual_machines?.length },
+    { id:"datastores", label:"Datastores",        count: assets.datastores?.length       },
+    { id:"clusters",   label:"Clusters",          count: assets.clusters?.length         },
+    { id:"networks",   label:"Networks",          count: assets.networks?.length         },
   ] : [];
 
   return (
     <>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;700;900&family=Share+Tech+Mono&display=swap');
-        @keyframes ping { 0%{transform:scale(1);opacity:.4} 100%{transform:scale(2.4);opacity:0} }
-        @keyframes fadeSlide { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
+        @keyframes ping       { 0%{transform:scale(1);opacity:.4} 100%{transform:scale(2.4);opacity:0} }
+        @keyframes fadeSlide  { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
         * { box-sizing:border-box; }
       `}</style>
 
@@ -422,14 +573,25 @@ export default function VCenterConnect({
           {ghostMode && <Badge label="Ghost Mode" variant="ghost" />}
         </div>
 
-        <div style={{ display:"grid", gridTemplateColumns: session?.connected ? "300px 1fr" : "380px", gap:16, alignItems:"start" }}>
+        <div style={{
+          display:"grid",
+          gridTemplateColumns: session?.connected ? "300px 1fr" : "380px",
+          gap:16,
+          alignItems:"start",
+        }}>
 
           {/* LEFT — Connect form */}
           <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
 
             {/* Form card */}
-            <div style={{ background:L.panelBg, border:`1px solid ${L.divider}`, borderRadius:10, overflow:"hidden", animation:"fadeSlide 0.25s ease" }}>
-              <div style={{ padding:"14px 18px", borderBottom:`1px solid ${L.divider}`, display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+            <div style={{
+              background:L.panelBg, border:`1px solid ${L.divider}`,
+              borderRadius:10, overflow:"hidden", animation:"fadeSlide 0.25s ease",
+            }}>
+              <div style={{
+                padding:"14px 18px", borderBottom:`1px solid ${L.divider}`,
+                display:"flex", alignItems:"center", justifyContent:"space-between",
+              }}>
                 <div style={{ display:"flex", alignItems:"center", gap:10 }}>
                   <IBox icon="◈" active />
                   <span style={{ fontFamily:FO, fontSize:9, fontWeight:700, letterSpacing:".18em", color:L.text }}>INFRASTRUCTURE</span>
@@ -446,42 +608,53 @@ export default function VCenterConnect({
                   border:`1px solid ${demoMode ? L.warnBorder : L.divider}`,
                   transition:"all 0.15s",
                 }}>
-                  <input type="checkbox" checked={demoMode}
+                  <input
+                    type="checkbox"
+                    checked={demoMode}
                     onChange={e => { setDemoMode(e.target.checked); setError(null); setSession(null); setAssets(null); }}
                     style={{ accentColor:L.warn, width:13, height:13 }}
                   />
                   <div>
-                    <div style={{ fontFamily:FO, fontSize:7.5, fontWeight:700, color:demoMode?L.warn:L.textSec, letterSpacing:".12em" }}>DEMO MODE</div>
+                    <div style={{ fontFamily:FO, fontSize:7.5, fontWeight:700, color:demoMode ? L.warn : L.textSec, letterSpacing:".12em" }}>DEMO MODE</div>
                     <div style={{ fontFamily:FM, fontSize:10, color:L.textFaint, marginTop:2 }}>No vCenter required</div>
                   </div>
                 </label>
 
                 {!demoMode && (
                   <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
-                    <RInput label="vCenter Host" value={host} onChange={setHost} placeholder="vcenter.vestro.int" disabled={loading} />
-                    <RInput label="Username"     value={user} onChange={setUser} placeholder="readonly@vsphere.local" disabled={loading} />
-                    <RInput label="Password" type="password" value={pass} onChange={setPass} placeholder="••••••••" disabled={loading} />
+                    <RInput label="vCenter Host" value={host} onChange={setHost} placeholder="vcenter.vestro.int"      disabled={loading} />
+                    <RInput label="Username"     value={user} onChange={setUser} placeholder="readonly@vsphere.local"  disabled={loading} />
+                    <RInput label="Password" type="password"  value={pass} onChange={setPass} placeholder="••••••••"   disabled={loading} />
                     <div style={{ display:"grid", gridTemplateColumns:"90px 1fr", gap:10, alignItems:"end" }}>
                       <RInput label="Port" type="number" value={port} onChange={setPort} placeholder="443" disabled={loading} />
                       <label style={{ display:"flex", alignItems:"center", gap:8, cursor:"pointer", paddingBottom:2 }}>
-                        <input type="checkbox" checked={selfSigned} onChange={e => setSelfSigned(e.target.checked)} style={{ accentColor:L.accent, width:13, height:13 }} />
-                        <div style={{ fontFamily:FO, fontSize:7, color:L.textMuted, letterSpacing:".12em", lineHeight:1.5 }}>ALLOW<br/>SELF-SIGNED SSL</div>
+                        <input
+                          type="checkbox"
+                          checked={selfSigned}
+                          onChange={e => setSelfSigned(e.target.checked)}
+                          style={{ accentColor:L.accent, width:13, height:13 }}
+                        />
+                        <div style={{ fontFamily:FO, fontSize:7, color:L.textMuted, letterSpacing:".12em", lineHeight:1.5 }}>
+                          ALLOW<br />SELF-SIGNED SSL
+                        </div>
                       </label>
                     </div>
                     <div style={{ padding:"8px 10px", borderRadius:6, background:L.accentDim, border:`1px solid ${L.accentBorder}` }}>
                       <div style={{ fontFamily:FO, fontSize:7, fontWeight:700, color:L.accent, letterSpacing:".14em", marginBottom:3 }}>SECURITY · READ-ONLY</div>
                       <div style={{ fontFamily:FM, fontSize:10, color:L.textFaint, lineHeight:1.5 }}>
-                        Credentials held in-memory only.<br/>No write operations to vCenter.
+                        Credentials held in-memory only.<br />No write operations to vCenter.
                       </div>
                     </div>
                   </div>
                 )}
 
                 {error && (
-                  <div style={{ marginTop:10, padding:"9px 12px", borderRadius:6,
+                  <div style={{
+                    marginTop:10, padding:"9px 12px", borderRadius:6,
                     background:L.dangerDim, border:`1px solid ${L.dangerBorder}`,
                     fontFamily:FM, fontSize:11, color:L.danger, lineHeight:1.4,
-                    animation:"fadeSlide 0.2s ease" }}>
+                    animation:"fadeSlide 0.2s ease",
+                  }}>
                     ✕ {error}
                   </div>
                 )}
@@ -497,10 +670,23 @@ export default function VCenterConnect({
 
             {/* Session health card */}
             {statusData && (
-              <div style={{ background:L.panelBg, border:`1px solid ${L.divider}`, borderRadius:10, padding:"14px 18px", animation:"fadeSlide 0.2s ease" }}>
+              <div style={{
+                background:L.panelBg, border:`1px solid ${L.divider}`,
+                borderRadius:10, padding:"14px 18px", animation:"fadeSlide 0.2s ease",
+              }}>
                 <OLabel>Session Health</OLabel>
-                {[["Session", statusData.session_active?"Active":"None"], ["Alive", statusData.alive?"Yes":"Expired"], ["Status", statusData.status||"—"], ["Version", statusData.vcenter_version||"—"]].map(([k,v]) => (
-                  <div key={k} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"5px 0", borderBottom:`1px solid rgba(14,165,233,0.06)` }}>
+                {(
+                  [
+                    ["Session", statusData.session_active ? "Active" : "None"],
+                    ["Alive",   statusData.alive           ? "Yes"    : "Expired"],
+                    ["Status",  statusData.status          || "—"],
+                    ["Version", statusData.vcenter_version || "—"],
+                  ] as [string, string][]
+                ).map(([k, v]) => (
+                  <div key={k} style={{
+                    display:"flex", justifyContent:"space-between", alignItems:"center",
+                    padding:"5px 0", borderBottom:`1px solid rgba(14,165,233,0.06)`,
+                  }}>
                     <span style={{ fontFamily:FO, fontSize:7, color:L.textMuted, letterSpacing:".14em", fontWeight:700 }}>{k}</span>
                     <span style={{ fontFamily:FM, fontSize:11, color:L.textSec }}>{v}</span>
                   </div>
@@ -515,12 +701,19 @@ export default function VCenterConnect({
 
               {/* Session info */}
               <div style={{ background:L.panelBg, border:`1px solid ${L.divider}`, borderRadius:10, overflow:"hidden" }}>
-                <div style={{ padding:"14px 18px", borderBottom:`1px solid ${L.divider}`, display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+                <div style={{
+                  padding:"14px 18px", borderBottom:`1px solid ${L.divider}`,
+                  display:"flex", alignItems:"center", justifyContent:"space-between",
+                }}>
                   <div style={{ display:"flex", alignItems:"center", gap:10 }}>
                     <PingDot />
                     <div>
-                      <div style={{ fontFamily:FO, fontWeight:700, fontSize:10, color:L.text, letterSpacing:".1em" }}>{session.full_name || session.host}</div>
-                      <div style={{ fontFamily:FM, fontSize:10, color:L.textFaint, marginTop:2 }}>{session.host} · port {port}</div>
+                      <div style={{ fontFamily:FO, fontWeight:700, fontSize:10, color:L.text, letterSpacing:".1em" }}>
+                        {session.full_name || session.host}
+                      </div>
+                      <div style={{ fontFamily:FM, fontSize:10, color:L.textFaint, marginTop:2 }}>
+                        {session.host} · port {port}
+                      </div>
                     </div>
                   </div>
                   <Badge label="Connected" variant="success" />
@@ -534,21 +727,21 @@ export default function VCenterConnect({
                   </div>
 
                   {/* VM preview */}
-                  {session.vm_preview?.length > 0 && (
+                  {(session.vm_preview?.length ?? 0) > 0 && (
                     <div>
                       <OLabel>VM Preview (first 5)</OLabel>
-                      {session.vm_preview.map((vm, i, a) => (
+                      {session.vm_preview!.map((vm, i, a) => (
                         <div key={i} style={{
                           display:"flex", alignItems:"center", gap:10, padding:"7px 0",
-                          borderBottom: i < a.length-1 ? `1px solid rgba(14,165,233,0.07)` : "none",
+                          borderBottom: i < a.length - 1 ? `1px solid rgba(14,165,233,0.07)` : "none",
                         }}>
                           <span style={{
                             width:7, height:7, borderRadius:"50%", flexShrink:0,
-                            background: vm.power_state==="poweredOn" ? L.success : L.textFaint,
-                            boxShadow: vm.power_state==="poweredOn" ? `0 0 4px ${L.success}` : "none",
+                            background: vm.power_state === "poweredOn" ? L.success : L.textFaint,
+                            boxShadow:  vm.power_state === "poweredOn" ? `0 0 4px ${L.success}` : "none",
                           }} />
                           <span style={{ fontFamily:FM, fontSize:11, fontWeight:500, minWidth:150, color:L.textSec }}>{vm.name}</span>
-                          <span style={{ fontFamily:FM, fontSize:10, color:L.textFaint, flex:1 }}>{vm.ip||"no IP"} · {vm.os}</span>
+                          <span style={{ fontFamily:FM, fontSize:10, color:L.textFaint, flex:1 }}>{vm.ip || "no IP"} · {vm.os}</span>
                           {vm.cluster && clusterBadge(vm.cluster)}
                         </div>
                       ))}
@@ -563,18 +756,29 @@ export default function VCenterConnect({
 
               {/* Asset inventory */}
               {assets && (
-                <div style={{ background:L.panelBg, border:`1px solid ${L.divider}`, borderRadius:10, overflow:"hidden", animation:"fadeSlide 0.25s ease" }}>
-                  <div style={{ padding:"14px 18px", borderBottom:`1px solid ${L.divider}`, display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+                <div style={{
+                  background:L.panelBg, border:`1px solid ${L.divider}`,
+                  borderRadius:10, overflow:"hidden", animation:"fadeSlide 0.25s ease",
+                }}>
+                  <div style={{
+                    padding:"14px 18px", borderBottom:`1px solid ${L.divider}`,
+                    display:"flex", alignItems:"center", justifyContent:"space-between",
+                  }}>
                     <div style={{ display:"flex", alignItems:"center", gap:10 }}>
                       <IBox icon="▦" active />
                       <span style={{ fontFamily:FO, fontSize:9, fontWeight:700, letterSpacing:".18em", color:L.text }}>ASSET INVENTORY</span>
                     </div>
                     <div style={{ display:"flex", alignItems:"center", gap:8 }}>
                       <span style={{ fontFamily:FM, fontSize:10, color:L.textFaint }}>
-                        {assets.source==="mock" ? "demo dataset" : assets.host}
+                        {assets.source === "mock" ? "demo dataset" : assets.host}
                         {assets.fetched_at && ` · ${new Date(assets.fetched_at).toLocaleTimeString()}`}
                       </span>
-                      <RBtn variant="secondary" onClick={() => handleFetchAssets(true)} disabled={loadingAssets} style={{ padding:"4px 10px", fontSize:7 }}>
+                      <RBtn
+                        variant="secondary"
+                        onClick={() => handleFetchAssets(true)}
+                        disabled={loadingAssets}
+                        style={{ padding:"4px 10px", fontSize:7 }}
+                      >
                         {loadingAssets ? "…" : "↻ RESCAN"}
                       </RBtn>
                     </div>
@@ -582,49 +786,61 @@ export default function VCenterConnect({
 
                   <div style={{ padding:18 }}>
                     <div style={{ display:"flex", gap:10, marginBottom:20 }}>
-                      <Metric label="VMs"        value={assets.summary?.total_vms ?? 0}        sub={`${assets.summary?.powered_on ?? 0} running`} />
+                      <Metric label="VMs"        value={assets.summary?.total_vms        ?? 0} sub={`${assets.summary?.powered_on ?? 0} running`} />
                       <Metric label="Datastores" value={assets.summary?.total_datastores ?? 0} />
-                      <Metric label="Clusters"   value={assets.summary?.total_clusters ?? 0}   />
-                      <Metric label="Networks"   value={assets.summary?.total_networks ?? 0}   />
+                      <Metric label="Clusters"   value={assets.summary?.total_clusters   ?? 0} />
+                      <Metric label="Networks"   value={assets.summary?.total_networks   ?? 0} />
                     </div>
 
                     <Tabs tabs={tabConfig} active={activeTab} onChange={setActiveTab} />
 
                     {activeTab === "vms" && (
-                      <RTable rows={assets.virtual_machines||[]} cols={[
-                        { key:"name",        label:"Name",    render:v => <strong style={{ fontWeight:500, color:L.textSec }}>{v}</strong> },
-                        { key:"ip",          label:"IP",      render:v => v || "—" },
-                        { key:"os",          label:"OS",      render:v => <span style={{ color:L.textFaint }}>{v||"—"}</span> },
-                        { key:"cluster",     label:"Cluster", render:v => v ? clusterBadge(v) : "—" },
-                        { key:"power_state", label:"State",   render:v => powerBadge(v) },
-                      ]} />
+                      <RTable<VM>
+                        rows={assets.virtual_machines ?? []}
+                        cols={[
+                          { key:"name",        label:"Name",    render:(v: string)  => <strong style={{ fontWeight:500, color:L.textSec }}>{v}</strong> },
+                          { key:"ip",          label:"IP",      render:(v: string | null) => v || "—" },
+                          { key:"os",          label:"OS",      render:(v: string)  => <span style={{ color:L.textFaint }}>{v || "—"}</span> },
+                          { key:"cluster",     label:"Cluster", render:(v: string)  => v ? clusterBadge(v) : "—" },
+                          { key:"power_state", label:"State",   render:(v: string)  => powerBadge(v) },
+                        ]}
+                      />
                     )}
                     {activeTab === "datastores" && (
-                      <RTable rows={assets.datastores||[]} cols={[
-                        { key:"name",        label:"Name"                                            },
-                        { key:"type",        label:"Type",     render:v => typeBadge(v)              },
-                        { key:"capacity_gb", label:"Capacity", render:v => v!=null?`${v.toLocaleString()} GB`:"—" },
-                        { key:"free_gb",     label:"Free",     render:v => v!=null?`${v.toLocaleString()} GB`:"—" },
-                        { key:"accessible",  label:"Status",   render:v => okFaultBadge(v)           },
-                      ]} />
+                      <RTable<Datastore>
+                        rows={assets.datastores ?? []}
+                        cols={[
+                          { key:"name",        label:"Name"                                                                         },
+                          { key:"type",        label:"Type",     render:(v: string)  => typeBadge(v)                                },
+                          { key:"capacity_gb", label:"Capacity", render:(v: number)  => v != null ? `${v.toLocaleString()} GB` : "—" },
+                          { key:"free_gb",     label:"Free",     render:(v: number)  => v != null ? `${v.toLocaleString()} GB` : "—" },
+                          { key:"accessible",  label:"Status",   render:(v: boolean) => okFaultBadge(v)                             },
+                        ]}
+                      />
                     )}
                     {activeTab === "clusters" && (
-                      <RTable rows={assets.clusters||[]} cols={[
-                        { key:"name",          label:"Cluster"                                              },
-                        { key:"num_hosts",     label:"Hosts"                                               },
-                        { key:"total_cpu_mhz", label:"CPU",    render:v => v?`${(v/1000).toFixed(1)} GHz`:"—" },
-                        { key:"total_mem_mb",  label:"RAM",    render:v => v?`${Math.round(v/1024)} GB`:"—"    },
-                        { key:"ha_enabled",    label:"HA",     render:v => onOffBadge(v)                    },
-                        { key:"drs_enabled",   label:"DRS",    render:v => onOffBadge(v)                    },
-                      ]} />
+                      <RTable<Cluster>
+                        rows={assets.clusters ?? []}
+                        cols={[
+                          { key:"name",          label:"Cluster"                                                                          },
+                          { key:"num_hosts",     label:"Hosts"                                                                           },
+                          { key:"total_cpu_mhz", label:"CPU",    render:(v: number)  => v ? `${(v / 1000).toFixed(1)} GHz` : "—"         },
+                          { key:"total_mem_mb",  label:"RAM",    render:(v: number)  => v ? `${Math.round(v / 1024)} GB`  : "—"          },
+                          { key:"ha_enabled",    label:"HA",     render:(v: boolean) => onOffBadge(v)                                    },
+                          { key:"drs_enabled",   label:"DRS",    render:(v: boolean) => onOffBadge(v)                                    },
+                        ]}
+                      />
                     )}
                     {activeTab === "networks" && (
-                      <RTable rows={assets.networks||[]} cols={[
-                        { key:"name",        label:"Network"                                                                             },
-                        { key:"type",        label:"Type",    render:v => typeBadge(v==="DistributedVirtualPortgroup"?"DVS":"VSWITCH")   },
-                        { key:"num_vms",     label:"VMs"                                                                                },
-                        { key:"accessible",  label:"Status",  render:v => okFaultBadge(v)                                               },
-                      ]} />
+                      <RTable<Network>
+                        rows={assets.networks ?? []}
+                        cols={[
+                          { key:"name",       label:"Network"                                                                                                },
+                          { key:"type",       label:"Type",   render:(v: string)  => typeBadge(v === "DistributedVirtualPortgroup" ? "DVS" : "VSWITCH")     },
+                          { key:"num_vms",    label:"VMs"                                                                                                   },
+                          { key:"accessible", label:"Status", render:(v: boolean) => okFaultBadge(v)                                                        },
+                        ]}
+                      />
                     )}
                   </div>
                 </div>
