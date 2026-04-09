@@ -14,7 +14,7 @@ const NAV_ITEMS = [
   { path: "/rating", label: "Cyber Rating", icon: "✦", section: "REPORTS" },
   { path: "/reporting", label: "Reporting", icon: "▣", section: null },
   { path: "/key-rotation", label: "Key Rotation", icon: "↻", section: null },
-  { path: "/vcenter", label: "vCenter", icon: "⬡", section: null },
+  { path: "/vcenter", label: "Connect To Infastructure", icon: "⬡", section: null },
 ];
 
 const L = {
