@@ -15,7 +15,7 @@ const API =
   "https://r3bel-production.up.railway.app";
 
 // ── Cache config ──────────────────────────────────────────────────────────────
-const CACHE_TTL_MS   = 12 * 60 * 60 * 1000;
+const CACHE_TTL_MS     = 12 * 60 * 60 * 1000;
 const CACHE_KEY_CBOM   = "rebel_cache_cbom_pqcr";
 const CACHE_KEY_ASSETS = "rebel_cache_assets_pqcr";
 const CACHE_KEY_GHOST  = "rebel_cache_ghost_pqcr";
@@ -303,6 +303,19 @@ function SecureModeBanner() {
   );
 }
 
+// ── vCenter Override Banner ───────────────────────────────────────────────────
+function VCenterBanner({ count }: { count: number }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 14px", background: "rgba(14,165,233,0.06)", border: "1px solid rgba(14,165,233,0.28)", borderRadius: 6 }}>
+      <span style={{ fontSize: 9, color: "#0284c7", fontWeight: 800, letterSpacing: ".14em", textTransform: "uppercase" as const }}>⬡ VCENTER ASSETS ACTIVE</span>
+      <span style={{ fontSize: 9, color: "#0284c7", opacity: 0.75 }}>·</span>
+      <span style={{ fontSize: 9, color: "#0284c7", fontFamily: "'DM Mono', monospace" }}>
+        {count} VMs from infrastructure — overriding /ghost/assets
+      </span>
+    </div>
+  );
+}
+
 // ── Light Panel Components ────────────────────────────────────────────────────
 function LPanel({ children, style = {} }: { children: React.ReactNode; style?: React.CSSProperties }) {
   return <div style={{ ...LS.panel, ...style }}>{children}</div>;
@@ -413,8 +426,23 @@ function RoadmapCard({ a, i }: { a: any; i: number }) {
   );
 }
 
+// ── vCenter VM type ───────────────────────────────────────────────────────────
+interface VCenterVM {
+  name:        string;
+  ip:          string | null;
+  os:          string;
+  cluster:     string;
+  datacenter:  string;
+  power_state: string;
+}
+
+// ── Props ─────────────────────────────────────────────────────────────────────
+interface PQCReadinessProps {
+  vcenterAssets?: VCenterVM[];
+}
+
 // ── Main Page ─────────────────────────────────────────────────────────────────
-export default function PQCReadinessPage() {
+export default function PQCReadinessPage({ vcenterAssets }: PQCReadinessProps = {}) {
   const [cbomData,          setCbomData]          = useState<any[]>([]);
   const [assets,            setAssets]            = useState<any[]>([]);
   const [loading,           setLoading]           = useState(true);
@@ -428,6 +456,8 @@ export default function PQCReadinessPage() {
   const [clientName,        setClientName]        = useState("");
   const [secureModeOn,      setSecureModeOn]      = useState(false);
   const [secureModeLoading, setSecureModeLoading] = useState(true);
+
+  const hasVCenter = (vcenterAssets?.length ?? 0) > 0;
 
   const bp = useBreakpoint(), isMobile = bp === "mobile", isTablet = bp === "tablet", isDesktop = bp === "desktop";
 
@@ -470,12 +500,43 @@ export default function PQCReadinessPage() {
     setLoading(true);
     setFetchError(false);
 
+    // ── vCenter override: skip all API calls, use infra assets directly ───
+    if (hasVCenter) {
+      const apps = vcenterAssets!.map((vm) => ({
+        app:                vm.name,
+        keylen:             "—",
+        cipher:             "—",
+        tls:                "—",
+        ca:                 "—",
+        status:             "unknown",
+        pqc:                false,
+        pqc_support:        "none",
+        key_exchange_group: null,
+        is_wildcard:        null,
+        ip:                 vm.ip,
+        os:                 vm.os,
+        cluster:            vm.cluster,
+        datacenter:         vm.datacenter,
+        power_state:        vm.power_state,
+      }));
+      const assetList = vcenterAssets!.map((vm) => ({
+        name:        vm.name,
+        type:        "Server",
+        is_wildcard: false,
+      }));
+      setCbomData(apps);
+      setAssets(assetList);
+      setFromCache(false);
+      setCachedAt(null);
+      setLoading(false);
+      return;
+    }
+
     if (secureModeOn) {
       // ── SECURE MODE: /ghost/assets ONLY ──────────────────────────────────
       if (!forceRefresh) {
         const cached = cacheGet<any>(CACHE_KEY_GHOST);
         if (cached) {
-          // Map ghost assets → CBOM app shape
           const apps = (cached?.assets ?? []).map((a: any) => ({
             app: a.name, keylen: a.keylen || "—", cipher: a.cipher || "—",
             tls: a.tls || "—", ca: a.ca || "—",
@@ -549,16 +610,18 @@ export default function PQCReadinessPage() {
   };
 
   function handleForceRefresh() {
+    // Don't clear cache / re-fetch if we're in vCenter mode — data comes from props
+    if (hasVCenter) return;
     cacheClearAll();
     setFromCache(false);
     setCachedAt(null);
     loadData(true);
   }
 
-  // Wait for secure mode status before first load
+  // Re-run loadData whenever vCenter assets change or secure mode resolves
   useEffect(() => {
     if (!secureModeLoading) loadData();
-  }, [secureModeOn, secureModeLoading]);
+  }, [secureModeOn, secureModeLoading, hasVCenter]);
 
   const displayCbom   = cbomData.length ? cbomData   : MOCK_CBOM;
   const displayAssets = assets.length   ? assets     : MOCK_ASSETS;
@@ -601,13 +664,13 @@ export default function PQCReadinessPage() {
 
   const weakApps = withPQCScore.filter((a: any) => a.status === "weak" || a.status === "WEAK" || !a.pqc || a.keylen?.startsWith("1024"));
   const enriched = weakApps.map((app: any) => {
-    const asset    = matchAsset(app.app, displayAssets);
+    const asset     = matchAsset(app.app, displayAssets);
     const assetType = asset?.type ?? "Other";
-    const days     = EFFORT[assetType] ?? 3;
-    const cost     = days * devRate;
-    const weight   = riskWeight(app, asset);
-    const risk     = riskLabel(weight);
-    const isPublic = asset?.type === "Web Apps" || asset?.type === "Web App";
+    const days      = EFFORT[assetType] ?? 3;
+    const cost      = days * devRate;
+    const weight    = riskWeight(app, asset);
+    const risk      = riskLabel(weight);
+    const isPublic  = asset?.type === "Web Apps" || asset?.type === "Web App";
     return { ...app, asset, assetType, days, cost, weight, risk, isPublic };
   }).sort((a: any, b: any) => b.weight - a.weight);
 
@@ -636,10 +699,16 @@ export default function PQCReadinessPage() {
     const el   = document.createElement("a"); el.href = url; el.download = `rebel-pqc-${activeDomain || "all"}.csv`; el.click();
   }
 
-  const activeEndpointLabel = secureModeOn ? "→ /ghost/assets" : "→ /assets + /cbom";
-  const gaugeSize   = isMobile ? 160 : 200;
-  const metricCols  = isMobile ? "1fr 1fr" : isTablet ? "repeat(3,1fr)" : "repeat(5,1fr)";
-  const scoreColor  = migrationScore >= 70 ? L.green : migrationScore >= 40 ? L.yellow : L.red;
+  // Source label shown in the API status row
+  const activeEndpointLabel = hasVCenter
+    ? "→ vcenter/assets"
+    : secureModeOn
+      ? "→ /ghost/assets"
+      : "→ /assets + /cbom";
+
+  const gaugeSize  = isMobile ? 160 : 200;
+  const metricCols = isMobile ? "1fr 1fr" : isTablet ? "repeat(3,1fr)" : "repeat(5,1fr)";
+  const scoreColor = migrationScore >= 70 ? L.green : migrationScore >= 40 ? L.yellow : L.red;
 
   return (
     <div style={LS.page}>
@@ -654,14 +723,17 @@ export default function PQCReadinessPage() {
         ::-webkit-scrollbar-thumb{background:${L.border};border-radius:3px;}
       `}</style>
 
-      {/* ── SECURE MODE BANNER ── */}
-      {secureModeOn && <SecureModeBanner />}
+      {/* ── BANNERS — vCenter takes priority over secure mode ── */}
+      {hasVCenter
+        ? <VCenterBanner count={vcenterAssets!.length} />
+        : secureModeOn && <SecureModeBanner />
+      }
 
       {/* ── DOMAIN FILTER ── */}
       <LPanel>
         <LPanelHeader
           left="REPORT SCOPE — CLIENT DOMAIN FILTER"
-          right={fromCache ? <CacheBadge age={cachedAt} onRefresh={handleForceRefresh} /> : undefined}
+          right={fromCache && !hasVCenter ? <CacheBadge age={cachedAt} onRefresh={handleForceRefresh} /> : undefined}
         />
         <div style={{ padding: 14, display: "flex", flexDirection: "column", gap: 12 }}>
           <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 10 }}>
@@ -679,20 +751,20 @@ export default function PQCReadinessPage() {
             </div>
           </div>
 
-          {/* API status */}
+          {/* API / data source status */}
           <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" as const }}>
-            <span style={{ fontSize: 7, fontFamily: "'DM Mono',monospace", color: L.text4, letterSpacing: ".08em" }}>API</span>
+            <span style={{ fontSize: 7, fontFamily: "'DM Mono',monospace", color: L.text4, letterSpacing: ".08em" }}>DATA SOURCE</span>
             <span style={{ fontSize: 8, fontFamily: "'DM Mono',monospace", color: fetchError ? L.red : L.green, fontWeight: 600 }}>
-              {fetchError ? "✗" : "✓"} {API}
+              {fetchError ? "✗" : "✓"} {hasVCenter ? "vCenter infrastructure" : API}
             </span>
             <span style={{
               fontSize: 8, fontFamily: "'DM Mono',monospace", fontWeight: 700,
-              color: secureModeOn ? L.purple : L.cyan,
-              background: secureModeOn ? `${L.purple}10` : `${L.cyan}10`,
-              border: `1px solid ${secureModeOn ? L.purple : L.cyan}44`,
+              color: hasVCenter ? "#0284c7" : secureModeOn ? L.purple : L.cyan,
+              background: hasVCenter ? "rgba(14,165,233,0.08)" : secureModeOn ? `${L.purple}10` : `${L.cyan}10`,
+              border: `1px solid ${hasVCenter ? "rgba(14,165,233,0.28)" : secureModeOn ? `${L.purple}44` : `${L.cyan}44`}`,
               borderRadius: 3, padding: "2px 6px", letterSpacing: ".04em",
             }}>{activeEndpointLabel}</span>
-            {fetchError && <span style={{ fontSize: 8, color: L.red }}>— showing demo data</span>}
+            {fetchError && !hasVCenter && <span style={{ fontSize: 8, color: L.red }}>— showing demo data</span>}
             {loading && <span style={{ fontSize: 8, color: L.blue }}>fetching…</span>}
           </div>
 
@@ -725,10 +797,10 @@ export default function PQCReadinessPage() {
         {loading
           ? Array.from({ length: 5 }).map((_, i) => <SkeletonMetricCard key={i} />)
           : <>
-              <LMetricCard label="MIGRATION SCORE" value={`${migrationScore}/100`} sub="Migration progress"   color={scoreColor} />
-              <LMetricCard label="NEED MIGRATION"  value={enriched.length}          sub="Weak assets"         color={L.red}      />
-              <LMetricCard label="CRITICAL"         value={critCount}                sub="Immediate action"    color={L.red}      />
-              <LMetricCard label="EST. DAYS"        value={calDays}                  sub={`${teamSize} dev team`} color={L.cyan}  />
+              <LMetricCard label="MIGRATION SCORE" value={`${migrationScore}/100`} sub="Migration progress"      color={scoreColor} />
+              <LMetricCard label="NEED MIGRATION"  value={enriched.length}          sub="Weak assets"            color={L.red}      />
+              <LMetricCard label="CRITICAL"         value={critCount}                sub="Immediate action"       color={L.red}      />
+              <LMetricCard label="EST. DAYS"        value={calDays}                  sub={`${teamSize} dev team`} color={L.cyan}     />
               <div style={isMobile ? { gridColumn: "1/-1" } : {}}>
                 <LMetricCard label="EST. COST (INR)" value={fmtINR(totalCost)} sub={`At ${fmtINR(devRate)}/day`} color={L.orange} />
               </div>
@@ -855,7 +927,10 @@ export default function PQCReadinessPage() {
         <LPanelHeader left="MIGRATION ROADMAP" right={
           !loading && (
             <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-              {secureModeOn && (
+              {hasVCenter && (
+                <span style={{ fontSize: 7, color: "#0284c7", fontFamily: "monospace", fontWeight: 700, border: "1px solid rgba(14,165,233,0.28)", borderRadius: 3, padding: "2px 6px", background: "rgba(14,165,233,0.06)" }}>⬡ VCENTER</span>
+              )}
+              {!hasVCenter && secureModeOn && (
                 <span style={{ fontSize: 7, color: L.purple, fontFamily: "monospace", fontWeight: 700, border: `1px solid ${L.purple}44`, borderRadius: 3, padding: "2px 6px", background: `${L.purple}0a` }}>🔒 GHOST</span>
               )}
               <button style={{ ...LS.btn, fontSize: isMobile ? 9 : 11 }} onClick={exportCSV}>↓ CSV</button>
@@ -933,7 +1008,8 @@ export default function PQCReadinessPage() {
                   <b style={{ color: L.text1 }}>{enriched.length}</b> to migrate ·{" "}
                   <b style={{ color: L.cyan }}>{totalDays}d</b> dev ·{" "}
                   <b style={{ color: L.orange }}>{fmtINR(totalCost)}</b>
-                  {secureModeOn && <span style={{ marginLeft: 8, fontSize: 8, color: L.purple, fontWeight: 600 }}>· ghost mode</span>}
+                  {hasVCenter && <span style={{ marginLeft: 8, fontSize: 8, color: "#0284c7", fontWeight: 600 }}>· vcenter mode</span>}
+                  {!hasVCenter && secureModeOn && <span style={{ marginLeft: 8, fontSize: 8, color: L.purple, fontWeight: 600 }}>· ghost mode</span>}
                 </span>
                 {!isMobile && <span style={{ fontSize: 9, color: L.text3 }}>Ranked: public-facing → risk → cost</span>}
               </>
