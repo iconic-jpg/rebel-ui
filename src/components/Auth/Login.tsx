@@ -5,6 +5,7 @@ const API = "https://r3bel.onrender.com";
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID as string;
 // Must match exactly what's registered in Google Cloud Console
 const REDIRECT_URI = `${window.location.origin}/auth/google/callback`;
+console.log(REDIRECT_URI);
 const styles = `
   @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Share+Tech+Mono&display=swap');
 
