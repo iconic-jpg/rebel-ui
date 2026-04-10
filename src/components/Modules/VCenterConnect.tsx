@@ -633,7 +633,7 @@ export default function VCenterConnect({
         }}>⬡</div>
         <div style={{ minWidth:0 }}>
           <h1 style={{ fontFamily:FO, fontWeight:900, fontSize:18, color:L.text, letterSpacing:".12em", lineHeight:1, margin:0 }}>
-            VCENTER CONNECT
+            CONNECTION TO INFRASTRUCTURE
           </h1>
           <div style={{ fontFamily:FM, fontSize:10, color:L.textFaint, marginTop:4, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>
             VMware vCenter · Centralized Asset Discovery · Air-Gap Compatible
