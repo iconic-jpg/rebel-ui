@@ -306,33 +306,7 @@ export default function AppShell() {
           <SecureModePanel token={jwtToken} />
         </div>
 
-        {/* Theme toggle */}
-        <div style={{ padding: "8px 10px", borderTop: `1px solid ${L.divider}` }}>
-          <button
-            onClick={toggle}
-            style={{
-              width: "100%",
-              padding: "9px 12px",
-              borderRadius: 6,
-              border: `1px solid ${L.accentBorder}`,
-              background: L.accentDim,
-              color: L.textSec,
-              fontFamily: "'Orbitron',monospace",
-              fontSize: 8.5,
-              letterSpacing: "0.14em",
-              fontWeight: 700,
-              cursor: "pointer",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              gap: 7,
-              transition: "all 0.15s",
-            }}
-          >
-            <span style={{ fontSize: 12 }}>☀</span>
-            TOGGLE THEME
-          </button>
-        </div>
+
 
         {/* Footer */}
         <div
