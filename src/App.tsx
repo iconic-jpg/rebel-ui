@@ -55,7 +55,7 @@ export default function App() {
             <Route path="cbom"          element={<CBOMPage />} />
             <Route path="pqc"           element={<PQCPosturePage />} />
             <Route path="/splash" element={<RebelSplash />} />
-            <Route path="/auth/google/callback" element={<GoogleCallback />} />
+            <Route path="/auth/google/callback" element={<Login />} />
 
             <Route
               path="pqc-readiness"
