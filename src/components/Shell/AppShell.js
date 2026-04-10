@@ -14,7 +14,7 @@ const NAV_ITEMS = [
     { path: "/rating", label: "Cyber Rating", icon: "✦", section: "REPORTS" },
     { path: "/reporting", label: "Reporting", icon: "▣", section: null },
     { path: "/key-rotation", label: "Key Rotation", icon: "↻", section: null },
-    { path: "/vcenter", label: "vCenter", icon: "⬡", section: null },
+    { path: "/vcenter", label: "Connect To Infastructure", icon: "⬡", section: null },
 ];
 const L = {
     accent: "#0ea5e9",
@@ -185,24 +185,7 @@ export default function AppShell() {
                                         fontWeight: 700,
                                         padding: "10px 8px 5px",
                                         textTransform: "uppercase",
-                                    }, children: section.title }), section.items.map((item) => (_jsx(NavButton, { path: item.path, label: item.label, icon: item.icon }, item.path)))] }, section.title))) }), _jsx("div", { style: { borderTop: `1px solid ${L.divider}` }, children: _jsx(SecureModePanel, { token: jwtToken }) }), _jsx("div", { style: { padding: "8px 10px", borderTop: `1px solid ${L.divider}` }, children: _jsxs("button", { onClick: toggle, style: {
-                                width: "100%",
-                                padding: "9px 12px",
-                                borderRadius: 6,
-                                border: `1px solid ${L.accentBorder}`,
-                                background: L.accentDim,
-                                color: L.textSec,
-                                fontFamily: "'Orbitron',monospace",
-                                fontSize: 8.5,
-                                letterSpacing: "0.14em",
-                                fontWeight: 700,
-                                cursor: "pointer",
-                                display: "flex",
-                                alignItems: "center",
-                                justifyContent: "center",
-                                gap: 7,
-                                transition: "all 0.15s",
-                            }, children: [_jsx("span", { style: { fontSize: 12 }, children: "\u2600" }), "TOGGLE THEME"] }) }), _jsxs("div", { style: {
+                                    }, children: section.title }), section.items.map((item) => (_jsx(NavButton, { path: item.path, label: item.label, icon: item.icon }, item.path)))] }, section.title))) }), _jsx("div", { style: { borderTop: `1px solid ${L.divider}` }, children: _jsx(SecureModePanel, { token: jwtToken }) }), _jsxs("div", { style: {
                             padding: "10px 14px 14px",
                             display: "flex",
                             flexDirection: "column",

@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { HashRouter as Router, Routes, Route } from "react-router-dom";
+import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
 import RebelDashboard from "./components/RebelDashboard/RebelDashboard.js";
 import Login from "./components/Auth/Login.js";
 import Signup from "./components/Auth/Signup.js";
@@ -20,7 +20,6 @@ import GoogleCallback from "./GoogleCallback.js";
 
 const API_BASE = "https://r3bel-production.up.railway.app";
 
-// Shape that VCenterConnect passes to onAssets
 export interface VCenterVM {
   name:        string;
   ip:          string | null;
@@ -31,20 +30,24 @@ export interface VCenterVM {
 }
 
 export default function App() {
-  // ── Global vCenter asset override ─────────────────────────────────────────
-  // When the user connects vCenter and fetches assets, this is populated.
-  // Any module that receives this as a prop should use it instead of /ghost/assets.
   const [vCenterAssets, setVCenterAssets] = useState<VCenterVM[]>([]);
-
   const hasVCenterAssets = vCenterAssets.length > 0;
 
   return (
     <ThemeProvider>
+      {/* ── BrowserRouter replaces HashRouter so real paths work ── */}
       <Router>
         <Routes>
-          <Route path="/login"  element={<Login />} />
-          <Route path="/signup" element={<Signup />} />
 
+          {/* ── Public routes — no shell, no auth check ── */}
+          <Route path="/login"                element={<Login />} />
+          <Route path="/signup"               element={<Signup />} />
+          <Route path="/splash"               element={<RebelSplash />} />
+
+          {/* ── Google OAuth callback — MUST be top-level, outside AppShell ── */}
+          <Route path="/auth/google/callback" element={<GoogleCallback />} />
+
+          {/* ── Protected routes inside AppShell ── */}
           <Route path="/" element={<AppShell />}>
             <Route index element={<RebelDashboard />} />
 
@@ -52,10 +55,8 @@ export default function App() {
             <Route path="discovery"  element={<AssetDiscoveryPage />} />
             <Route path="registry"   element={<AssetRegistryPage />} />
 
-            <Route path="cbom"          element={<CBOMPage />} />
-            <Route path="pqc"           element={<PQCPosturePage />} />
-            <Route path="/splash" element={<RebelSplash />} />
-            <Route path="/auth/google/callback" element={<Login />} />
+            <Route path="cbom" element={<CBOMPage />} />
+            <Route path="pqc"  element={<PQCPosturePage />} />
 
             <Route
               path="pqc-readiness"
@@ -65,6 +66,7 @@ export default function App() {
                 />
               }
             />
+
             <Route path="rating"    element={<CyberRatingPage />} />
             <Route path="reporting" element={<ReportingPage />} />
 
@@ -73,12 +75,11 @@ export default function App() {
               element={
                 <KeyRotationPanel
                   apiBase={API_BASE}
-                  assets={vCenterAssets}   // empty [] when not connected → same as before
+                  assets={vCenterAssets}
                 />
               }
             />
 
-            {/* Connect To Infrastructure — sets the global asset override */}
             <Route
               path="vcenter"
               element={
@@ -91,6 +92,7 @@ export default function App() {
 
             <Route path="settings/assets" element={<AssetRegistryPage />} />
           </Route>
+
         </Routes>
       </Router>
     </ThemeProvider>

@@ -3,100 +3,230 @@ import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 const API = "https://r3bel.onrender.com";
 const styles = `
-  @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@300;400;600&display=swap');
+  @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Share+Tech+Mono&display=swap');
+
+  @keyframes rebel-scan {
+    0%   { transform: translateY(-100%); }
+    100% { transform: translateY(110vh); }
+  }
+  @keyframes rebel-fadeup {
+    from { opacity: 0; transform: translateY(18px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes rebel-flicker {
+    0%, 90%, 94%, 98%, 100% { opacity: 1; }
+    92% { opacity: 0.7; }
+    96% { opacity: 0.8; }
+  }
+
+  *, *::before, *::after { box-sizing: border-box; }
 
   .signup-root {
     min-height: 100vh;
-    background: #020408;
+    background: #020b18;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-family: 'Rajdhani', sans-serif;
+    font-family: 'Orbitron', monospace;
     overflow: hidden;
     position: relative;
+    padding: 24px 16px;
   }
 
-  .signup-root::before {
-    content: '';
+  .rebel-grid {
     position: fixed;
     inset: 0;
-    background:
-      repeating-linear-gradient(0deg, transparent, transparent 60px, rgba(0,255,170,0.015) 60px, rgba(0,255,170,0.015) 61px),
-      repeating-linear-gradient(90deg, transparent, transparent 60px, rgba(0,255,170,0.015) 60px, rgba(0,255,170,0.015) 61px);
+    background-image:
+      linear-gradient(rgba(0,180,255,.04) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0,180,255,.04) 1px, transparent 1px);
+    background-size: 36px 36px;
     pointer-events: none;
+    z-index: 0;
   }
 
-  .signup-root::after {
-    content: '';
+  .rebel-scan {
     position: fixed;
-    top: -50%; left: -50%;
-    width: 200%; height: 200%;
-    background: radial-gradient(ellipse at 60% 40%, rgba(0,255,170,0.04) 0%, transparent 60%);
+    left: 0; right: 0;
+    height: 2px;
+    background: linear-gradient(transparent, rgba(0,200,255,.18), transparent);
+    animation: rebel-scan 4s linear infinite;
     pointer-events: none;
+    z-index: 0;
   }
+
+  .rebel-corner {
+    position: absolute;
+    width: 20px;
+    height: 20px;
+    z-index: 2;
+  }
+  .rebel-corner::before,
+  .rebel-corner::after {
+    content: '';
+    position: absolute;
+    background: rgba(0,200,255,.5);
+  }
+  .rebel-corner::before { width: 100%; height: 1.5px; top: 0; }
+  .rebel-corner::after  { width: 1.5px; height: 100%; top: 0; }
+  .rebel-corner-tl { top: 16px; left: 16px; }
+  .rebel-corner-tr { top: 16px; right: 16px; transform: scaleX(-1); }
+  .rebel-corner-bl { bottom: 16px; left: 16px; transform: scaleY(-1); }
+  .rebel-corner-br { bottom: 16px; right: 16px; transform: scale(-1); }
 
   .signup-card {
     position: relative;
-    width: 380px;
+    width: 100%;
+    max-width: 420px;
     padding: 48px 40px;
-    animation: fadeUp 0.6s ease both;
+    z-index: 1;
+    animation: rebel-fadeup 0.8s ease both;
   }
 
-  @keyframes fadeUp {
-    from { opacity: 0; transform: translateY(20px); }
-    to   { opacity: 1; transform: translateY(0); }
+  @media (max-width: 480px) {
+    .signup-card { padding: 36px 24px; }
+    .rebel-corner-tl { top: 12px; left: 12px; }
+    .rebel-corner-tr { top: 12px; right: 12px; }
+    .rebel-corner-bl { bottom: 12px; left: 12px; }
+    .rebel-corner-br { bottom: 12px; right: 12px; }
   }
 
-  .corner { position: absolute; width: 16px; height: 16px; border-color: rgba(0,255,170,0.5); border-style: solid; }
-  .corner-tl { top: 0; left: 0; border-width: 1px 0 0 1px; }
-  .corner-tr { top: 0; right: 0; border-width: 1px 1px 0 0; }
-  .corner-bl { bottom: 0; left: 0; border-width: 0 0 1px 1px; }
-  .corner-br { bottom: 0; right: 0; border-width: 0 1px 1px 0; }
+  .card-corner { position: absolute; width: 18px; height: 18px; }
+  .card-corner::before, .card-corner::after { content: ''; position: absolute; background: rgba(0,200,255,.4); }
+  .card-corner::before { width: 100%; height: 1.5px; top: 0; }
+  .card-corner::after  { width: 1.5px; height: 100%; top: 0; }
+  .card-corner-tl { top: 0; left: 0; }
+  .card-corner-tr { top: 0; right: 0; transform: scaleX(-1); }
+  .card-corner-bl { bottom: 0; left: 0; transform: scaleY(-1); }
+  .card-corner-br { bottom: 0; right: 0; transform: scale(-1); }
 
-  .signup-label { font-family: 'Share Tech Mono', monospace; font-size: 10px; letter-spacing: 0.3em; color: rgba(0,255,170,0.5); text-transform: uppercase; margin-bottom: 32px; }
-  .signup-title { font-size: 32px; font-weight: 600; letter-spacing: 0.15em; color: #e8f4f0; text-transform: uppercase; margin: 0 0 8px 0; line-height: 1; }
-  .signup-sub { font-size: 13px; font-weight: 300; color: rgba(255,255,255,0.25); letter-spacing: 0.1em; margin: 0 0 40px 0; }
+  .signup-label {
+    font-size: 9px;
+    font-weight: 400;
+    letter-spacing: 4px;
+    color: rgba(0,200,255,.4);
+    text-transform: uppercase;
+    margin-bottom: 20px;
+  }
 
-  .field-group { margin-bottom: 20px; position: relative; }
-  .field-label { font-family: 'Share Tech Mono', monospace; font-size: 9px; letter-spacing: 0.25em; color: rgba(0,255,170,0.4); text-transform: uppercase; display: block; margin-bottom: 8px; }
-  .field-input { width: 100%; background: rgba(0,255,170,0.03); border: none; border-bottom: 1px solid rgba(0,255,170,0.2); color: #e8f4f0; font-family: 'Rajdhani', sans-serif; font-size: 15px; font-weight: 400; letter-spacing: 0.05em; padding: 10px 0; outline: none; transition: border-color 0.2s ease; box-sizing: border-box; }
-  .field-input::placeholder { color: rgba(255,255,255,0.1); }
-  .field-input:focus { border-bottom-color: rgba(0,255,170,0.7); }
-  .field-input:-webkit-autofill { -webkit-box-shadow: 0 0 0 1000px #020408 inset; -webkit-text-fill-color: #e8f4f0; }
+  .signup-title {
+    font-size: clamp(28px, 8vw, 40px);
+    font-weight: 900;
+    letter-spacing: clamp(6px, 2vw, 12px);
+    color: #00c8ff;
+    text-transform: uppercase;
+    margin: 0 0 8px;
+    animation: rebel-flicker 6s ease-in-out infinite;
+    text-shadow: 0 0 30px rgba(0,200,255,.5), 0 0 60px rgba(0,180,255,.2);
+  }
 
-  .submit-btn { width: 100%; margin-top: 36px; padding: 14px; background: transparent; border: 1px solid rgba(0,255,170,0.4); color: rgba(0,255,170,0.9); font-family: 'Share Tech Mono', monospace; font-size: 12px; letter-spacing: 0.3em; text-transform: uppercase; cursor: pointer; transition: all 0.2s ease; position: relative; overflow: hidden; }
-  .submit-btn::before { content: ''; position: absolute; inset: 0; background: rgba(0,255,170,0.06); transform: translateX(-100%); transition: transform 0.3s ease; }
+  .signup-sub {
+    font-size: 9px;
+    font-weight: 400;
+    letter-spacing: 3px;
+    color: rgba(0,200,255,.3);
+    text-transform: uppercase;
+    margin: 0 0 32px;
+  }
+
+  .rebel-divider-line {
+    width: 100%;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(0,200,255,.2), transparent);
+    margin-bottom: 32px;
+  }
+
+  .field-group { margin-bottom: 24px; position: relative; }
+
+  .field-label {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 9px;
+    letter-spacing: 3px;
+    color: rgba(0,200,255,.4);
+    text-transform: uppercase;
+    display: block;
+    margin-bottom: 10px;
+  }
+
+  .field-input {
+    width: 100%;
+    background: rgba(0,200,255,.03);
+    border: none;
+    border-bottom: 1px solid rgba(0,200,255,.2);
+    color: #c8eeff;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 14px;
+    letter-spacing: 2px;
+    padding: 10px 0;
+    outline: none;
+    transition: border-color 0.2s ease;
+  }
+  .field-input::placeholder { color: rgba(0,200,255,.15); }
+  .field-input:focus { border-bottom-color: rgba(0,200,255,.7); }
+  .field-input:-webkit-autofill {
+    -webkit-box-shadow: 0 0 0 1000px #020b18 inset;
+    -webkit-text-fill-color: #c8eeff;
+  }
+
+  .submit-btn {
+    width: 100%;
+    margin-top: 32px;
+    padding: 14px;
+    background: transparent;
+    border: 1px solid rgba(0,200,255,.35);
+    color: rgba(0,200,255,.85);
+    font-family: 'Orbitron', monospace;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 4px;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    position: relative;
+    overflow: hidden;
+  }
+  .submit-btn::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: rgba(0,200,255,.06);
+    transform: translateX(-100%);
+    transition: transform 0.3s ease;
+  }
   .submit-btn:hover:not(:disabled)::before { transform: translateX(0); }
-  .submit-btn:hover:not(:disabled) { border-color: rgba(0,255,170,0.8); color: #00ffaa; box-shadow: 0 0 20px rgba(0,255,170,0.1); }
-  .submit-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .submit-btn:hover:not(:disabled) {
+    border-color: rgba(0,200,255,.8);
+    color: #00c8ff;
+    box-shadow: 0 0 20px rgba(0,200,255,.15);
+  }
+  .submit-btn:disabled { opacity: 0.35; cursor: not-allowed; }
 
-  .divider {
+  .rebel-or {
     display: flex;
     align-items: center;
     gap: 12px;
     margin: 20px 0 0;
     font-family: 'Share Tech Mono', monospace;
     font-size: 9px;
-    letter-spacing: 0.2em;
-    color: rgba(255,255,255,0.12);
+    letter-spacing: 3px;
+    color: rgba(0,200,255,.2);
   }
-  .divider::before, .divider::after {
+  .rebel-or::before, .rebel-or::after {
     content: '';
     flex: 1;
     height: 1px;
-    background: rgba(255,255,255,0.07);
+    background: rgba(0,200,255,.1);
   }
 
   .google-btn {
     width: 100%;
-    margin-top: 12px;
+    margin-top: 14px;
     padding: 13px;
     background: transparent;
-    border: 1px solid rgba(255,255,255,0.1);
-    color: rgba(255,255,255,0.45);
+    border: 1px solid rgba(0,200,255,.15);
+    color: rgba(0,200,255,.45);
     font-family: 'Share Tech Mono', monospace;
-    font-size: 11px;
-    letter-spacing: 0.2em;
+    font-size: 10px;
+    letter-spacing: 3px;
     text-transform: uppercase;
     cursor: pointer;
     display: flex;
@@ -107,26 +237,37 @@ const styles = `
     position: relative;
     overflow: hidden;
   }
-  .google-btn::before {
-    content: '';
-    position: absolute;
-    inset: 0;
-    background: rgba(255,255,255,0.03);
-    transform: translateX(-100%);
-    transition: transform 0.3s ease;
-  }
-  .google-btn:hover::before { transform: translateX(0); }
   .google-btn:hover {
-    border-color: rgba(255,255,255,0.25);
-    color: rgba(255,255,255,0.75);
+    border-color: rgba(0,200,255,.4);
+    color: rgba(0,200,255,.8);
   }
   .google-btn:disabled { opacity: 0.3; cursor: not-allowed; }
 
-  .error-msg { font-family: 'Share Tech Mono', monospace; font-size: 10px; letter-spacing: 0.1em; color: rgba(255,80,80,0.8); margin-top: 16px; padding: 10px 12px; border-left: 2px solid rgba(255,80,80,0.4); background: rgba(255,80,80,0.04); }
+  .error-msg {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 2px;
+    color: rgba(255,80,80,.8);
+    margin-top: 16px;
+    padding: 10px 12px;
+    border-left: 2px solid rgba(255,80,80,.4);
+    background: rgba(255,80,80,.04);
+  }
 
-  .signin-link { margin-top: 28px; text-align: center; font-size: 12px; color: rgba(255,255,255,0.2); letter-spacing: 0.05em; }
-  .signin-link a { color: rgba(0,255,170,0.5); text-decoration: none; transition: color 0.2s; }
-  .signin-link a:hover { color: rgba(0,255,170,0.9); }
+  .signin-link {
+    margin-top: 28px;
+    text-align: center;
+    font-size: 9px;
+    letter-spacing: 2px;
+    color: rgba(0,200,255,.2);
+    font-family: 'Share Tech Mono', monospace;
+  }
+  .signin-link a {
+    color: rgba(0,200,255,.5);
+    text-decoration: none;
+    transition: color 0.2s;
+  }
+  .signin-link a:hover { color: #00c8ff; }
 `;
 export default function Signup() {
     const navigate = useNavigate();
@@ -153,7 +294,7 @@ export default function Signup() {
             }
             localStorage.setItem("access", data.access);
             localStorage.setItem("refresh", data.refresh);
-            navigate("/");
+            navigate("/splash");
         }
         catch {
             setError("Google login failed. Try again.");
@@ -166,21 +307,15 @@ export default function Signup() {
         if (googleInitialized.current)
             return;
         const initGoogle = () => {
+            if (!import.meta.env.VITE_GOOGLE_CLIENT_ID)
+                return;
             window.google?.accounts.id.initialize({
                 client_id: import.meta.env.VITE_GOOGLE_CLIENT_ID,
                 callback: handleGoogleResponse,
                 use_fedcm_for_prompt: false,
+                auto_select: false,
+                cancel_on_tap_outside: false,
             });
-            // Render actual Google button — never gets dismissed
-            const btn = document.getElementById("google-signin-btn");
-            if (btn) {
-                window.google?.accounts.id.renderButton(btn, {
-                    theme: "outline",
-                    size: "large",
-                    width: btn.offsetWidth || 300,
-                    text: "continue_with",
-                });
-            }
             googleInitialized.current = true;
         };
         const existing = document.getElementById("gsi-script");
@@ -198,16 +333,17 @@ export default function Signup() {
         return () => { window.google?.accounts.id.cancel(); };
     }, []);
     const triggerGoogle = () => {
-        if (!googleInitialized.current)
+        if (!import.meta.env.VITE_GOOGLE_CLIENT_ID) {
+            setError("Google login is not configured.");
             return;
-        // Use popup flow instead of One Tap prompt
-        window.google?.accounts.oauth2 ?
-            window.google.accounts.id.prompt() :
-            window.google?.accounts.id.renderButton(document.getElementById("g-signin-btn"), { theme: "outline", size: "large" });
+        }
+        if (!googleInitialized.current) {
+            setError("Google not loaded yet, please wait...");
+            return;
+        }
         window.google?.accounts.id.prompt((notification) => {
-            if (notification.isNotDisplayed()) {
-                // One Tap blocked — fall back to popup
-                window.google?.accounts.id.renderButton(document.getElementById("g-signin-btn-hidden"), { theme: "outline", size: "large", width: 1 });
+            if (notification.isNotDisplayed() || notification.isSkippedMoment()) {
+                setError("Google sign-in blocked by browser. Please allow popups and try again.");
             }
         });
     };
@@ -228,7 +364,7 @@ export default function Signup() {
             }
             localStorage.setItem("access", data.access);
             localStorage.setItem("refresh", data.refresh);
-            navigate("/");
+            navigate("/splash");
         }
         catch {
             setError("Unable to connect to server.");
@@ -237,5 +373,5 @@ export default function Signup() {
             setLoading(false);
         }
     };
-    return (_jsxs(_Fragment, { children: [_jsx("style", { children: styles }), _jsx("div", { className: "signup-root", children: _jsxs("div", { className: "signup-card", children: [_jsx("div", { className: "corner corner-tl" }), _jsx("div", { className: "corner corner-tr" }), _jsx("div", { className: "corner corner-bl" }), _jsx("div", { className: "corner corner-br" }), _jsx("div", { className: "signup-label", children: "// init sequence" }), _jsx("h1", { className: "signup-title", children: "Rebel" }), _jsx("p", { className: "signup-sub", children: "Create your access credentials" }), _jsxs("form", { onSubmit: handleSignup, children: [_jsxs("div", { className: "field-group", children: [_jsx("label", { className: "field-label", children: "Username" }), _jsx("input", { className: "field-input", type: "text", placeholder: "your_handle", value: username, onChange: (e) => setUsername(e.target.value), required: true })] }), _jsxs("div", { className: "field-group", children: [_jsx("label", { className: "field-label", children: "Email Address" }), _jsx("input", { className: "field-input", type: "email", placeholder: "user@domain.com", value: email, onChange: (e) => setEmail(e.target.value) })] }), _jsxs("div", { className: "field-group", children: [_jsx("label", { className: "field-label", children: "Password" }), _jsx("input", { className: "field-input", type: "password", placeholder: "min. 8 characters", value: password, minLength: 8, onChange: (e) => setPassword(e.target.value), required: true })] }), _jsx("button", { className: "submit-btn", type: "submit", disabled: loading, children: loading ? "Initializing..." : "Create Account" })] }), _jsx("div", { className: "divider", children: "or" }), _jsxs("button", { className: "google-btn", type: "button", onClick: triggerGoogle, disabled: googleLoading, children: [_jsxs("svg", { width: "14", height: "14", viewBox: "0 0 24 24", children: [_jsx("path", { fill: "#4285F4", d: "M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" }), _jsx("path", { fill: "#34A853", d: "M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" }), _jsx("path", { fill: "#FBBC05", d: "M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z" }), _jsx("path", { fill: "#EA4335", d: "M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" })] }), googleLoading ? "Authenticating..." : "Continue with Google"] }), error && _jsx("div", { className: "error-msg", children: error }), _jsxs("div", { className: "signin-link", children: ["Already have access? ", _jsx("a", { href: "#/login", children: "Sign in" })] })] }) })] }));
+    return (_jsxs(_Fragment, { children: [_jsx("style", { children: styles }), _jsxs("div", { className: "signup-root", children: [_jsx("div", { className: "rebel-grid" }), _jsx("div", { className: "rebel-scan" }), _jsx("div", { className: "rebel-corner rebel-corner-tl" }), _jsx("div", { className: "rebel-corner rebel-corner-tr" }), _jsx("div", { className: "rebel-corner rebel-corner-bl" }), _jsx("div", { className: "rebel-corner rebel-corner-br" }), _jsxs("div", { className: "signup-card", children: [_jsx("div", { className: "card-corner card-corner-tl" }), _jsx("div", { className: "card-corner card-corner-tr" }), _jsx("div", { className: "card-corner card-corner-bl" }), _jsx("div", { className: "card-corner card-corner-br" }), _jsx("div", { className: "signup-label", children: "// init sequence" }), _jsx("h1", { className: "signup-title", children: "Rebel" }), _jsx("p", { className: "signup-sub", children: "Create your access credentials" }), _jsx("div", { className: "rebel-divider-line" }), _jsxs("form", { onSubmit: handleSignup, children: [_jsxs("div", { className: "field-group", children: [_jsx("label", { className: "field-label", children: "Username" }), _jsx("input", { className: "field-input", type: "text", placeholder: "your_handle", value: username, onChange: e => setUsername(e.target.value), required: true })] }), _jsxs("div", { className: "field-group", children: [_jsx("label", { className: "field-label", children: "Email Address" }), _jsx("input", { className: "field-input", type: "email", placeholder: "user@domain.com", value: email, onChange: e => setEmail(e.target.value) })] }), _jsxs("div", { className: "field-group", children: [_jsx("label", { className: "field-label", children: "Password" }), _jsx("input", { className: "field-input", type: "password", placeholder: "min. 8 characters", value: password, minLength: 8, onChange: e => setPassword(e.target.value), required: true })] }), _jsx("button", { className: "submit-btn", type: "submit", disabled: loading, children: loading ? "Initializing..." : "Create Account" })] }), _jsx("div", { className: "rebel-or", children: "or" }), _jsxs("button", { className: "google-btn", type: "button", onClick: triggerGoogle, disabled: googleLoading, children: [_jsxs("svg", { width: "14", height: "14", viewBox: "0 0 24 24", style: { flexShrink: 0 }, children: [_jsx("path", { fill: "#4285F4", d: "M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" }), _jsx("path", { fill: "#34A853", d: "M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" }), _jsx("path", { fill: "#FBBC05", d: "M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z" }), _jsx("path", { fill: "#EA4335", d: "M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" })] }), googleLoading ? "Authenticating..." : "Continue with Google"] }), error && _jsx("div", { className: "error-msg", children: error }), _jsxs("div", { className: "signin-link", children: ["Already have access?\u00A0", _jsx("a", { href: "#/login", children: "Sign in" })] })] })] })] }));
 }

@@ -3,9 +3,10 @@ import { useNavigate } from "react-router-dom";
 
 const API = "https://r3bel.onrender.com";
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID as string;
-// Must match exactly what's registered in Google Cloud Console
+
+// Real path — works now that we're on BrowserRouter
 const REDIRECT_URI = `${window.location.origin}/auth/google/callback`;
-console.log(REDIRECT_URI);
+
 const styles = `
   @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Share+Tech+Mono&display=swap');
 
@@ -64,14 +65,11 @@ const styles = `
 
   .rebel-corner {
     position: absolute;
-    width: 20px;
-    height: 20px;
+    width: 20px; height: 20px;
     z-index: 2;
   }
-  .rebel-corner::before,
-  .rebel-corner::after {
-    content: '';
-    position: absolute;
+  .rebel-corner::before, .rebel-corner::after {
+    content: ''; position: absolute;
     background: rgba(0,200,255,.5);
   }
   .rebel-corner::before { width: 100%; height: 1.5px; top: 0; }
@@ -83,8 +81,7 @@ const styles = `
 
   .login-card {
     position: relative;
-    width: 100%;
-    max-width: 420px;
+    width: 100%; max-width: 420px;
     padding: 48px 40px;
     z-index: 1;
     animation: rebel-fadeup 0.8s ease both;
@@ -108,37 +105,25 @@ const styles = `
   .card-corner-br { bottom: 0; right: 0; transform: scale(-1); }
 
   .login-label {
-    font-size: 9px;
-    font-weight: 400;
-    letter-spacing: 4px;
-    color: rgba(0,200,255,.4);
-    text-transform: uppercase;
-    margin-bottom: 20px;
+    font-size: 9px; font-weight: 400; letter-spacing: 4px;
+    color: rgba(0,200,255,.4); text-transform: uppercase; margin-bottom: 20px;
   }
 
   .login-title {
-    font-size: clamp(28px, 8vw, 40px);
-    font-weight: 900;
-    letter-spacing: clamp(6px, 2vw, 12px);
-    color: #00c8ff;
-    text-transform: uppercase;
-    margin: 0 0 8px;
+    font-size: clamp(28px, 8vw, 40px); font-weight: 900;
+    letter-spacing: clamp(6px, 2vw, 12px); color: #00c8ff;
+    text-transform: uppercase; margin: 0 0 8px;
     animation: rebel-flicker 6s ease-in-out infinite;
     text-shadow: 0 0 30px rgba(0,200,255,.5), 0 0 60px rgba(0,180,255,.2);
   }
 
   .login-sub {
-    font-size: 9px;
-    font-weight: 400;
-    letter-spacing: 3px;
-    color: rgba(0,200,255,.3);
-    text-transform: uppercase;
-    margin: 0 0 32px;
+    font-size: 9px; font-weight: 400; letter-spacing: 3px;
+    color: rgba(0,200,255,.3); text-transform: uppercase; margin: 0 0 32px;
   }
 
   .rebel-divider-line {
-    width: 100%;
-    height: 1px;
+    width: 100%; height: 1px;
     background: linear-gradient(90deg, transparent, rgba(0,200,255,.2), transparent);
     margin-bottom: 32px;
   }
@@ -146,26 +131,15 @@ const styles = `
   .field-group { margin-bottom: 24px; position: relative; }
 
   .field-label {
-    font-family: 'Share Tech Mono', monospace;
-    font-size: 9px;
-    letter-spacing: 3px;
-    color: rgba(0,200,255,.4);
-    text-transform: uppercase;
-    display: block;
-    margin-bottom: 10px;
+    font-family: 'Share Tech Mono', monospace; font-size: 9px; letter-spacing: 3px;
+    color: rgba(0,200,255,.4); text-transform: uppercase; display: block; margin-bottom: 10px;
   }
 
   .field-input {
-    width: 100%;
-    background: rgba(0,200,255,.03);
-    border: none;
-    border-bottom: 1px solid rgba(0,200,255,.2);
-    color: #c8eeff;
-    font-family: 'Share Tech Mono', monospace;
-    font-size: 14px;
-    letter-spacing: 2px;
-    padding: 10px 0;
-    outline: none;
+    width: 100%; background: rgba(0,200,255,.03); border: none;
+    border-bottom: 1px solid rgba(0,200,255,.2); color: #c8eeff;
+    font-family: 'Share Tech Mono', monospace; font-size: 14px;
+    letter-spacing: 2px; padding: 10px 0; outline: none;
     transition: border-color 0.2s ease;
   }
   .field-input::placeholder { color: rgba(0,200,255,.15); }
@@ -176,124 +150,67 @@ const styles = `
   }
 
   .submit-btn {
-    width: 100%;
-    margin-top: 32px;
-    padding: 14px;
-    background: transparent;
-    border: 1px solid rgba(0,200,255,.35);
-    color: rgba(0,200,255,.85);
-    font-family: 'Orbitron', monospace;
-    font-size: 10px;
-    font-weight: 700;
-    letter-spacing: 4px;
-    text-transform: uppercase;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    position: relative;
-    overflow: hidden;
+    width: 100%; margin-top: 32px; padding: 14px;
+    background: transparent; border: 1px solid rgba(0,200,255,.35);
+    color: rgba(0,200,255,.85); font-family: 'Orbitron', monospace;
+    font-size: 10px; font-weight: 700; letter-spacing: 4px; text-transform: uppercase;
+    cursor: pointer; transition: all 0.2s ease; position: relative; overflow: hidden;
   }
   .submit-btn::before {
-    content: '';
-    position: absolute;
-    inset: 0;
-    background: rgba(0,200,255,.06);
-    transform: translateX(-100%);
+    content: ''; position: absolute; inset: 0;
+    background: rgba(0,200,255,.06); transform: translateX(-100%);
     transition: transform 0.3s ease;
   }
   .submit-btn:hover:not(:disabled)::before { transform: translateX(0); }
   .submit-btn:hover:not(:disabled) {
-    border-color: rgba(0,200,255,.8);
-    color: #00c8ff;
+    border-color: rgba(0,200,255,.8); color: #00c8ff;
     box-shadow: 0 0 20px rgba(0,200,255,.15);
   }
   .submit-btn:disabled { opacity: 0.35; cursor: not-allowed; }
 
   .rebel-or {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    margin: 20px 0 0;
-    font-family: 'Share Tech Mono', monospace;
-    font-size: 9px;
-    letter-spacing: 3px;
-    color: rgba(0,200,255,.2);
+    display: flex; align-items: center; gap: 12px; margin: 20px 0 0;
+    font-family: 'Share Tech Mono', monospace; font-size: 9px;
+    letter-spacing: 3px; color: rgba(0,200,255,.2);
   }
   .rebel-or::before, .rebel-or::after {
-    content: '';
-    flex: 1;
-    height: 1px;
-    background: rgba(0,200,255,.1);
+    content: ''; flex: 1; height: 1px; background: rgba(0,200,255,.1);
   }
 
   .google-btn {
-    width: 100%;
-    margin-top: 14px;
-    padding: 13px;
-    background: transparent;
-    border: 1px solid rgba(0,200,255,.15);
-    color: rgba(0,200,255,.45);
-    font-family: 'Share Tech Mono', monospace;
-    font-size: 10px;
-    letter-spacing: 3px;
-    text-transform: uppercase;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 10px;
-    transition: all 0.2s ease;
-    position: relative;
-    overflow: hidden;
+    width: 100%; margin-top: 14px; padding: 13px;
+    background: transparent; border: 1px solid rgba(0,200,255,.15);
+    color: rgba(0,200,255,.45); font-family: 'Share Tech Mono', monospace;
+    font-size: 10px; letter-spacing: 3px; text-transform: uppercase;
+    cursor: pointer; display: flex; align-items: center; justify-content: center;
+    gap: 10px; transition: all 0.2s ease;
   }
-  .google-btn:hover {
-    border-color: rgba(0,200,255,.4);
-    color: rgba(0,200,255,.8);
-  }
-  .google-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+  .google-btn:hover { border-color: rgba(0,200,255,.4); color: rgba(0,200,255,.8); }
 
   .error-msg {
-    font-family: 'Share Tech Mono', monospace;
-    font-size: 10px;
-    letter-spacing: 2px;
-    color: rgba(255,80,80,.8);
-    margin-top: 16px;
-    padding: 10px 12px;
-    border-left: 2px solid rgba(255,80,80,.4);
-    background: rgba(255,80,80,.04);
+    font-family: 'Share Tech Mono', monospace; font-size: 10px; letter-spacing: 2px;
+    color: rgba(255,80,80,.8); margin-top: 16px; padding: 10px 12px;
+    border-left: 2px solid rgba(255,80,80,.4); background: rgba(255,80,80,.04);
   }
 
   .signup-link {
-    margin-top: 28px;
-    text-align: center;
-    font-size: 9px;
-    letter-spacing: 2px;
-    color: rgba(0,200,255,.2);
-    font-family: 'Share Tech Mono', monospace;
+    margin-top: 28px; text-align: center; font-size: 9px; letter-spacing: 2px;
+    color: rgba(0,200,255,.2); font-family: 'Share Tech Mono', monospace;
   }
-  .signup-link a {
-    color: rgba(0,200,255,.5);
-    text-decoration: none;
-    transition: color 0.2s;
-  }
+  .signup-link a { color: rgba(0,200,255,.5); text-decoration: none; transition: color 0.2s; }
   .signup-link a:hover { color: #00c8ff; }
 
   .checking-root {
-    min-height: 100vh;
-    background: #020b18;
-    display: flex;
-    align-items: center;
-    justify-content: center;
+    min-height: 100vh; background: #020b18;
+    display: flex; align-items: center; justify-content: center;
     font-family: 'Share Tech Mono', monospace;
   }
   .checking-text {
-    font-size: 10px;
-    letter-spacing: 4px;
-    color: rgba(0,200,255,.35);
+    font-size: 10px; letter-spacing: 4px; color: rgba(0,200,255,.35);
     animation: blink 1.2s ease-in-out infinite;
   }
 `;
 
-// ── Build the Google OAuth redirect URL ───────────────────────────────────────
 function buildGoogleOAuthURL(): string {
   const state = crypto.randomUUID();
   sessionStorage.setItem("google_oauth_state", state);
@@ -315,7 +232,6 @@ export default function Login() {
   const [password,        setPassword]        = useState("");
   const [error,           setError]           = useState("");
   const [loading,         setLoading]         = useState(false);
-  const [googleLoading,   setGoogleLoading]   = useState(false);
   const [checkingSession, setCheckingSession] = useState(true);
 
   // ── 1. Check existing session ─────────────────────────────────────────────
@@ -340,51 +256,13 @@ export default function Login() {
       });
   }, [navigate]);
 
-  // ── 2. Handle redirect callback — runs if we're back from Google ──────────
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const code  = params.get("code");
-    const state = params.get("state");
-    const saved = sessionStorage.getItem("google_oauth_state");
-
-    if (!code) return;
-
-    // Clear the ?code=...&state=... from the URL immediately
-    window.history.replaceState({}, "", window.location.pathname);
-
-    if (state !== saved) {
-      setError("OAuth state mismatch — please try again.");
-      setCheckingSession(false);
-      return;
-    }
-    sessionStorage.removeItem("google_oauth_state");
-
-    // Exchange the code for tokens via your backend
-    setGoogleLoading(true);
-    setCheckingSession(false);
-    fetch(`${API}/api/auth/google/`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ code, redirect_uri: REDIRECT_URI }),
-    })
-      .then(res => res.json().then(data => ({ ok: res.ok, data })))
-      .then(({ ok, data }) => {
-        if (!ok) { setError(data.detail || data.error || "Google login failed"); return; }
-        localStorage.setItem("access",  data.access);
-        localStorage.setItem("refresh", data.refresh);
-        navigate("/splash", { replace: true });
-      })
-      .catch(() => setError("Google login failed. Try again."))
-      .finally(() => setGoogleLoading(false));
-  }, [navigate]);
-
-  // ── 3. Trigger Google redirect (no popup) ────────────────────────────────
+  // ── 2. Trigger Google redirect — no popup, no One Tap ────────────────────
   const triggerGoogle = () => {
     if (!GOOGLE_CLIENT_ID) { setError("Google login is not configured."); return; }
     window.location.href = buildGoogleOAuthURL();
   };
 
-  // ── 4. Email/password login ───────────────────────────────────────────────
+  // ── 3. Email/password login ───────────────────────────────────────────────
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
@@ -407,14 +285,12 @@ export default function Login() {
     }
   };
 
-  if (checkingSession || googleLoading) {
+  if (checkingSession) {
     return (
       <>
         <style>{styles}</style>
         <div className="checking-root">
-          <span className="checking-text">
-            {googleLoading ? "// authenticating with google..." : "// verifying session..."}
-          </span>
+          <span className="checking-text">// verifying session...</span>
         </div>
       </>
     );
@@ -475,7 +351,7 @@ export default function Login() {
           {error && <div className="error-msg">{error}</div>}
 
           <div className="signup-link">
-            No access yet?&nbsp;<a href="#/signup">Create account</a>
+            No access yet?&nbsp;<a href="/signup">Create account</a>
           </div>
         </div>
       </div>
