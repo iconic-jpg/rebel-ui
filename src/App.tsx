@@ -16,7 +16,7 @@ import { ThemeProvider } from './components/context/ThemeContext.js';
 import KeyRotationPanel from "./components/Modules/KeyRotationPanel.js";
 import VCenterConnect from "./components/Modules/VCenterConnect.js";
 import RebelSplash from "./components/Modules/RebelSplash.js";
-import GoogleCallback from "./GoogleCallback";
+import GoogleCallback from "./GoogleCallback.js";
 
 const API_BASE = "https://r3bel-production.up.railway.app";
 
