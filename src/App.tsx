@@ -15,6 +15,7 @@ import ReportingPage from "./components/Modules/Reporting.js";
 import { ThemeProvider } from './components/context/ThemeContext.js';
 import KeyRotationPanel from "./components/Modules/KeyRotationPanel.js";
 import VCenterConnect from "./components/Modules/VCenterConnect.js";
+import RebelSplash from "./components/Modules/RebelSplash.js";
 
 const API_BASE = "https://r3bel-production.up.railway.app";
 
@@ -52,6 +53,8 @@ export default function App() {
 
             <Route path="cbom"          element={<CBOMPage />} />
             <Route path="pqc"           element={<PQCPosturePage />} />
+            <Route path="/splash" element={<RebelSplash />} />
+
             <Route
               path="pqc-readiness"
               element={
