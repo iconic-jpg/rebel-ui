@@ -40,7 +40,7 @@ export default function RebelSplash() {
   // Auto-navigate to dashboard 900ms after boot completes (fade-out plays first)
   useEffect(() => {
     if (!done) return;
-    const t = setTimeout(() => navigate("/"), 900);
+    const t = setTimeout(() => navigate("/"), 2000);
     return () => clearTimeout(t);
   }, [done, navigate]);
 
@@ -351,12 +351,6 @@ export default function RebelSplash() {
             <div className="rebel-dot" />
             <div className="rebel-dot" />
           </div>
-        )}
-
-        {done && (
-          <button className="rebel-enter-btn" onClick={() => navigate("/")}>
-            ENTER DASHBOARD
-          </button>
         )}
       </div>
     </>
