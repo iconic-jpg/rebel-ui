@@ -3,7 +3,7 @@ import { AreaChart, Area, XAxis, YAxis, ResponsiveContainer, Tooltip } from "rec
 import { useNavigate } from "react-router-dom";
 import { useThemeContext } from '../context/ThemeContext.js'
 
-const API = "https://r3bel-production.up.railway.app";
+const API = "https://r3bel-5464.onrender.com";
 
 // ─── TYPES ────────────────────────────────────────────────────────────────────
 interface ScanResult {

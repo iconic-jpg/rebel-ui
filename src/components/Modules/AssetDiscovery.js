@@ -1,6 +1,6 @@
 import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-runtime";
 import { useState, useEffect, useRef } from "react";
-const API = "https://r3bel-production.up.railway.app";
+const API = "https://r3bel-5464.onrender.com";
 // ── Light Theme Palette ───────────────────────────────────────────────────────
 const L = {
     pageBg: "#f5f7fa",

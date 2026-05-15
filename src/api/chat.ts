@@ -1,4 +1,4 @@
-const API_URL = "https://r3bel-production.up.railway.app/chat";
+const API_URL = "https://r3bel-5464.onrender.com/chat";
 
 export async function sendMessage(messages: any[]) {
   const lastMessage = messages[messages.length - 1];

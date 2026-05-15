@@ -12,7 +12,7 @@ import type { PQCScoreBreakdown } from "./cipherAnalysis.js";
 
 const API =
   (typeof import.meta !== "undefined" && (import.meta as any).env?.VITE_API_BASE) ||
-  "https://r3bel-production.up.railway.app";
+  "https://r3bel-5464.onrender.com";
 
 // ── Cache config ──────────────────────────────────────────────────────────────
 const CACHE_TTL_MS     = 12 * 60 * 60 * 1000;

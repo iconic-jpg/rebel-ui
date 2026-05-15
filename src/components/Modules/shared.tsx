@@ -1,6 +1,6 @@
 import React from "react";
 
-export const API = "https://r3bel-production.up.railway.app";
+export const API = "https://r3bel-5464.onrender.com";
 
 // ── Shared style tokens ──────────────────────────────────────────────────────
 export const T = {

@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { Badge, MOCK_ASSETS, } from "./shared.js";
 // ── API Base ──────────────────────────────────────────────────────────────────
 const API = (typeof import.meta !== "undefined" && import.meta.env?.VITE_API_BASE) ||
-    "https://r3bel-production.up.railway.app";
+    "https://r3bel-5464.onrender.com";
 // ── Cache config ──────────────────────────────────────────────────────────────
 const CACHE_TTL_MS = 12 * 60 * 60 * 1000;
 const CACHE_KEY_NORMAL = "rebel_cache_assets_inventory";

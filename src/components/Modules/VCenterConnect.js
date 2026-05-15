@@ -283,7 +283,7 @@ const okFaultBadge = (v) => tb(v ? "OK" : "FAULT", v ? L.successDim : L.dangerDi
 const typeBadge = (v) => tb(v, L.accentDim, L.accentBorder, L.accent);
 const powerBadge = (v) => tb(v === "poweredOn" ? "ON" : "OFF", v === "poweredOn" ? L.successDim : L.accentDim, v === "poweredOn" ? L.successBorder : L.divider, v === "poweredOn" ? L.success : L.textFaint);
 // ── Main component ────────────────────────────────────────────────────────────
-export default function VCenterConnect({ apiBase = "https://r3bel-production.up.railway.app", onAssets, ghostMode = false, }) {
+export default function VCenterConnect({ apiBase = "https://r3bel-5464.onrender.com", onAssets, ghostMode = false, }) {
     const base = apiBase.replace(/\/$/, "");
     const [host, setHost] = useState("");
     const [user, setUser] = useState("");

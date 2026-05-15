@@ -201,7 +201,7 @@ export default function AppShell() {
                                     color: L.textMuted,
                                     fontFamily: "'Share Tech Mono',monospace",
                                     fontWeight: 500,
-                                }, children: "r3bel-production.up.railway.app" })] })] }), _jsx("button", { onClick: () => setOpen((o) => !o), style: {
+                                }, children: "https://r3bel-5464XXXXX.onrender.com" })] })] }), _jsx("button", { onClick: () => setOpen((o) => !o), style: {
                     position: "fixed",
                     top: 9,
                     left: 10,

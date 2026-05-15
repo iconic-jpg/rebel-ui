@@ -342,7 +342,7 @@ export default function AppShell() {
               fontWeight: 500,
             }}
           >
-            r3bel-production.up.railway.app
+            https://r3bel-5464XXXXX.onrender.com
           </div>
         </div>
       </div>

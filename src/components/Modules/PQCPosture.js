@@ -1,6 +1,6 @@
 import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-runtime";
 import { useState, useEffect } from "react";
-const API = "https://r3bel-production.up.railway.app";
+const API = "https://r3bel-5464.onrender.com";
 // ─── CACHE CONFIG ─────────────────────────────────────────────────────────────
 const CACHE_TTL_MS = 12 * 60 * 60 * 1000;
 const CACHE_KEY_CBOM = "rebel_cache_cbom_pqc";

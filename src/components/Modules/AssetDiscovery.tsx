@@ -4,7 +4,7 @@ import {
   Table, TR, TD, Pulse, MOCK_DOMAINS, MOCK_SSL, MOCK_IPS, MOCK_SOFTWARE,
 } from "./shared.js";
 
-const API = "https://r3bel-production.up.railway.app";
+const API = "https://r3bel-5464.onrender.com";
 
 type DiscTab = "domains"|"ssl"|"ips"|"software";
 

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 
-const API = "https://r3bel-production.up.railway.app";
+const API = "https://r3bel-5464.onrender.com";
 
 // ── Light palette (mirrors PQCReadinessPage) ──────────────────────────────────
 const L = {

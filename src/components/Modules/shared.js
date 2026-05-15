@@ -1,5 +1,5 @@
 import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
-export const API = "https://r3bel-production.up.railway.app";
+export const API = "https://r3bel-5464.onrender.com";
 // ── Shared style tokens ──────────────────────────────────────────────────────
 export const T = {
     blue: "#3b82f6", blue2: "rgba(59,130,246,0.12)", blue3: "rgba(59,130,246,0.06)",

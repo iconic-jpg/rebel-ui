@@ -503,7 +503,7 @@ interface VCenterConnectProps { apiBase?: string; onAssets?: (vms:VM[])=>void; g
 
 // ── Main component ────────────────────────────────────────────────────────────
 export default function VCenterConnect({
-  apiBase   = "https://r3bel-production.up.railway.app",
+  apiBase   = "https://r3bel-5464.onrender.com",
   onAssets,
   ghostMode = false,
 }: VCenterConnectProps) {

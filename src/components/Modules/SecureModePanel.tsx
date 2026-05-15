@@ -5,7 +5,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 // ── Config ────────────────────────────────────────────────────────────────
 const API_BASE = (window as any).__REBEL_API__ ??
   import.meta?.env?.VITE_API_URL ??
-  "https://r3bel-production.up.railway.app";
+  "https://r3bel-5464.onrender.com";
 
 const POLL_MS = 5_000;
 

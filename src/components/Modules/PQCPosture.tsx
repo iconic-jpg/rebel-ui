@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 
-const API = "https://r3bel-production.up.railway.app";
+const API = "https://r3bel-5464.onrender.com";
 
 // ─── CACHE CONFIG ─────────────────────────────────────────────────────────────
 const CACHE_TTL_MS     = 12 * 60 * 60 * 1000;
