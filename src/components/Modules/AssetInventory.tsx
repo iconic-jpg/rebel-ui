@@ -1,48 +1,12 @@
-import React, { useState, useEffect, useRef } from "react";
-import {
-  Badge,
-  MOCK_ASSETS, MOCK_CBOM,
-} from "./shared.js";
+import React, { useState, useEffect, useCallback, useRef } from "react";
+import { Badge } from "./shared.js";
 
 // ── API Base ──────────────────────────────────────────────────────────────────
 const API =
   (typeof import.meta !== "undefined" && (import.meta as any).env?.VITE_API_BASE) ||
   "https://r3bel-5464.onrender.com";
 
-// ── Cache config ──────────────────────────────────────────────────────────────
-const CACHE_TTL_MS          = 12 * 60 * 60 * 1000;
-const CACHE_KEY_NORMAL      = "rebel_cache_assets_inventory";
-const CACHE_KEY_CBOM_NORMAL = "rebel_cache_cbom_inventory";
-const CACHE_KEY_GHOST       = "rebel_cache_assets_ghost";
-
-interface CacheEntry<T> { ts: number; data: T; }
-
-function cacheGet<T>(key: string): T | null {
-  try {
-    const raw = localStorage.getItem(key);
-    if (!raw) return null;
-    const entry: CacheEntry<T> = JSON.parse(raw);
-    if (Date.now() - entry.ts > CACHE_TTL_MS) { localStorage.removeItem(key); return null; }
-    return entry.data;
-  } catch { return null; }
-}
-function cacheSet<T>(key: string, data: T): void {
-  try { localStorage.setItem(key, JSON.stringify({ ts: Date.now(), data })); } catch {}
-}
-function cacheClearAll(): void {
-  [CACHE_KEY_NORMAL, CACHE_KEY_CBOM_NORMAL, CACHE_KEY_GHOST].forEach(k => localStorage.removeItem(k));
-}
-function cacheAgeLabel(key: string): string | null {
-  try {
-    const raw = localStorage.getItem(key);
-    if (!raw) return null;
-    const entry: CacheEntry<unknown> = JSON.parse(raw);
-    const mins = Math.round((Date.now() - entry.ts) / 60000);
-    return mins < 60 ? `${mins}m ago` : `${Math.round(mins / 60)}h ago`;
-  } catch { return null; }
-}
-
-// ── Light Theme Palette ───────────────────────────────────────────────────────
+// ── Light Theme Palette (matches AssetInventoryPage.tsx) ──────────────────────
 const L = {
   pageBg:      "#f5f7fa",
   panelBg:     "#ffffff",
@@ -101,107 +65,16 @@ const LS = {
   },
 };
 
-// ── INR Formatter ─────────────────────────────────────────────────────────────
-const INR_RATE = 83;
-function toINR(usd: number): number { return Math.round(usd * INR_RATE); }
-function fmtINRFull(usd: number): string {
-  return `₹${toINR(usd).toLocaleString("en-IN")}`;
+function useMobile() {
+  const [mobile, setMobile] = useState(window.innerWidth < 768);
+  useEffect(() => {
+    const h = () => setMobile(window.innerWidth < 768);
+    window.addEventListener("resize", h);
+    return () => window.removeEventListener("resize", h);
+  }, []);
+  return mobile;
 }
 
-// ── Merge helper: assets + cbom → unified asset list ─────────────────────────
-function buildMergedAssets(assetsData: any, cbom: any): any[] {
-  // Clone to avoid mutating cached objects
-  const base: any[] = (assetsData?.assets ?? []).map((a: any) => ({ ...a }));
-  if (!cbom?.apps?.length) return base;
-
-  const byName: Record<string, number> = {};
-  base.forEach((a, i) => { if (a.name) byName[a.name.toLowerCase()] = i; });
-
-  const extras: any[] = [];
-  for (const app of cbom.apps ?? []) {
-    const key = (app.app ?? "").toLowerCase();
-    if (!key) continue;
-    const idx = byName[key];
-    if (idx !== undefined) {
-      const existing = base[idx];
-      base[idx] = {
-        ...existing,
-        cipher:             existing.cipher             || app.cipher             || "—",
-        tls:                existing.tls                || app.tls                || "—",
-        keylen:             existing.keylen              || app.keylen             || "—",
-        ca:                 existing.ca                 || app.ca                 || "—",
-        pqc:                existing.pqc                ?? app.pqc                ?? false,
-        pqc_support:        existing.pqc_support        || app.pqc_support        || "none",
-        key_exchange_group: existing.key_exchange_group || app.key_exchange_group || null,
-        is_wildcard:        existing.is_wildcard        ?? app.is_wildcard        ?? null,
-        cbom_status:        app.status,
-      };
-    } else {
-      extras.push({
-        name:               app.app,
-        url:                app.app,
-        type:               "Other",
-        cipher:             app.cipher             || "—",
-        tls:                app.tls                || "—",
-        keylen:             app.keylen             || "—",
-        ca:                 app.ca                 || "—",
-        cert:               "—",
-        scan:               "—",
-        pqc:                app.pqc                ?? false,
-        pqc_support:        app.pqc_support        || "none",
-        key_exchange_group: app.key_exchange_group || null,
-        is_wildcard:        app.is_wildcard        ?? null,
-        cbom_status:        app.status,
-        _fromCbom:          true,
-      });
-    }
-  }
-  return [...base, ...extras];
-}
-
-// ── Derive stats from merged asset list ───────────────────────────────────────
-// Always called after a merge so charts/metrics reflect the full unified set,
-// not just the subset the /assets endpoint happened to pre-compute.
-interface DerivedStats {
-  risk_counts:  { Critical: number; High: number; Medium: number; Low: number };
-  cert_buckets: { "0-30": number; "30-60": number; "60-90": number; "90+": number };
-  by_type:      Record<string, number>;
-}
-function deriveStats(assets: any[]): DerivedStats {
-  const risk_counts  = { Critical: 0, High: 0, Medium: 0, Low: 0 };
-  const cert_buckets = { "0-30": 0, "30-60": 0, "60-90": 0, "90+": 0 };
-  const by_type: Record<string, number> = {};
-
-  for (const a of assets) {
-    // Risk — prefer explicit `risk` field, fallback to `criticality`
-    const r = (a.risk || a.criticality || "") as string;
-    if (r === "Critical")     risk_counts.Critical++;
-    else if (r === "High")    risk_counts.High++;
-    else if (r === "Medium")  risk_counts.Medium++;
-    else if (r === "Low")     risk_counts.Low++;
-
-    // Cert expiry — use numeric days_to_expiry when available, else infer from cert string
-    const dte = a.days_to_expiry;
-    if (typeof dte === "number") {
-      if (dte <= 30)       cert_buckets["0-30"]++;
-      else if (dte <= 60)  cert_buckets["30-60"]++;
-      else if (dte <= 90)  cert_buckets["60-90"]++;
-      else                 cert_buckets["90+"]++;
-    } else if (a.cert === "Expiring") {
-      cert_buckets["0-30"]++;
-    } else if (a.cert === "Valid") {
-      cert_buckets["90+"]++;
-    }
-
-    // Type distribution
-    const t = a.type || "Other";
-    by_type[t] = (by_type[t] || 0) + 1;
-  }
-
-  return { risk_counts, cert_buckets, by_type };
-}
-
-// ── Skeleton components ───────────────────────────────────────────────────────
 function Shimmer({ w = "100%", h = 14, radius = 4, style = {} }: {
   w?: string | number; h?: number; radius?: number; style?: React.CSSProperties;
 }) {
@@ -216,394 +89,256 @@ function Shimmer({ w = "100%", h = 14, radius = 4, style = {} }: {
   );
 }
 
-function SkeletonMetricCard() {
-  return (
-    <div style={{ background: L.panelBg, border: `1px solid ${L.panelBorder}`, borderRadius: 8, padding: "14px 16px", boxShadow: "0 1px 3px rgba(0,0,0,0.05)" }}>
-      <Shimmer w="50%" h={8} style={{ marginBottom: 10 }} />
-      <Shimmer w="65%" h={26} style={{ marginBottom: 8 }} />
-      <Shimmer w="40%" h={8} />
-    </div>
-  );
-}
-
-function SkeletonDonutPanel() {
-  return (
-    <div style={{ ...LS.panel }}>
-      <div style={{ padding: "10px 14px", borderBottom: `1px solid ${L.borderLight}`, background: L.subtleBg, borderRadius: "8px 8px 0 0" }}>
-        <Shimmer w={160} h={9} />
-      </div>
-      <div style={{ padding: 14, display: "flex", gap: 16, alignItems: "center" }}>
-        <div style={{ width: 140, height: 140, flexShrink: 0, borderRadius: "50%", background: "conic-gradient(#e2e8f0 0deg 90deg,#f1f5f9 90deg 200deg,#e2e8f0 200deg 290deg,#f1f5f9 290deg 360deg)", position: "relative", animation: "shimmer 1.4s ease infinite" }}>
-          <div style={{ position: "absolute", inset: 28, borderRadius: "50%", background: L.panelBg }} />
-        </div>
-        <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 9 }}>
-          {[70, 55, 80, 45, 60, 40].map((w, i) => (
-            <div key={i} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <Shimmer w={8} h={8} radius={2} />
-              <Shimmer w={`${w}%`} h={9} />
-              <Shimmer w={18} h={9} style={{ marginLeft: "auto" }} />
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function SkeletonBarPanel() {
-  return (
-    <div style={{ ...LS.panel }}>
-      <div style={{ padding: "10px 14px", borderBottom: `1px solid ${L.borderLight}`, background: L.subtleBg, borderRadius: "8px 8px 0 0", display: "flex", justifyContent: "space-between" }}>
-        <Shimmer w={140} h={9} />
-        <Shimmer w={60} h={18} radius={3} />
-      </div>
-      <div style={{ padding: 14, display: "flex", alignItems: "flex-end", gap: 22, justifyContent: "center", height: 140 }}>
-        {[80, 55, 65, 40].map((h, i) => (
-          <div key={i} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 5 }}>
-            <Shimmer w={36} h={h} radius={3} />
-            <Shimmer w={36} h={9} radius={3} />
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function SkeletonTableRows({ cols, count = 7 }: { cols: number; count?: number }) {
-  const widths = [140, 60, 65, 80, 50, 50, 50, 80, 70, 30];
-  return (
-    <>
-      {Array.from({ length: count }).map((_, i) => (
-        <tr key={i} style={{ borderBottom: `1px solid ${L.borderLight}`, background: i % 2 === 0 ? L.panelBg : L.subtleBg }}>
-          {Array.from({ length: cols }).map((_, j) => (
-            <td key={j} style={{ padding: "10px 8px" }}>
-              <Shimmer w={widths[j] ?? 60} h={j === 0 ? 11 : 9} />
-              {j === 0 && <Shimmer w={100} h={8} style={{ marginTop: 4 }} />}
-            </td>
-          ))}
-        </tr>
-      ))}
-    </>
-  );
-}
-
-function SkeletonMobileCards({ count = 5 }: { count?: number }) {
-  return (
-    <>
-      {Array.from({ length: count }).map((_, i) => (
-        <div key={i} style={{ padding: "10px 14px", borderBottom: `1px solid ${L.borderLight}` }}>
-          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
-            <Shimmer w={160} h={12} />
-            <Shimmer w={52} h={16} radius={3} />
-          </div>
-          <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
-            <Shimmer w={50} h={16} radius={3} />
-            <Shimmer w={50} h={16} radius={3} />
-            <Shimmer w={50} h={16} radius={3} />
-          </div>
-          <Shimmer w="70%" h={9} />
-        </div>
-      ))}
-    </>
-  );
-}
-
-function SkeletonProgBar() {
-  return (
-    <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
-      <Shimmer w={8} h={8} radius={4} />
-      <div style={{ flex: 1 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
-          <Shimmer w={80} h={9} />
-          <Shimmer w={18} h={9} />
-        </div>
-        <Shimmer w="100%" h={4} radius={2} />
-      </div>
-    </div>
-  );
-}
-
-// ── Cache badge ───────────────────────────────────────────────────────────────
-function CacheBadge({ age, onRefresh }: { age: string | null; onRefresh: () => void }) {
-  if (!age) return null;
-  return (
-    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-      <span style={{ fontSize: 8, fontWeight: 600, color: L.text3, background: L.insetBg, border: `1px solid ${L.panelBorder}`, borderRadius: 3, padding: "2px 7px", letterSpacing: ".06em" }}>
-        CACHED · {age}
-      </span>
-      <button onClick={onRefresh} style={{ ...LS.btn, fontSize: 9, padding: "3px 8px", color: L.blue, borderColor: `${L.blue}40`, background: `${L.blue}0d` }}>
-        ↺ REFRESH
-      </button>
-    </div>
-  );
-}
-
-// ── Secure Mode Banner ────────────────────────────────────────────────────────
-function SecureModeBanner() {
-  return (
-    <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 14px", background: `${L.purple}0d`, border: `1px solid ${L.purple}44`, borderRadius: 6 }}>
-      <span style={{ fontSize: 9, color: L.purple, fontWeight: 800, letterSpacing: ".14em", textTransform: "uppercase" as const }}>🔒 SECURE MODE ACTIVE</span>
-      <span style={{ fontSize: 9, color: L.purple, opacity: 0.75 }}>·</span>
-      <span style={{ fontSize: 9, color: L.purple, fontFamily: "'DM Mono', monospace" }}>/ghost/assets — anonymised data, no live scans</span>
-    </div>
-  );
-}
-
-// ── Light sub-components ──────────────────────────────────────────────────────
 function LPanel({ children, style = {} }: { children: React.ReactNode; style?: React.CSSProperties }) {
   return <div style={{ ...LS.panel, ...style }}>{children}</div>;
 }
 function LPanelHeader({ left, right }: { left: string; right?: React.ReactNode }) {
   return (
-    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", borderBottom: `1px solid ${L.borderLight}`, background: L.subtleBg, borderRadius: "8px 8px 0 0" }}>
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", borderBottom: `1px solid ${L.borderLight}`, background: L.subtleBg, borderRadius: "8px 8px 0 0", flexWrap: "wrap", gap: 8 }}>
       <span style={{ fontSize: 9, fontWeight: 700, color: L.text3, letterSpacing: ".14em", textTransform: "uppercase" as const }}>{left}</span>
       {right}
     </div>
   );
 }
-function LMetricCard({ label, value, sub, color }: { label: string; value: string | number; sub: string; color: string }) {
+function LMetricCard({ label, value, sub, color, loading }: { label: string; value: string | number; sub: string; color: string; loading?: boolean }) {
   return (
     <div style={{ background: L.panelBg, border: `1px solid ${L.panelBorder}`, borderRadius: 8, padding: "14px 16px", boxShadow: "0 1px 3px rgba(0,0,0,0.05)" }}>
       <div style={{ fontSize: 8, color: L.text4, textTransform: "uppercase" as const, letterSpacing: ".12em", marginBottom: 6, fontWeight: 600 }}>{label}</div>
-      <div style={{ fontSize: 22, fontWeight: 800, color, lineHeight: 1 }}>{value}</div>
+      {loading ? <Shimmer w="60%" h={22} style={{ marginBottom: 8 }} /> : <div style={{ fontSize: 22, fontWeight: 800, color, lineHeight: 1 }}>{value}</div>}
       <div style={{ fontSize: 9, color: L.text3, marginTop: 5 }}>{sub}</div>
     </div>
   );
 }
-function LProgBar({ pct, color }: { pct: number; color: string }) {
-  return (
-    <div style={{ height: 4, background: L.insetBg, borderRadius: 2, border: `1px solid ${L.panelBorder}`, overflow: "hidden" }}>
-      <div style={{ height: "100%", width: `${Math.min(pct, 100)}%`, background: color, borderRadius: 2, transition: "width 0.6s ease" }} />
-    </div>
-  );
+
+// ── Types ──────────────────────────────────────────────────────────────────────
+interface CryptoAsset {
+  id: number;
+  asset_name: string;
+  asset_type: string;
+  environment: string;
+  cloud_provider: string;
+  business_owner: string;
+  team: string;
+  application: string;
+  creation_date: string | null;
+  expiration_date: string | null;
+  last_rotation: string | null;
+  next_rotation: string | null;
+  compliance_status: string;
+  risk_score: number;
+  health_status: string;
+  tags: string[];
+  region: string;
+  encryption_algorithm: string;
+  key_size: string;
 }
 
-// ── useMobile ─────────────────────────────────────────────────────────────────
-function useMobile() {
-  const [mobile, setMobile] = useState(window.innerWidth < 768);
-  useEffect(() => {
-    const h = () => setMobile(window.innerWidth < 768);
-    window.addEventListener("resize", h);
-    return () => window.removeEventListener("resize", h);
-  }, []);
-  return mobile;
+interface Facets {
+  asset_type: string[];
+  environment: string[];
+  cloud_provider: string[];
+  compliance_status: string[];
+  health_status: string[];
+  team: string[];
+  business_owner: string[];
 }
 
-// ── Main Component ────────────────────────────────────────────────────────────
-export default function AssetInventoryPage() {
-  const [assets,            setAssets]            = useState<any[]>([]);
-  const [loading,           setLoading]           = useState(true);
-  const [fetchError,        setFetchError]        = useState(false);
-  const [fromCache,         setFromCache]         = useState(false);
-  const [cacheAge,          setCacheAge]          = useState<string | null>(null);
-  const [query,             setQuery]             = useState("");
-  const [filterCrit,        setFilterCrit]        = useState("All");
-  const [expandedRow,       setExpandedRow]       = useState<number | null>(null);
-  const [riskCounts,        setRiskCounts]        = useState({ Critical: 0, High: 0, Medium: 0, Low: 0 });
-  const [certBuckets,       setCertBuckets]       = useState({ "0-30": 0, "30-60": 0, "60-90": 0, "90+": 0 });
-  const [byType,            setByType]            = useState<Record<string, number>>({});
-  const [secureModeOn,      setSecureModeOn]      = useState(false);
-  const [secureModeLoading, setSecureModeLoading] = useState(true);
+interface DependencyInfo {
+  depends_on: { id: number; asset_name: string; asset_type: string; health_status: string; relationship: string }[];
+  used_by:    { id: number; asset_name: string; asset_type: string; health_status: string; relationship: string }[];
+}
 
-  const typeRef   = useRef<HTMLCanvasElement>(null);
-  const riskRef   = useRef<HTMLCanvasElement>(null);
-  const legendRef = useRef<HTMLDivElement>(null);
-  const mobile    = useMobile();
+const EMPTY_FACETS: Facets = {
+  asset_type: [], environment: [], cloud_provider: [],
+  compliance_status: [], health_status: [], team: [], business_owner: [],
+};
 
-  // ── Fetch secure mode status ──────────────────────────────────────────────
+// ── Helpers ────────────────────────────────────────────────────────────────────
+function fmtDate(iso: string | null): string {
+  if (!iso) return "—";
+  try { return new Date(iso).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }); }
+  catch { return "—"; }
+}
+function daysUntil(iso: string | null): number | null {
+  if (!iso) return null;
+  const diff = new Date(iso).getTime() - Date.now();
+  return Math.round(diff / 86400000);
+}
+function healthColor(h: string) { return ({ Healthy: L.green, Warning: L.yellow, Critical: L.red }[h] ?? L.text3); }
+function healthBg(h: string) { return ({ Healthy: "#f0fdf4", Warning: "#fffbeb", Critical: "#fff5f5" }[h] ?? L.subtleBg); }
+function complianceVariant(c: string): any {
+  return c === "Compliant" ? "green" : c === "Pending Review" ? "yellow" : c === "Non-Compliant" ? "red" : "gray";
+}
+function riskColor(score: number) {
+  if (score >= 75) return L.red;
+  if (score >= 40) return L.yellow;
+  return L.green;
+}
+
+const SORT_COLUMNS: { key: string; label: string }[] = [
+  { key: "asset_name", label: "ASSET" },
+  { key: "asset_type", label: "TYPE" },
+  { key: "environment", label: "ENV" },
+  { key: "business_owner", label: "OWNER" },
+  { key: "team", label: "TEAM" },
+  { key: "compliance_status", label: "COMPLIANCE" },
+  { key: "health_status", label: "HEALTH" },
+  { key: "risk_score", label: "RISK" },
+  { key: "next_rotation", label: "NEXT ROTATION" },
+];
+
+// ── Main Component ─────────────────────────────────────────────────────────────
+export default function CryptoAssetInventory() {
+  const mobile = useMobile();
+
+  const [assets, setAssets]           = useState<CryptoAsset[]>([]);
+  const [total, setTotal]             = useState(0);
+  const [totalPages, setTotalPages]   = useState(1);
+  const [page, setPage]               = useState(1);
+  const [pageSize]                    = useState(25);
+  const [loading, setLoading]         = useState(true);
+  const [fetchError, setFetchError]   = useState(false);
+
+  const [query, setQuery]                       = useState("");
+  const [debouncedQuery, setDebouncedQuery]     = useState("");
+  const [assetType, setAssetType]               = useState("");
+  const [environment, setEnvironment]           = useState("");
+  const [cloudProvider, setCloudProvider]       = useState("");
+  const [complianceStatus, setComplianceStatus] = useState("");
+  const [healthStatus, setHealthStatus]         = useState("");
+  const [sortBy, setSortBy]                     = useState("risk_score");
+  const [sortDir, setSortDir]                   = useState<"asc" | "desc">("desc");
+
+  const [facets, setFacets] = useState<Facets>(EMPTY_FACETS);
+
+  const [expandedId, setExpandedId]     = useState<number | null>(null);
+  const [deps, setDeps]                 = useState<Record<number, DependencyInfo>>({});
+  const [depsLoading, setDepsLoading]   = useState<number | null>(null);
+
+  // Lightweight aggregate counts for the metric cards — piggybacks on the
+  // same paginated endpoint (page_size=1) since it already returns `total`
+  // for whatever filter combination is passed.
+  const [counts, setCounts] = useState({ total: 0, critical: 0, nonCompliant: 0, overdueRotation: 0 });
+  const [countsLoading, setCountsLoading] = useState(true);
+
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // ── Debounce search input ──────────────────────────────────────────────────
   useEffect(() => {
-    fetch(`${API}/secure-mode/status`)
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => setDebouncedQuery(query), 350);
+    return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
+  }, [query]);
+
+  // Reset to page 1 whenever a filter changes
+  useEffect(() => { setPage(1); }, [debouncedQuery, assetType, environment, cloudProvider, complianceStatus, healthStatus, sortBy, sortDir]);
+
+  // ── Fetch facets once ───────────────────────────────────────────────────────
+  useEffect(() => {
+    fetch(`${API}/crypto-assets/facets`)
       .then(r => r.ok ? r.json() : null)
-      .then(d => { if (d?.enabled !== undefined) setSecureModeOn(Boolean(d.enabled)); })
-      .catch(() => {})
-      .finally(() => setSecureModeLoading(false));
+      .then(d => { if (d) setFacets(d); })
+      .catch(() => {});
   }, []);
 
-  // ── Commit a resolved asset list to state, always re-deriving stats ───────
-  // We always call deriveStats on the FINAL merged list so the charts and
-  // metric cards reflect CBOM-sourced entries too, not just /assets pre-computed totals.
-  const commitAssets = (finalAssets: any[]) => {
-    setAssets(finalAssets);
-    const stats = deriveStats(finalAssets);
-    setRiskCounts(stats.risk_counts);
-    setCertBuckets(stats.cert_buckets);
-    setByType(stats.by_type);
-  };
+  // ── Fetch metric counts whenever filters unrelated to health/compliance change ──
+  useEffect(() => {
+    setCountsLoading(true);
+    const base = new URLSearchParams({ page: "1", page_size: "1" });
+    if (debouncedQuery) base.set("q", debouncedQuery);
+    if (assetType) base.set("asset_type", assetType);
+    if (environment) base.set("environment", environment);
+    if (cloudProvider) base.set("cloud_provider", cloudProvider);
 
-  // ── Data fetch with cache ─────────────────────────────────────────────────
-  const loadData = async (forceRefresh = false) => {
+    const withParam = (key: string, val: string) => {
+      const p = new URLSearchParams(base);
+      p.set(key, val);
+      return p;
+    };
+
+    Promise.all([
+      fetch(`${API}/crypto-assets?${base.toString()}`).then(r => r.ok ? r.json() : { total: 0 }),
+      fetch(`${API}/crypto-assets?${withParam("health_status", "Critical").toString()}`).then(r => r.ok ? r.json() : { total: 0 }),
+      fetch(`${API}/crypto-assets?${withParam("compliance_status", "Non-Compliant").toString()}`).then(r => r.ok ? r.json() : { total: 0 }),
+    ]).then(([totalRes, criticalRes, nonCompliantRes]) => {
+      setCounts({
+        total: totalRes.total ?? 0,
+        critical: criticalRes.total ?? 0,
+        nonCompliant: nonCompliantRes.total ?? 0,
+        overdueRotation: 0, // computed client-side below from the current page as a lightweight proxy
+      });
+    }).catch(() => {}).finally(() => setCountsLoading(false));
+  }, [debouncedQuery, assetType, environment, cloudProvider]);
+
+  // ── Fetch assets ──────────────────────────────────────────────────────────
+  const loadAssets = useCallback(async () => {
     setLoading(true);
     setFetchError(false);
+    try {
+      const params = new URLSearchParams({
+        page: String(page),
+        page_size: String(pageSize),
+        sort_by: sortBy,
+        sort_dir: sortDir,
+      });
+      if (debouncedQuery) params.set("q", debouncedQuery);
+      if (assetType) params.set("asset_type", assetType);
+      if (environment) params.set("environment", environment);
+      if (cloudProvider) params.set("cloud_provider", cloudProvider);
+      if (complianceStatus) params.set("compliance_status", complianceStatus);
+      if (healthStatus) params.set("health_status", healthStatus);
 
-    if (secureModeOn) {
-      // ── SECURE MODE: /ghost/assets only ──────────────────────────────────
-      if (!forceRefresh) {
-        const cached = cacheGet<any>(CACHE_KEY_GHOST);
-        if (cached) {
-          commitAssets(cached?.assets?.length ? cached.assets : MOCK_ASSETS);
-          setFromCache(true);
-          setCacheAge(cacheAgeLabel(CACHE_KEY_GHOST));
-          setLoading(false);
-          return;
-        }
-      }
-      try {
-        const d = await fetch(`${API}/ghost/assets`).then(r => { if (!r.ok) throw new Error(); return r.json(); });
-        cacheSet(CACHE_KEY_GHOST, d);
-        commitAssets(d?.assets?.length ? d.assets : MOCK_ASSETS);
-        setFromCache(false);
-        setCacheAge(null);
-      } catch {
-        setFetchError(true);
-        commitAssets(MOCK_ASSETS);
-      }
-
-    } else {
-      // ── NORMAL MODE: /assets + /cbom merged ──────────────────────────────
-      if (!forceRefresh) {
-        const cachedAssets = cacheGet<any>(CACHE_KEY_NORMAL);
-        const cachedCbom   = cacheGet<any>(CACHE_KEY_CBOM_NORMAL);
-        if (cachedAssets) {
-          const merged = cachedCbom
-            ? buildMergedAssets(cachedAssets, cachedCbom)
-            : (cachedAssets.assets ?? []);
-          commitAssets(merged.length ? merged : MOCK_ASSETS);
-          setFromCache(true);
-          setCacheAge(cacheAgeLabel(CACHE_KEY_NORMAL));
-          setLoading(false);
-          return;
-        }
-      }
-      try {
-        const [assetsData, cbomData] = await Promise.all([
-          fetch(`${API}/assets`).then(r => { if (!r.ok) throw new Error(); return r.json(); }),
-          fetch(`${API}/cbom`).then(r => r.ok ? r.json() : null).catch(() => null),
-        ]);
-        cacheSet(CACHE_KEY_NORMAL, assetsData);
-        if (cbomData) cacheSet(CACHE_KEY_CBOM_NORMAL, cbomData);
-        const merged = cbomData
-          ? buildMergedAssets(assetsData, cbomData)
-          : (assetsData?.assets ?? []);
-        commitAssets(merged.length ? merged : MOCK_ASSETS);
-        setFromCache(false);
-        setCacheAge(null);
-      } catch {
-        setFetchError(true);
-        commitAssets(MOCK_ASSETS);
-      }
+      const res = await fetch(`${API}/crypto-assets?${params.toString()}`);
+      if (!res.ok) throw new Error();
+      const data = await res.json();
+      setAssets(data.assets ?? []);
+      setTotal(data.total ?? 0);
+      setTotalPages(data.total_pages ?? 1);
+    } catch {
+      setFetchError(true);
+      setAssets([]);
+      setTotal(0);
+      setTotalPages(1);
     }
-
     setLoading(false);
+  }, [page, pageSize, sortBy, sortDir, debouncedQuery, assetType, environment, cloudProvider, complianceStatus, healthStatus]);
+
+  useEffect(() => { loadAssets(); }, [loadAssets]);
+
+  const toggleSort = (key: string) => {
+    if (sortBy === key) setSortDir(d => (d === "asc" ? "desc" : "asc"));
+    else { setSortBy(key); setSortDir("desc"); }
   };
 
-  function handleForceRefresh() {
-    cacheClearAll();
-    setFromCache(false);
-    setCacheAge(null);
-    loadData(true);
-  }
-
-  useEffect(() => {
-    if (!secureModeLoading) loadData();
-  }, [secureModeOn, secureModeLoading]);
-
-  useEffect(() => {
-    if (!loading) { drawTypeChart(); drawRiskChart(); }
-  }, [assets, riskCounts, byType, mobile, loading]);
-
-  // ── Charts ────────────────────────────────────────────────────────────────
-  function drawTypeChart() {
-    const c = typeRef.current; if (!c) return;
-    const ctx = c.getContext("2d")!;
-    const W = 140, H = 140, cx = 70, cy = 70, r = 50, gap = 0.05;
-    const data = [
-      { label: "Web Apps",         val: byType["Web App"] || byType["Web Apps"] || 0, color: L.blue    },
-      { label: "APIs",             val: byType["API"]     || byType["APIs"]     || 0, color: L.purple  },
-      { label: "Core Banking",     val: byType["Core Banking"]     || 0,               color: L.green   },
-      { label: "Internet Banking", val: byType["Internet Banking"] || 0,               color: L.yellow  },
-      { label: "Servers",          val: byType["Server"]  || byType["Servers"]  || 0, color: "#94a3b8" },
-      { label: "Other",            val: byType["Other"]   || 0,                        color: "#cbd5e1" },
-    ].filter(d => d.val > 0);
-    const display = data.length ? data : [{ label: "Web Apps", val: 1, color: L.blue }];
-    const total   = display.reduce((a, d) => a + d.val, 0);
-    let angle = -Math.PI / 2;
-    ctx.clearRect(0, 0, W, H);
-    display.forEach(d => {
-      const sweep = 2 * Math.PI * (d.val / total) - gap;
-      ctx.beginPath(); ctx.moveTo(cx, cy); ctx.arc(cx, cy, r, angle, angle + sweep);
-      ctx.fillStyle = d.color; ctx.fill();
-      angle += 2 * Math.PI * (d.val / total);
-    });
-    ctx.beginPath(); ctx.arc(cx, cy, 28, 0, Math.PI * 2);
-    ctx.fillStyle = "#ffffff"; ctx.fill();
-    ctx.fillStyle = L.text1;
-    ctx.font = "bold 13px 'DM Mono', monospace";
-    ctx.textAlign = "center";
-    ctx.fillText(String(assets.length), cx, cy + 5);
-    if (legendRef.current) {
-      legendRef.current.innerHTML = display.map(d =>
-        `<div style="display:flex;align-items:center;gap:6px;">
-          <div style="width:8px;height:8px;border-radius:2px;background:${d.color};flex-shrink:0;"></div>
-          <span style="font-size:9px;color:${L.text2};flex:1;font-family:'DM Sans',sans-serif;">${d.label}</span>
-          <span style="font-size:9px;font-family:'DM Mono',monospace;color:${L.text3};font-weight:600;">${d.val}</span>
-        </div>`).join("");
+  const toggleExpand = async (a: CryptoAsset) => {
+    if (expandedId === a.id) { setExpandedId(null); return; }
+    setExpandedId(a.id);
+    if (!deps[a.id]) {
+      setDepsLoading(a.id);
+      try {
+        const res = await fetch(`${API}/crypto-assets/${a.id}/dependencies`);
+        if (res.ok) {
+          const d = await res.json();
+          setDeps(prev => ({ ...prev, [a.id]: d }));
+        }
+      } catch {}
+      setDepsLoading(null);
     }
-  }
+  };
 
-  function drawRiskChart() {
-    const c = riskRef.current; if (!c) return;
-    const ctx = c.getContext("2d")!;
-    const W = c.offsetWidth || 280, H = 140;
-    c.width = W;
-    const bars = [
-      { label: "Critical", val: riskCounts.Critical, color: L.red    },
-      { label: "High",     val: riskCounts.High,     color: L.orange },
-      { label: "Medium",   val: riskCounts.Medium,   color: L.yellow },
-      { label: "Low",      val: riskCounts.Low,       color: L.green  },
-    ];
-    const max    = Math.max(...bars.map(b => b.val), 1);
-    const bw     = mobile ? 28 : 36, gap = mobile ? 14 : 22;
-    const startX = (W - (bars.length * (bw + gap) - gap)) / 2;
-    ctx.clearRect(0, 0, W, H);
-    bars.forEach((b, i) => {
-      const x    = startX + i * (bw + gap);
-      const barH = Math.round((b.val / max) * (H - 30));
-      const y    = H - barH - 20;
-      ctx.fillStyle = b.color + "22"; ctx.fillRect(x, y, bw, barH);
-      ctx.fillStyle = b.color + "99"; ctx.fillRect(x, y + 3, bw, barH - 3);
-      ctx.fillStyle = b.color;        ctx.fillRect(x, y, bw, 3);
-      ctx.fillStyle = L.text3;
-      ctx.font = "9px 'DM Mono', monospace"; ctx.textAlign = "center";
-      ctx.fillText(b.label, x + bw / 2, H - 4);
-      ctx.fillStyle = b.color; ctx.font = "bold 9px 'DM Mono', monospace";
-      ctx.fillText(String(b.val), x + bw / 2, y - 4);
-    });
-  }
+  const clearFilters = () => {
+    setQuery(""); setAssetType(""); setEnvironment(""); setCloudProvider("");
+    setComplianceStatus(""); setHealthStatus("");
+  };
 
-  // ── Helpers ───────────────────────────────────────────────────────────────
-  const certVariant = (c: string): any =>
-    c === "Valid" ? "green" : c === "Expiring" ? "yellow" : "red";
-  const keyColor = (k: string) =>
-    k?.startsWith("1024") ? L.red : k?.startsWith("2048") ? L.yellow : L.green;
-  const critColor = (c: string) =>
-    ({ Critical: L.red, High: L.orange, Medium: L.yellow, Low: L.green }[c] ?? null);
-  const critBg = (c: string) =>
-    ({ Critical: "#fff5f5", High: "#fff7ed", Medium: "#fffbeb", Low: "#f0fdf4" }[c] ?? L.subtleBg);
+  const activeFilterCount = [assetType, environment, cloudProvider, complianceStatus, healthStatus].filter(Boolean).length;
+  const expiringSoonOnPage = assets.filter(a => {
+    const d = daysUntil(a.next_rotation);
+    return d !== null && d <= 14;
+  }).length;
 
-  // ── Filter ────────────────────────────────────────────────────────────────
-  const filtered = assets.filter(a => {
-    const ms = !query
-      || a.name?.toLowerCase().includes(query.toLowerCase())
-      || a.owner?.toLowerCase().includes(query.toLowerCase())
-      || a.type?.toLowerCase().includes(query.toLowerCase());
-    const mc = filterCrit === "All" || a.criticality === filterCrit || a.risk === filterCrit;
-    return ms && mc;
-  });
+  const selectSt = { ...LS.input, cursor: "pointer" as const };
 
-  const highRisk = riskCounts.Critical + riskCounts.High;
-  const activeEndpointLabel = secureModeOn ? "→ /ghost/assets" : "→ /assets + /cbom";
-
-  // ── Render ────────────────────────────────────────────────────────────────
   return (
     <div style={LS.page}>
       <style>{`
@@ -616,8 +351,6 @@ export default function AssetInventoryPage() {
         select option { background: ${L.panelBg}; color: ${L.text1}; }
       `}</style>
 
-      {secureModeOn && <SecureModeBanner />}
-
       {/* ── API STATUS BAR ── */}
       <div style={{ display: "flex", alignItems: "center", gap: 10, justifyContent: "space-between", flexWrap: "wrap" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
@@ -625,343 +358,274 @@ export default function AssetInventoryPage() {
           <span style={{ fontSize: 8, fontFamily: "'DM Mono',monospace", color: fetchError ? L.red : L.green, fontWeight: 600 }}>
             {fetchError ? "✗" : "✓"} {API}
           </span>
-          <span style={{
-            fontSize: 8, fontFamily: "'DM Mono',monospace", fontWeight: 700,
-            color: secureModeOn ? L.purple : L.cyan,
-            background: secureModeOn ? `${L.purple}10` : `${L.cyan}10`,
-            border: `1px solid ${secureModeOn ? L.purple : L.cyan}44`,
-            borderRadius: 3, padding: "2px 6px", letterSpacing: ".04em",
-          }}>{activeEndpointLabel}</span>
-          {fetchError && <span style={{ fontSize: 8, color: L.red }}>— showing demo data</span>}
+          <span style={{ fontSize: 8, fontFamily: "'DM Mono',monospace", fontWeight: 700, color: L.cyan, background: `${L.cyan}10`, border: `1px solid ${L.cyan}44`, borderRadius: 3, padding: "2px 6px", letterSpacing: ".04em" }}>
+            → /crypto-assets
+          </span>
+          {fetchError && <span style={{ fontSize: 8, color: L.red }}>— request failed</span>}
           {loading && <span style={{ fontSize: 8, color: L.blue }}>fetching…</span>}
         </div>
-        {fromCache && <CacheBadge age={cacheAge} onRefresh={handleForceRefresh} />}
       </div>
 
       {/* ── METRICS ── */}
       <div style={{ display: "grid", gridTemplateColumns: mobile ? "1fr 1fr" : "repeat(4,1fr)", gap: mobile ? 8 : 9 }}>
-        {loading
-          ? Array.from({ length: 4 }).map((_, i) => <SkeletonMetricCard key={i} />)
-          : <>
-              <LMetricCard label="TOTAL ASSETS"  value={assets.length}                                 sub="Scanned"            color={L.blue}   />
-              <LMetricCard label="HIGH RISK"      value={highRisk}                                      sub="Immediate action"   color={L.red}    />
-              <LMetricCard label="CERT EXPIRING"  value={certBuckets["0-30"]}                           sub="Within 30 days"     color={L.orange} />
-              <div style={mobile ? { gridColumn: "1/-1" } : {}}>
-                <LMetricCard label="ACTIVE CERTS" value={assets.filter(a => a.cert === "Valid").length} sub="Valid certificates" color={L.green} />
-              </div>
-            </>
-        }
-      </div>
-
-      {/* ── CHARTS ── */}
-      <div style={{ display: "grid", gridTemplateColumns: mobile ? "1fr" : "1fr 1fr", gap: mobile ? 8 : 10 }}>
-        {loading
-          ? <><SkeletonDonutPanel /><SkeletonBarPanel /></>
-          : <>
-              <LPanel>
-                <LPanelHeader left="ASSET TYPE DISTRIBUTION" />
-                <div style={{ padding: 14, display: "flex", gap: 16, alignItems: "center" }}>
-                  <canvas ref={typeRef} width={140} height={140} style={{ flexShrink: 0 }} />
-                  <div ref={legendRef} style={{ display: "flex", flexDirection: "column", gap: 7, flex: 1 }} />
-                </div>
-              </LPanel>
-              <LPanel>
-                <LPanelHeader
-                  left="RISK DISTRIBUTION"
-                  right={
-                    <span style={{ fontFamily: "'DM Mono',monospace", fontSize: 18, color: L.red, fontWeight: 800 }}>
-                      {highRisk}<span style={{ fontSize: 11, fontWeight: 600 }}> high</span>
-                    </span>
-                  }
-                />
-                <div style={{ padding: 14 }}>
-                  <canvas ref={riskRef} width={280} height={140} style={{ width: "100%" }} />
-                </div>
-              </LPanel>
-            </>
-        }
+        <LMetricCard label="TOTAL CRYPTO ASSETS" value={counts.total} sub="Across all types" color={L.blue} loading={countsLoading} />
+        <LMetricCard label="CRITICAL HEALTH" value={counts.critical} sub="Needs immediate action" color={L.red} loading={countsLoading} />
+        <LMetricCard label="NON-COMPLIANT" value={counts.nonCompliant} sub="Failing a control" color={L.orange} loading={countsLoading} />
+        <LMetricCard label="ROTATION DUE (this page)" value={expiringSoonOnPage} sub="Within 14 days" color={L.yellow} loading={loading} />
       </div>
 
       {/* ── ASSET TABLE ── */}
       <LPanel>
         <LPanelHeader
-          left="ASSET INVENTORY"
+          left="CRYPTO ASSET INVENTORY"
           right={
-            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-              {fromCache && !mobile && <CacheBadge age={cacheAge} onRefresh={handleForceRefresh} />}
+            <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
               <input
                 value={query}
                 onChange={e => setQuery(e.target.value)}
-                placeholder="Search domain / owner..."
-                style={{ ...LS.input, width: mobile ? 120 : 170 }}
-                disabled={loading}
+                placeholder="Search name / owner / app..."
+                style={{ ...LS.input, width: mobile ? 130 : 190 }}
               />
-              <select
-                value={filterCrit}
-                onChange={e => setFilterCrit(e.target.value)}
-                style={{ ...LS.input, cursor: "pointer" }}
-                disabled={loading}
-              >
-                <option value="All">All</option>
-                {["Critical", "High", "Medium", "Low"].map(c => <option key={c}>{c}</option>)}
+              <select value={assetType} onChange={e => setAssetType(e.target.value)} style={selectSt}>
+                <option value="">All Types</option>
+                {facets.asset_type.map(t => <option key={t} value={t}>{t}</option>)}
               </select>
+              <select value={environment} onChange={e => setEnvironment(e.target.value)} style={selectSt}>
+                <option value="">All Envs</option>
+                {facets.environment.map(t => <option key={t} value={t}>{t}</option>)}
+              </select>
+              <select value={cloudProvider} onChange={e => setCloudProvider(e.target.value)} style={selectSt}>
+                <option value="">All Clouds</option>
+                {facets.cloud_provider.map(t => <option key={t} value={t}>{t}</option>)}
+              </select>
+              <select value={complianceStatus} onChange={e => setComplianceStatus(e.target.value)} style={selectSt}>
+                <option value="">All Compliance</option>
+                {facets.compliance_status.map(t => <option key={t} value={t}>{t}</option>)}
+              </select>
+              <select value={healthStatus} onChange={e => setHealthStatus(e.target.value)} style={selectSt}>
+                <option value="">All Health</option>
+                {facets.health_status.map(t => <option key={t} value={t}>{t}</option>)}
+              </select>
+              {activeFilterCount > 0 && (
+                <button onClick={clearFilters} style={{ ...LS.btn, color: L.red, borderColor: `${L.red}40`, background: `${L.red}0d` }}>
+                  Clear ({activeFilterCount})
+                </button>
+              )}
             </div>
           }
         />
 
         {/* Mobile cards */}
         {mobile ? (
-          <div style={{ maxHeight: 420, overflowY: "auto" }}>
-            {loading
-              ? <SkeletonMobileCards count={5} />
-              : filtered.length
-                ? filtered.map((a, i) => {
-                    const scope = Array.isArray(a.compliance_scope) ? a.compliance_scope : [];
-                    const cc    = critColor(a.criticality);
-                    const cbg   = cc ? critBg(a.criticality) : undefined;
-                    const tlsN  = (a.tls || "").replace(/^TLSv?/i, "");
-                    return (
-                      <div key={i} style={{ padding: "10px 14px", borderBottom: `1px solid ${L.borderLight}` }}>
-                        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
-                          <span style={{ fontSize: 12, color: L.blue, fontWeight: 600 }}>{a.name}</span>
-                          <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
-                            {a._fromCbom && <span style={{ fontSize: 7, color: L.purple, border: `1px solid ${L.purple}44`, borderRadius: 2, padding: "1px 4px", background: `${L.purple}0a` }}>CBOM</span>}
-                            {cc && <span style={{ fontSize: 7, fontWeight: 700, color: cc, border: `1px solid ${cc}44`, borderRadius: 2, padding: "1px 5px", background: cbg }}>{a.criticality}</span>}
-                          </div>
-                        </div>
-                        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 4 }}>
-                          <Badge v="gray">{a.type || "—"}</Badge>
-                          <Badge v={certVariant(a.cert)}>{a.cert || "—"}</Badge>
-                          <Badge v={tlsN === "1.0" ? "red" : tlsN === "1.2" ? "yellow" : "green"}>TLS {tlsN || "—"}</Badge>
-                        </div>
-                        {scope.length > 0 && (
-                          <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-                            {scope.map((s: string) => (
-                              <span key={s} style={{ fontSize: 7, color: L.cyan, border: `1px solid ${L.cyan}44`, borderRadius: 2, padding: "1px 5px", background: `${L.cyan}0a` }}>{s}</span>
-                            ))}
-                          </div>
-                        )}
-                        <div style={{ fontSize: 9, color: L.text3, marginTop: 4, fontFamily: "'DM Mono',monospace" }}>
-                          {a.keylen} · {a.ca} · {a.scan || "—"}
-                        </div>
+          <div style={{ maxHeight: 460, overflowY: "auto" }}>
+            {loading ? (
+              Array.from({ length: 5 }).map((_, i) => (
+                <div key={i} style={{ padding: "10px 14px", borderBottom: `1px solid ${L.borderLight}` }}>
+                  <Shimmer w="60%" h={12} style={{ marginBottom: 6 }} />
+                  <Shimmer w="40%" h={9} />
+                </div>
+              ))
+            ) : assets.length ? (
+              assets.map(a => {
+                const isOpen = expandedId === a.id;
+                return (
+                  <div key={a.id}>
+                    <div onClick={() => toggleExpand(a)} style={{ padding: "10px 14px", borderBottom: `1px solid ${L.borderLight}`, cursor: "pointer" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+                        <span style={{ fontSize: 12, color: L.blue, fontWeight: 600 }}>{a.asset_name}</span>
+                        <span style={{ fontSize: 7, fontWeight: 700, color: healthColor(a.health_status), border: `1px solid ${healthColor(a.health_status)}44`, borderRadius: 2, padding: "1px 5px", background: healthBg(a.health_status) }}>{a.health_status}</span>
                       </div>
-                    );
-                  })
-                : <div style={{ padding: 20, fontSize: 10, color: L.text3, textAlign: "center" }}>No assets found</div>
-            }
+                      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 4 }}>
+                        <Badge v="gray">{a.asset_type}</Badge>
+                        <Badge v={complianceVariant(a.compliance_status)}>{a.compliance_status}</Badge>
+                      </div>
+                      <div style={{ fontSize: 9, color: L.text3, fontFamily: "'DM Mono',monospace" }}>
+                        {a.team} · Risk {a.risk_score} · Next rotation {fmtDate(a.next_rotation)}
+                      </div>
+                    </div>
+                    {isOpen && (
+                      <div style={{ padding: "10px 14px", background: L.insetBg, borderBottom: `1px solid ${L.borderLight}` }}>
+                        <DependencyPanel deps={deps[a.id]} loading={depsLoading === a.id} />
+                      </div>
+                    )}
+                  </div>
+                );
+              })
+            ) : (
+              <div style={{ padding: 20, fontSize: 10, color: L.text3, textAlign: "center" }}>No crypto assets found</div>
+            )}
           </div>
         ) : (
           <div style={{ overflowX: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", fontFamily: "'DM Sans',system-ui,sans-serif" }}>
               <thead>
                 <tr style={{ background: L.subtleBg, borderBottom: `2px solid ${L.panelBorder}` }}>
-                  {["ASSET", "TYPE", "CRITICALITY", "OWNER", "TLS", "CERT", "KEY LEN", "COMPLIANCE", "LAST SCAN", ""].map(h => (
-                    <th key={h} style={{ padding: "7px 8px", fontSize: 8, fontWeight: 700, color: L.text3, textTransform: "uppercase" as const, letterSpacing: ".08em", textAlign: "left", whiteSpace: "nowrap" }}>{h}</th>
+                  {SORT_COLUMNS.map(col => (
+                    <th
+                      key={col.key}
+                      onClick={() => toggleSort(col.key)}
+                      style={{ padding: "7px 8px", fontSize: 8, fontWeight: 700, color: sortBy === col.key ? L.blue : L.text3, textTransform: "uppercase" as const, letterSpacing: ".08em", textAlign: "left", whiteSpace: "nowrap", cursor: "pointer", userSelect: "none" }}
+                    >
+                      {col.label}{sortBy === col.key ? (sortDir === "asc" ? " ▲" : " ▼") : ""}
+                    </th>
                   ))}
+                  <th style={{ padding: "7px 8px", fontSize: 8 }} />
                 </tr>
               </thead>
               <tbody>
-                {loading
-                  ? <SkeletonTableRows cols={10} count={7} />
-                  : filtered.length
-                    ? filtered.map((a, i) => {
-                        const scope  = Array.isArray(a.compliance_scope) ? a.compliance_scope : [];
-                        const cc     = critColor(a.criticality);
-                        const cbg    = cc ? critBg(a.criticality) : undefined;
-                        const tlsN   = (a.tls || "").replace(/^TLSv?/i, "");
-                        const isOpen = expandedRow === i;
-                        const rowBg  = i % 2 === 0 ? L.panelBg : L.subtleBg;
-                        return (
-                          <React.Fragment key={i}>
-                            <tr
-                              style={{ borderBottom: `1px solid ${L.borderLight}`, background: rowBg }}
-                              onMouseEnter={e => (e.currentTarget.style.background = L.insetBg)}
-                              onMouseLeave={e => (e.currentTarget.style.background = rowBg)}
-                            >
-                              <td style={{ padding: "8px 8px" }}>
-                                <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
-                                  <div style={{ fontSize: 10, color: L.blue, fontWeight: 600 }}>{a.name}</div>
-                                  {a._fromCbom && <span style={{ fontSize: 7, color: L.purple, border: `1px solid ${L.purple}44`, borderRadius: 2, padding: "1px 4px", background: `${L.purple}0a`, flexShrink: 0 }}>CBOM</span>}
-                                </div>
-                                <div style={{ fontSize: 8, color: L.text4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 160 }}>{a.url}</div>
-                              </td>
-                              <td style={{ padding: "8px 8px" }}>
-                                <span style={{ fontSize: 8, color: L.text3, background: L.insetBg, border: `1px solid ${L.panelBorder}`, borderRadius: 3, padding: "1px 5px", fontWeight: 600 }}>{a.type || "—"}</span>
-                              </td>
-                              <td style={{ padding: "8px 8px" }}>
-                                {cc
-                                  ? <span style={{ fontSize: 8, fontWeight: 700, color: cc, border: `1px solid ${cc}44`, borderRadius: 3, padding: "1px 6px", background: cbg }}>{a.criticality}</span>
-                                  : <span style={{ fontSize: 9, color: L.text3 }}>—</span>
-                                }
-                              </td>
-                              <td style={{ padding: "8px 8px" }}>
-                                <div style={{ fontSize: 9, color: L.text2, fontWeight: 500 }}>{a.owner || "—"}</div>
-                                {a.owner_email && <div style={{ fontSize: 8, color: L.text4 }}>{a.owner_email}</div>}
-                              </td>
-                              <td style={{ padding: "8px 8px" }}>
-                                <span style={{ fontSize: 8, fontWeight: 600, color: tlsN === "1.0" ? L.red : tlsN === "1.2" ? L.yellow : L.green, background: tlsN === "1.0" ? "#fff5f5" : tlsN === "1.2" ? "#fffbeb" : "#f0fdf4", border: `1px solid ${tlsN === "1.0" ? L.red : tlsN === "1.2" ? L.yellow : L.green}33`, borderRadius: 3, padding: "1px 5px" }}>TLS {tlsN || "—"}</span>
-                              </td>
-                              <td style={{ padding: "8px 8px" }}>
-                                <Badge v={certVariant(a.cert)}>{a.cert || "—"}</Badge>
-                              </td>
-                              <td style={{ padding: "8px 8px", fontSize: 10, fontWeight: 700, fontFamily: "'DM Mono',monospace", color: keyColor(a.keylen) }}>{a.keylen || "—"}</td>
-                              <td style={{ padding: "8px 8px" }}>
-                                <div style={{ display: "flex", gap: 3, flexWrap: "wrap" }}>
-                                  {scope.slice(0, 3).map((s: string) => (
-                                    <span key={s} style={{ fontSize: 7, color: L.cyan, border: `1px solid ${L.cyan}44`, borderRadius: 2, padding: "1px 4px", background: `${L.cyan}0a` }}>{s}</span>
+                {loading ? (
+                  Array.from({ length: 8 }).map((_, i) => (
+                    <tr key={i} style={{ borderBottom: `1px solid ${L.borderLight}`, background: i % 2 === 0 ? L.panelBg : L.subtleBg }}>
+                      {SORT_COLUMNS.map((_, j) => (
+                        <td key={j} style={{ padding: "10px 8px" }}><Shimmer w={j === 0 ? 140 : 60} h={9} /></td>
+                      ))}
+                      <td />
+                    </tr>
+                  ))
+                ) : assets.length ? (
+                  assets.map((a, i) => {
+                    const isOpen = expandedId === a.id;
+                    const rowBg = i % 2 === 0 ? L.panelBg : L.subtleBg;
+                    const rotDays = daysUntil(a.next_rotation);
+                    return (
+                      <React.Fragment key={a.id}>
+                        <tr
+                          style={{ borderBottom: `1px solid ${L.borderLight}`, background: rowBg }}
+                          onMouseEnter={e => (e.currentTarget.style.background = L.insetBg)}
+                          onMouseLeave={e => (e.currentTarget.style.background = rowBg)}
+                        >
+                          <td style={{ padding: "8px 8px" }}>
+                            <div style={{ fontSize: 10, color: L.blue, fontWeight: 600 }}>{a.asset_name}</div>
+                            <div style={{ fontSize: 8, color: L.text4 }}>{a.application || "—"}</div>
+                          </td>
+                          <td style={{ padding: "8px 8px" }}>
+                            <span style={{ fontSize: 8, color: L.text3, background: L.insetBg, border: `1px solid ${L.panelBorder}`, borderRadius: 3, padding: "1px 5px", fontWeight: 600 }}>{a.asset_type}</span>
+                          </td>
+                          <td style={{ padding: "8px 8px", fontSize: 9, color: L.text2 }}>{a.environment}</td>
+                          <td style={{ padding: "8px 8px" }}>
+                            <div style={{ fontSize: 9, color: L.text2, fontWeight: 500 }}>{a.business_owner || "—"}</div>
+                          </td>
+                          <td style={{ padding: "8px 8px", fontSize: 9, color: L.text3 }}>{a.team || "—"}</td>
+                          <td style={{ padding: "8px 8px" }}>
+                            <Badge v={complianceVariant(a.compliance_status)}>{a.compliance_status}</Badge>
+                          </td>
+                          <td style={{ padding: "8px 8px" }}>
+                            <span style={{ fontSize: 8, fontWeight: 700, color: healthColor(a.health_status), border: `1px solid ${healthColor(a.health_status)}44`, borderRadius: 3, padding: "1px 6px", background: healthBg(a.health_status) }}>{a.health_status}</span>
+                          </td>
+                          <td style={{ padding: "8px 8px", fontSize: 10, fontWeight: 700, fontFamily: "'DM Mono',monospace", color: riskColor(a.risk_score) }}>{a.risk_score}</td>
+                          <td style={{ padding: "8px 8px", fontSize: 9, fontFamily: "'DM Mono',monospace", color: rotDays !== null && rotDays < 0 ? L.red : rotDays !== null && rotDays <= 14 ? L.orange : L.text3 }}>
+                            {fmtDate(a.next_rotation)}
+                          </td>
+                          <td style={{ padding: "8px 8px" }}>
+                            <button
+                              onClick={() => toggleExpand(a)}
+                              style={{ ...LS.btn, fontSize: 8, padding: "2px 7px", background: isOpen ? `${L.blue}15` : L.subtleBg, color: isOpen ? L.blue : L.text3, borderColor: isOpen ? `${L.blue}40` : L.panelBorder }}
+                            >{isOpen ? "▲" : "▼"}</button>
+                          </td>
+                        </tr>
+                        {isOpen && (
+                          <tr style={{ background: L.insetBg }}>
+                            <td colSpan={SORT_COLUMNS.length + 1} style={{ padding: "0 12px 12px" }}>
+                              <div style={{ background: L.panelBg, border: `1px solid ${L.panelBorder}`, borderRadius: 6, padding: 12, marginTop: 4, boxShadow: "inset 0 1px 3px rgba(0,0,0,0.04)" }}>
+                                <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 8, marginBottom: 12 }}>
+                                  {[
+                                    { label: "CLOUD PROVIDER", val: a.cloud_provider || "—" },
+                                    { label: "REGION",         val: a.region || "—" },
+                                    { label: "ALGORITHM",      val: a.encryption_algorithm || "—" },
+                                    { label: "KEY SIZE",       val: a.key_size || "—" },
+                                    { label: "CREATED",        val: fmtDate(a.creation_date) },
+                                    { label: "EXPIRES",        val: fmtDate(a.expiration_date) },
+                                    { label: "LAST ROTATION",  val: fmtDate(a.last_rotation) },
+                                    { label: "TAGS",           val: a.tags?.length ? a.tags.join(", ") : "—" },
+                                  ].map(item => (
+                                    <div key={item.label}>
+                                      <div style={{ fontSize: 7, color: L.text4, letterSpacing: ".1em", marginBottom: 4, textTransform: "uppercase" as const, fontWeight: 600 }}>{item.label}</div>
+                                      <div style={{ fontSize: 10, color: L.text2, fontFamily: "'DM Mono',monospace", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.val}</div>
+                                    </div>
                                   ))}
-                                  {scope.length > 3 && <span style={{ fontSize: 7, color: L.text3 }}>+{scope.length - 3}</span>}
-                                  {scope.length === 0 && <span style={{ fontSize: 8, color: L.text4 }}>—</span>}
                                 </div>
-                              </td>
-                              <td style={{ padding: "8px 8px", fontSize: 9, color: L.text3, fontFamily: "'DM Mono',monospace" }}>{a.scan || "Never"}</td>
-                              <td style={{ padding: "8px 8px" }}>
-                                <button
-                                  onClick={() => setExpandedRow(isOpen ? null : i)}
-                                  style={{ ...LS.btn, fontSize: 8, padding: "2px 7px", background: isOpen ? `${L.blue}15` : L.subtleBg, color: isOpen ? L.blue : L.text3, borderColor: isOpen ? `${L.blue}40` : L.panelBorder }}
-                                >{isOpen ? "▲" : "▼"}</button>
-                              </td>
-                            </tr>
-                            {isOpen && (
-                              <tr style={{ background: L.insetBg }}>
-                                <td colSpan={10} style={{ padding: "0 12px 12px" }}>
-                                  <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 8, background: L.panelBg, border: `1px solid ${L.panelBorder}`, borderRadius: 6, padding: 12, marginTop: 4, boxShadow: "inset 0 1px 3px rgba(0,0,0,0.04)" }}>
-                                    {[
-                                      { label: "BUSINESS UNIT",      val: a.business_unit || "—",                                                                  color: L.text1  },
-                                      { label: "FINANCIAL EXPOSURE", val: a.financial_exposure ? `₹${Number(a.financial_exposure).toLocaleString("en-IN")}` : "—", color: L.orange },
-                                      { label: "IP ADDRESS",         val: a.ip || "—",                                                                              color: L.text2  },
-                                      { label: "CIPHER",             val: a.cipher || "—",                                                                          color: L.text3  },
-                                    ].map(item => (
-                                      <div key={item.label}>
-                                        <div style={{ fontSize: 7, color: L.text4, letterSpacing: ".1em", marginBottom: 4, textTransform: "uppercase" as const, fontWeight: 600 }}>{item.label}</div>
-                                        <div style={{ fontSize: 10, color: item.color, fontFamily: "'DM Mono',monospace", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.val}</div>
-                                      </div>
-                                    ))}
-                                    {a.notes && (
-                                      <div style={{ gridColumn: "1/-1" }}>
-                                        <div style={{ fontSize: 7, color: L.text4, letterSpacing: ".1em", marginBottom: 4, textTransform: "uppercase" as const, fontWeight: 600 }}>NOTES</div>
-                                        <div style={{ fontSize: 9, color: L.text2, lineHeight: 1.6 }}>{a.notes}</div>
-                                      </div>
-                                    )}
-                                  </div>
-                                </td>
-                              </tr>
-                            )}
-                          </React.Fragment>
-                        );
-                      })
-                    : (
-                      <tr>
-                        <td colSpan={10} style={{ padding: "20px", fontSize: 10, color: L.text3, textAlign: "center" }}>No assets found</td>
-                      </tr>
-                    )
-                }
+                                <DependencyPanel deps={deps[a.id]} loading={depsLoading === a.id} />
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </React.Fragment>
+                    );
+                  })
+                ) : (
+                  <tr>
+                    <td colSpan={SORT_COLUMNS.length + 1} style={{ padding: "20px", fontSize: 10, color: L.text3, textAlign: "center" }}>No crypto assets found</td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>
         )}
 
-        {/* Footer */}
+        {/* Footer / Pagination */}
         <div style={{ padding: "8px 14px", borderTop: `1px solid ${L.borderLight}`, display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8, background: L.subtleBg, borderRadius: "0 0 8px 8px" }}>
-          {loading
-            ? <Shimmer w={200} h={10} />
-            : <>
-                <span style={{ fontSize: 10, color: L.text2 }}>
-                  Showing <b style={{ color: L.text1 }}>{filtered.length}</b> of{" "}
-                  <b style={{ color: L.text1 }}>{assets.length}</b> assets
-                  {secureModeOn
-                    ? <span style={{ marginLeft: 8, fontSize: 8, color: L.purple, fontWeight: 600 }}>· ghost mode</span>
-                    : <span style={{ marginLeft: 8, fontSize: 8, color: L.cyan, fontWeight: 600 }}>· assets + cbom</span>
-                  }
-                </span>
-                {!mobile && <span style={{ fontSize: 9, color: L.text3 }}>▼ expand row for financial exposure and cipher details</span>}
-              </>
-          }
+          {loading ? (
+            <Shimmer w={200} h={10} />
+          ) : (
+            <span style={{ fontSize: 10, color: L.text2 }}>
+              Showing <b style={{ color: L.text1 }}>{assets.length}</b> of{" "}
+              <b style={{ color: L.text1 }}>{total}</b> assets
+            </span>
+          )}
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <button
+              disabled={page <= 1 || loading}
+              onClick={() => setPage(p => Math.max(1, p - 1))}
+              style={{ ...LS.btn, opacity: page <= 1 ? 0.4 : 1, cursor: page <= 1 ? "not-allowed" : "pointer" }}
+            >‹ Prev</button>
+            <span style={{ fontSize: 10, color: L.text3 }}>Page {page} of {totalPages}</span>
+            <button
+              disabled={page >= totalPages || loading}
+              onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+              style={{ ...LS.btn, opacity: page >= totalPages ? 0.4 : 1, cursor: page >= totalPages ? "not-allowed" : "pointer" }}
+            >Next ›</button>
+          </div>
         </div>
       </LPanel>
+    </div>
+  );
+}
 
-      {/* ── CERT EXPIRY + CRYPTO OVERVIEW ── */}
-      <div style={{ display: "grid", gridTemplateColumns: mobile ? "1fr" : "1fr 1fr", gap: mobile ? 8 : 10 }}>
-        <LPanel>
-          <LPanelHeader left="CERTIFICATE EXPIRY TIMELINE" />
-          <div style={{ padding: 14 }}>
-            {loading
-              ? [0, 1, 2, 3].map(i => <SkeletonProgBar key={i} />)
-              : [
-                  { label: "0–30 Days",  count: certBuckets["0-30"],  color: L.red    },
-                  { label: "30–60 Days", count: certBuckets["30-60"], color: L.orange },
-                  { label: "60–90 Days", count: certBuckets["60-90"], color: L.yellow },
-                  { label: ">90 Days",   count: certBuckets["90+"],   color: L.green  },
-                ].map(row => (
-                  <div key={row.label} style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
-                    <div style={{ width: 8, height: 8, borderRadius: "50%", background: row.color, flexShrink: 0, boxShadow: `0 0 0 2px ${row.color}22` }} />
-                    <div style={{ flex: 1 }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
-                        <span style={{ fontSize: 10, color: L.text2, fontWeight: 500 }}>{row.label}</span>
-                        <span style={{ fontSize: 10, fontFamily: "'DM Mono',monospace", color: row.color, fontWeight: 700 }}>{row.count}</span>
-                      </div>
-                      <LProgBar pct={Math.round(row.count / Math.max(assets.length, 1) * 100)} color={row.color} />
-                    </div>
-                  </div>
-                ))
-            }
-          </div>
-        </LPanel>
-
-        <LPanel>
-          <LPanelHeader left="CRYPTO & SECURITY OVERVIEW" />
-          {mobile ? (
-            <div style={{ maxHeight: 220, overflowY: "auto" }}>
-              {loading
-                ? <SkeletonMobileCards count={4} />
-                : assets.filter(a => a.tls && a.tls !== "—").slice(0, 10).map((a, i) => {
-                    const tlsN = (a.tls || "").replace(/^TLSv?/i, "");
-                    return (
-                      <div key={i} style={{ padding: "9px 14px", borderBottom: `1px solid ${L.borderLight}` }}>
-                        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 3 }}>
-                          <span style={{ fontSize: 11, color: L.blue, fontWeight: 600 }}>{a.name}</span>
-                          <span style={{ fontSize: 8, fontWeight: 600, color: tlsN === "1.0" ? L.red : tlsN === "1.2" ? L.yellow : L.green, background: tlsN === "1.0" ? "#fff5f5" : tlsN === "1.2" ? "#fffbeb" : "#f0fdf4", border: `1px solid ${tlsN === "1.0" ? L.red : tlsN === "1.2" ? L.yellow : L.green}33`, borderRadius: 3, padding: "1px 5px" }}>TLS {tlsN}</span>
-                        </div>
-                        <div style={{ fontSize: 9, color: L.text3, fontFamily: "'DM Mono',monospace" }}>{a.keylen} · {a.ca}</div>
-                      </div>
-                    );
-                  })
-              }
-            </div>
-          ) : (
-            <div style={{ overflowX: "auto" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse", fontFamily: "'DM Sans',system-ui,sans-serif" }}>
-                <thead>
-                  <tr style={{ background: L.subtleBg, borderBottom: `2px solid ${L.panelBorder}` }}>
-                    {["ASSET", "KEY LEN", "CIPHER SUITE", "TLS", "CA"].map(h => (
-                      <th key={h} style={{ padding: "7px 8px", fontSize: 8, fontWeight: 700, color: L.text3, textTransform: "uppercase" as const, letterSpacing: ".08em", textAlign: "left" }}>{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {loading
-                    ? <SkeletonTableRows cols={5} count={6} />
-                    : assets.filter(a => a.tls && a.tls !== "—").slice(0, 10).map((a, i) => {
-                        const tlsN  = (a.tls || "").replace(/^TLSv?/i, "");
-                        const rowBg = i % 2 === 0 ? L.panelBg : L.subtleBg;
-                        return (
-                          <tr key={i} style={{ borderBottom: `1px solid ${L.borderLight}`, background: rowBg }}>
-                            <td style={{ padding: "7px 8px", fontSize: 10, color: L.blue, fontWeight: 600 }}>{a.name}</td>
-                            <td style={{ padding: "7px 8px", fontSize: 10, fontWeight: 700, fontFamily: "'DM Mono',monospace", color: keyColor(a.keylen) }}>{a.keylen}</td>
-                            <td style={{ padding: "7px 8px", fontSize: 9, color: L.text3, maxWidth: 140, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontFamily: "'DM Mono',monospace" }}>{a.cipher}</td>
-                            <td style={{ padding: "7px 8px" }}>
-                              <span style={{ fontSize: 8, fontWeight: 600, color: tlsN === "1.0" ? L.red : tlsN === "1.2" ? L.yellow : L.green, background: tlsN === "1.0" ? "#fff5f5" : tlsN === "1.2" ? "#fffbeb" : "#f0fdf4", border: `1px solid ${tlsN === "1.0" ? L.red : tlsN === "1.2" ? L.yellow : L.green}33`, borderRadius: 3, padding: "1px 5px" }}>TLS {tlsN}</span>
-                            </td>
-                            <td style={{ padding: "7px 8px", fontSize: 10, color: L.text3 }}>{a.ca}</td>
-                          </tr>
-                        );
-                      })
-                  }
-                </tbody>
-              </table>
-            </div>
-          )}
-        </LPanel>
+// ── Dependency sub-panel ────────────────────────────────────────────────────
+function DependencyPanel({ deps, loading }: { deps: DependencyInfo | undefined; loading: boolean }) {
+  if (loading) {
+    return <Shimmer w={220} h={10} />;
+  }
+  if (!deps || (deps.depends_on.length === 0 && deps.used_by.length === 0)) {
+    return <div style={{ fontSize: 9, color: L.text4 }}>No dependency links recorded for this asset.</div>;
+  }
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+      <div>
+        <div style={{ fontSize: 7, color: L.text4, letterSpacing: ".1em", marginBottom: 6, textTransform: "uppercase" as const, fontWeight: 600 }}>Depends On</div>
+        {deps.depends_on.length === 0
+          ? <div style={{ fontSize: 9, color: L.text4 }}>—</div>
+          : deps.depends_on.map(d => (
+              <div key={d.id} style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
+                <span style={{ width: 6, height: 6, borderRadius: "50%", background: healthColor(d.health_status), flexShrink: 0 }} />
+                <span style={{ fontSize: 10, color: L.blue }}>{d.asset_name}</span>
+                <span style={{ fontSize: 8, color: L.text4 }}>({d.asset_type})</span>
+              </div>
+            ))
+        }
+      </div>
+      <div>
+        <div style={{ fontSize: 7, color: L.text4, letterSpacing: ".1em", marginBottom: 6, textTransform: "uppercase" as const, fontWeight: 600 }}>Used By</div>
+        {deps.used_by.length === 0
+          ? <div style={{ fontSize: 9, color: L.text4 }}>—</div>
+          : deps.used_by.map(d => (
+              <div key={d.id} style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
+                <span style={{ width: 6, height: 6, borderRadius: "50%", background: healthColor(d.health_status), flexShrink: 0 }} />
+                <span style={{ fontSize: 10, color: L.blue }}>{d.asset_name}</span>
+                <span style={{ fontSize: 8, color: L.text4 }}>({d.asset_type})</span>
+              </div>
+            ))
+        }
       </div>
     </div>
   );
