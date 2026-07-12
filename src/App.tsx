@@ -9,6 +9,7 @@ import AssetRegistryPage from "./components/Modules/AssetRegistryPage.js";
 import AssetDiscoveryPage from "./components/Modules/AssetDiscovery.js";
 import CBOMPage from "./components/Modules/CBOM.js";
 import PQCPosturePage from "./components/Modules/PQCPosture.js";
+import Compliance from "./components/Modules/Compliance.js"
 import PQCReadinessPage from "./components/Modules/PQCReadiness.js";
 import CyberRatingPage from "./components/Modules/CyberRating.js";
 import ReportingPage from "./components/Modules/Reporting.js";
@@ -54,6 +55,7 @@ export default function App() {
             <Route path="inventory"  element={<AssetInventoryPage />} />
             <Route path="discovery"  element={<AssetDiscoveryPage />} />
             <Route path="registry"   element={<AssetRegistryPage />} />
+            <Route path="compliance"   element={<Compliance />} />
 
             <Route path="cbom" element={<CBOMPage />} />
             <Route path="pqc"  element={<PQCPosturePage />} />

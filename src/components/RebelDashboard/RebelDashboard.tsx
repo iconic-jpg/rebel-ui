@@ -453,6 +453,7 @@ function NavDrawer() {
     { section: "CORE", items: [{ path: "/", icon: "⬡", label: "Dashboard", sub: "Live threat feed" }] },
     { section: "ASSET & PQC", items: [
       { path: "/inventory", icon: "◈", label: "Asset Inventory", sub: "128 assets tracked" },
+      { path: "/compliance",    icon: "✦", label: "Compliance",  sub: "Tier 1–4 scoring" },
       { path: "/discovery", icon: "◎", label: "Asset Discovery", sub: "Domains · SSL · IPs" },
       { path: "/cbom",      icon: "◉", label: "CBOM",            sub: "Crypto bill of mat." },
       { path: "/pqc",       icon: "⬟", label: "Posture of PQC",  sub: "755/1000 Elite" },
