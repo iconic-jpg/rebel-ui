@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 import { AreaChart, Area, XAxis, YAxis, ResponsiveContainer, Tooltip } from "recharts";
 import { useNavigate } from "react-router-dom";
 import { useThemeContext } from '../context/ThemeContext.js'
+import { askRebel } from "../../api/askRebel";
 
 const API = "https://r3bel-5464.onrender.com";
 
@@ -542,17 +543,16 @@ function ChatPanel({ onClose }: { onClose: () => void }) {
   const mobile = useMobile();
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [msgs]);
 
-  const send = async () => {
-    if (!input.trim() || loading) return;
-    const msg = input.trim(); setInput(""); setLoading(true);
-    setMsgs(m => [...m, { role: "user", text: msg }]);
-    try {
-      const res = await fetch(`${API}/chat`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: msg }) });
-      const data = await res.json();
-      setMsgs(m => [...m, { role: "assistant", text: data.response || JSON.stringify(data) }]);
-    } catch (e) { setMsgs(m => [...m, { role: "assistant", text: `[ERROR] ${e instanceof Error ? e.message : "Unknown"}` }]); }
-    setLoading(false);
-  };
+const send = async () => {
+  if (!input.trim() || loading) return;
+  const msg = input.trim(); setInput(""); setLoading(true);
+  setMsgs(m => [...m, { role: "user", text: msg }]);
+  try {
+    const result = await askRebel(msg);
+    setMsgs(m => [...m, { role: "assistant", text: result.reply }]);
+  } catch (e) { setMsgs(m => [...m, { role: "assistant", text: `[ERROR] ${e instanceof Error ? e.message : "Unknown"}` }]); }
+  setLoading(false);
+};
 
   const chatBg = "#f8fafc";
 
