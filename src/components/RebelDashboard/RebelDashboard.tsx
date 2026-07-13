@@ -549,7 +549,7 @@ const send = async () => {
   setMsgs(m => [...m, { role: "user", text: msg }]);
   try {
     const result = await askRebel(msg);
-    setMsgs(m => [...m, { role: "assistant", text: result.reply }]);
+    setMsgs(m => [...m, { role: "assistant", text: formatForDisplay(result) }]);
   } catch (e) { setMsgs(m => [...m, { role: "assistant", text: `[ERROR] ${e instanceof Error ? e.message : "Unknown"}` }]); }
   setLoading(false);
 };

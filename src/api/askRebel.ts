@@ -63,3 +63,19 @@ export async function askRebel(
   const chatData = await chatRes.json();
   return { reply: chatData.response, source: "chat" };
 }
+
+/**
+ * UI helper: prefix general-chat replies with a visible marker so a
+ * confident-sounding but ungrounded answer (e.g. "rate our compliance 8/10")
+ * can never be mistaken for a real, data-backed Copilot answer. Copilot
+ * answers are left unmarked since they're already fact-grounded.
+ *
+ * Use this when rendering `result.reply` in the chat panel:
+ *   const displayText = formatForDisplay(result);
+ */
+export function formatForDisplay(result: RebelChatResult): string {
+  if (result.source === "chat") {
+    return `⚠️ General AI response — not verified against platform data.\n\n${result.reply}`;
+  }
+  return result.reply;
+}
