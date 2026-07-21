@@ -18,7 +18,7 @@ import KeyRotationPanel from "./components/Modules/KeyRotationPanel.js";
 import VCenterConnect from "./components/Modules/VCenterConnect.js";
 import RebelSplash from "./components/Modules/RebelSplash.js";
 import GoogleCallback from "./components/Modules/GoogleCallback.js";
-import IntegrationsPage from "./components/Modules/IntegrationsPage";
+import IntegrationsPage from "./components/Modules/IntegrationsPage.js";
 
 
 
