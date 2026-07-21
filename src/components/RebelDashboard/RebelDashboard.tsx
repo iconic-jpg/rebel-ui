@@ -452,6 +452,8 @@ function NavDrawer() {
   const NAV = [
     { section: "CORE", items: [{ path: "/", icon: "⬡", label: "Dashboard", sub: "Live threat feed" }] },
     { section: "ASSET & PQC", items: [
+
+      { path: "/integrations", icon: "⬢", label: "Integrations", sub: "AWS · Azure · GCP · vCenter" },
       { path: "/inventory", icon: "◈", label: "Asset Inventory", sub: "128 assets tracked" },
       { path: "/compliance",    icon: "✦", label: "Compliance",  sub: "Tier 1–4 scoring" },
       { path: "/discovery", icon: "◎", label: "Asset Discovery", sub: "Domains · SSL · IPs" },
