@@ -19,6 +19,7 @@ import VCenterConnect from "./components/Modules/VCenterConnect.js";
 import RebelSplash from "./components/Modules/RebelSplash.js";
 import GoogleCallback from "./components/Modules/GoogleCallback.js";
 import IntegrationsPage from "./components/Modules/IntegrationsPage.js";
+import RemediationCenter from "./components/Modules/RemediationCenter.js";
 
 
 
@@ -63,6 +64,7 @@ export default function App() {
 
             <Route path="cbom" element={<CBOMPage />} />
             <Route path="pqc"  element={<PQCPosturePage />} />
+            <Route path="/remediation" element={<RemediationCenter />} />
 
             <Route
               path="pqc-readiness"

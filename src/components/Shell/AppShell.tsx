@@ -6,6 +6,7 @@ import SecureModePanel, { SecureModeBadge } from "../Modules/SecureModePanel.js"
 const NAV_ITEMS = [
   { path: "/", label: "Dashboard", icon: "⬡", section: "CORE" },
     { path: "/integrations", icon: "⬢", label: "Integrations", section: "ASSET & PQC" },
+    { path: "/remediation", icon: "⚡", label: "Remediation Center", section: "ASSET & PQC" },
 
   { path: "/inventory", label: "Asset Inventory", icon: "◈", section: "ASSET & PQC" },
   { path: "/compliance", label: "Compliance", icon: "✦", section: "CORE" },
