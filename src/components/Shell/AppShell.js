@@ -5,6 +5,7 @@ import { useThemeContext } from "../context/ThemeContext.js";
 import SecureModePanel, { SecureModeBadge } from "../Modules/SecureModePanel.js";
 const NAV_ITEMS = [
     { path: "/", label: "Dashboard", icon: "⬡", section: "CORE" },
+    { path: "/integrations", icon: "⬢", label: "Integrations", sub: "AWS · Azure · GCP · vCenter" },
     { path: "/inventory", label: "Asset Inventory", icon: "◈", section: "ASSET & PQC" },
     { path: "/discovery", label: "Asset Discovery", icon: "◎", section: null },
     { path: "/cbom", label: "CBOM", icon: "◉", section: null },

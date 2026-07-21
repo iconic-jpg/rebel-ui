@@ -18,6 +18,9 @@ import KeyRotationPanel from "./components/Modules/KeyRotationPanel.js";
 import VCenterConnect from "./components/Modules/VCenterConnect.js";
 import RebelSplash from "./components/Modules/RebelSplash.js";
 import GoogleCallback from "./components/Modules/GoogleCallback.js";
+import IntegrationsPage from "./components/Modules/IntegrationsPage";
+
+
 
 const API_BASE = "https://r3bel-5464.onrender.com";
 
@@ -57,6 +60,7 @@ export default function App() {
             <Route path="registry"   element={<AssetRegistryPage />} />
             <Route path="compliance"   element={<Compliance />} />
 
+
             <Route path="cbom" element={<CBOMPage />} />
             <Route path="pqc"  element={<PQCPosturePage />} />
 
@@ -81,6 +85,8 @@ export default function App() {
                 />
               }
             />
+
+            <Route path="/integrations" element={<IntegrationsPage />} />
 
             <Route
               path="vcenter"
