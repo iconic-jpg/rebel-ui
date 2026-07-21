@@ -5,6 +5,8 @@ import SecureModePanel, { SecureModeBadge } from "../Modules/SecureModePanel.js"
 
 const NAV_ITEMS = [
   { path: "/", label: "Dashboard", icon: "⬡", section: "CORE" },
+    { path: "/integrations", icon: "⬢", label: "Integrations", sub: "AWS · Azure · GCP · vCenter" },
+
   { path: "/inventory", label: "Asset Inventory", icon: "◈", section: "ASSET & PQC" },
   { path: "/compliance", label: "Compliance", icon: "✦", section: "CORE" },
   { path: "/discovery", label: "Asset Discovery", icon: "◎", section: null },
