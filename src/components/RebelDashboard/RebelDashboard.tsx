@@ -451,6 +451,9 @@ function NavDrawer() {
 
   const NAV = [
     { section: "CORE", items: [{ path: "/", icon: "⬡", label: "Dashboard", sub: "Live threat feed" }] },
+    { section: "SECURITY OPS", items: [
+    { path: "/siem", icon: "⛨", label: "SIEM Integration", sub: "Wazuh · Alerts · Agents" },
+  ]},
     { section: "ASSET & PQC", items: [
 
       { path: "/integrations", icon: "⬢", label: "Integrations", sub: "AWS · Azure · GCP · vCenter" },
