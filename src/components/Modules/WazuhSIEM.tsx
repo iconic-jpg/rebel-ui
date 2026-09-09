@@ -374,7 +374,10 @@ export default function WazuhSIEM() {
     if (!token) return;
     try {
       const res = await fetch(`${API}/security/wazuh/health`, { headers: authHeaders(token) });
-      setHealth(await res.json());
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      if (!data || typeof data.status !== "string") throw new Error("Malformed health response");
+      setHealth(data);
     } catch {
       setHealth({ status: "error", api_reachable: false, authenticated: false });
     }
