@@ -6,6 +6,10 @@ const API =
   (typeof import.meta !== "undefined" && (import.meta as any).env?.VITE_API_BASE) ||
   "https://r3bel-5464.onrender.com";
 
+// Django auth service — separate host from the FastAPI API above. Matches
+// the exact endpoint/shape Login.tsx already uses for the same purpose.
+const AUTH_API = "https://r3bel.onrender.com";
+
 // ── Light Theme Palette (matches IntegrationsPage / other Modules pages) ──────
 const L = {
   pageBg:      "#f5f7fa",
@@ -117,9 +121,60 @@ function authHeaders(token: string): Record<string, string> {
   return { Authorization: `Bearer ${token}` };
 }
 
+/**
+ * Refreshes the access token using the same Django endpoint/shape Login.tsx
+ * uses. Returns the new access token on success, or null if the refresh
+ * token itself is missing/invalid — callers treat null as "session is over".
+ */
+async function refreshAccessToken(): Promise<string | null> {
+  const refresh = localStorage.getItem("refresh");
+  if (!refresh) return null;
+  try {
+    const res = await fetch(`${AUTH_API}/api/token/refresh/`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refresh }),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (!data?.access) return null;
+    localStorage.setItem("access", data.access);
+    if (data.refresh) localStorage.setItem("refresh", data.refresh);
+    return data.access as string;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * fetch() wrapper for every /security/wazuh/* call: attaches the current
+ * access token, and on a 401 transparently refreshes once and retries the
+ * original request with the new token. If the refresh itself fails (refresh
+ * token missing/expired), clears both tokens and sends the user back to
+ * login — same "session is over" behavior Login.tsx uses when its own
+ * refresh-on-mount check fails.
+ */
+async function authFetch(url: string, init: RequestInit = {}, _retried = false): Promise<Response> {
+  const token = localStorage.getItem("access") || "";
+  const res = await fetch(url, {
+    ...init,
+    headers: { ...(init.headers || {}), ...authHeaders(token) },
+  });
+  if (res.status !== 401 || _retried) return res;
+
+  const newToken = await refreshAccessToken();
+  if (!newToken) {
+    localStorage.removeItem("access");
+    localStorage.removeItem("refresh");
+    window.location.href = "/login";
+    return res; // navigation is async; return the original 401 for this call
+  }
+  return authFetch(url, init, true);
+}
+
 // ── Connect Modal ───────────────────────────────────────────────────────────
-function ConnectModal({ token, onClose, onConnected }: {
-  token: string; onClose: () => void; onConnected: () => void;
+function ConnectModal({ onClose, onConnected }: {
+  onClose: () => void; onConnected: () => void;
 }) {
   const [values, setValues] = useState({
     WAZUH_API_URL: "", WAZUH_USERNAME: "", WAZUH_PASSWORD: "", WAZUH_VERIFY_SSL: "true",
@@ -134,9 +189,9 @@ function ConnectModal({ token, onClose, onConnected }: {
     if (missing.length) { setError(`Missing: ${missing.join(", ")}`); return; }
     setConnecting(true); setError(null);
     try {
-      const res = await fetch(`${API}/security/wazuh/connect`, {
+      const res = await authFetch(`${API}/security/wazuh/connect`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", ...authHeaders(token) },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ credentials: values }),
       });
       const data = await res.json().catch(() => ({}));
@@ -243,7 +298,7 @@ function AgentDetailModal({ token, agent, onClose }: {
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch(`${API}/security/wazuh/vulnerabilities?agent_id=${encodeURIComponent(agent.agent_id)}`, { headers: authHeaders(token) });
+        const res = await authFetch(`${API}/security/wazuh/vulnerabilities?agent_id=${encodeURIComponent(agent.agent_id)}`);
         const data = await res.json();
         if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
         if (!cancelled) setVulns(data.vulnerabilities || []);
@@ -253,7 +308,7 @@ function AgentDetailModal({ token, agent, onClose }: {
     })();
     (async () => {
       try {
-        const res = await fetch(`${API}/security/wazuh/fim?agent_id=${encodeURIComponent(agent.agent_id)}`, { headers: authHeaders(token) });
+        const res = await authFetch(`${API}/security/wazuh/fim?agent_id=${encodeURIComponent(agent.agent_id)}`);
         const data = await res.json();
         if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
         if (!cancelled) setFim(data.fim_events || []);
@@ -361,7 +416,7 @@ export default function WazuhSIEM() {
   const loadStatus = useCallback(async () => {
     if (!token) return;
     try {
-      const res = await fetch(`${API}/security/wazuh/status`, { headers: authHeaders(token) });
+      const res = await authFetch(`${API}/security/wazuh/status`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       setStatus(await res.json());
       setStatusError(null);
@@ -373,7 +428,7 @@ export default function WazuhSIEM() {
   const loadHealth = useCallback(async () => {
     if (!token) return;
     try {
-      const res = await fetch(`${API}/security/wazuh/health`, { headers: authHeaders(token) });
+      const res = await authFetch(`${API}/security/wazuh/health`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       if (!data || typeof data.status !== "string") throw new Error("Malformed health response");
@@ -387,7 +442,7 @@ export default function WazuhSIEM() {
     if (!token) return;
     setAgentsLoading(true); setAgentsError(null);
     try {
-      const res = await fetch(`${API}/security/wazuh/agents`, { headers: authHeaders(token) });
+      const res = await authFetch(`${API}/security/wazuh/agents`);
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
       setAgents(data.agents || []);
@@ -406,7 +461,7 @@ export default function WazuhSIEM() {
       if (poll) params.set("poll", "true");
       if (minSeverity) params.set("min_severity", minSeverity);
       if (agentFilter.trim()) params.set("agent_id", agentFilter.trim());
-      const res = await fetch(`${API}/security/wazuh/alerts?${params.toString()}`, { headers: authHeaders(token) });
+      const res = await authFetch(`${API}/security/wazuh/alerts?${params.toString()}`);
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
       setAlerts(data.alerts || []);
@@ -432,7 +487,7 @@ export default function WazuhSIEM() {
   const doSync = async () => {
     setSyncing(true);
     try {
-      const res = await fetch(`${API}/security/wazuh/agents/sync`, { method: "POST", headers: authHeaders(token || "") });
+      const res = await authFetch(`${API}/security/wazuh/agents/sync`, { method: "POST" });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
       await loadAgents();
@@ -445,7 +500,7 @@ export default function WazuhSIEM() {
   const doDisconnect = async () => {
     setDisconnecting(true);
     try {
-      const res = await fetch(`${API}/security/wazuh/disconnect`, { method: "POST", headers: authHeaders(token || "") });
+      const res = await authFetch(`${API}/security/wazuh/disconnect`, { method: "POST" });
       if (!res.ok && res.status !== 404) {
         const data = await res.json().catch(() => ({}));
         throw new Error(data.detail || `HTTP ${res.status}`);
@@ -680,7 +735,6 @@ export default function WazuhSIEM() {
 
       {showConnect && (
         <ConnectModal
-          token={token}
           onClose={() => setShowConnect(false)}
           onConnected={() => { loadStatus(); loadHealth(); }}
         />
