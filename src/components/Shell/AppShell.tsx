@@ -7,7 +7,7 @@ const NAV_ITEMS = [
   { path: "/", label: "Dashboard", icon: "⬡", section: "CORE" },
     { path: "/integrations", icon: "⬢", label: "Integrations", section: "ASSET & PQC" },
     { path: "/remediation", icon: "⚡", label: "Remediation Center", section: "ASSET & PQC" },
-
+    { path: "/siem", icon: "⛨", label: "SIEM Integration", section: "SECURITY OPS" },
   { path: "/inventory", label: "Asset Inventory", icon: "◈", section: "ASSET & PQC" },
   { path: "/compliance", label: "Compliance", icon: "✦", section: "CORE" },
   { path: "/discovery", label: "Asset Discovery", icon: "◎", section: null },
