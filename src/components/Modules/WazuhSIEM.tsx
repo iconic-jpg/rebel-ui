@@ -414,6 +414,10 @@ export default function WazuhSIEM() {
       setStatus(await res.json());
       setStatusError(null);
     } catch (e) {
+      // Resolve status to a fallback even on failure (e.g. a 401 when
+      // there's no valid session) so `loading` can clear and the page
+      // settles into the "not connected" view instead of spinning forever.
+      setStatus({ configured: false, has_stored_credentials: false });
       setStatusError(e instanceof Error ? e.message : "Status check failed");
     }
   }, []);
