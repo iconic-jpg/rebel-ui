@@ -2,6 +2,7 @@ import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-run
 import { useState, useEffect, useRef, useCallback } from "react";
 import { AreaChart, Area, XAxis, YAxis, ResponsiveContainer, Tooltip } from "recharts";
 import { useNavigate } from "react-router-dom";
+import { askRebel, formatForDisplay } from "../../api/askRebel.js";
 const API = "https://r3bel-5464.onrender.com";
 // ─── LIGHT THEME COLORS ──────────────────────────────────────────────────────
 const SEV_COLOR = {
@@ -295,8 +296,13 @@ function NavDrawer() {
     const go = (path) => { navigate(path); setOpen(false); };
     const NAV = [
         { section: "CORE", items: [{ path: "/", icon: "⬡", label: "Dashboard", sub: "Live threat feed" }] },
+        { section: "SECURITY OPS", items: [
+                { path: "/siem", icon: "⛨", label: "SIEM Integration", sub: "Alerts · Agents" },
+            ] },
         { section: "ASSET & PQC", items: [
+                { path: "/integrations", icon: "⬢", label: "Integrations", sub: "AWS · Azure · GCP · vCenter" },
                 { path: "/inventory", icon: "◈", label: "Asset Inventory", sub: "128 assets tracked" },
+                { path: "/compliance", icon: "✦", label: "Compliance", sub: "Tier 1–4 scoring" },
                 { path: "/discovery", icon: "◎", label: "Asset Discovery", sub: "Domains · SSL · IPs" },
                 { path: "/cbom", icon: "◉", label: "CBOM", sub: "Crypto bill of mat." },
                 { path: "/pqc", icon: "⬟", label: "Posture of PQC", sub: "755/1000 Elite" },
@@ -334,9 +340,8 @@ function ChatPanel({ onClose }) {
         setLoading(true);
         setMsgs(m => [...m, { role: "user", text: msg }]);
         try {
-            const res = await fetch(`${API}/chat`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: msg }) });
-            const data = await res.json();
-            setMsgs(m => [...m, { role: "assistant", text: data.response || JSON.stringify(data) }]);
+            const result = await askRebel(msg);
+            setMsgs(m => [...m, { role: "assistant", text: formatForDisplay(result) }]);
         }
         catch (e) {
             setMsgs(m => [...m, { role: "assistant", text: `[ERROR] ${e instanceof Error ? e.message : "Unknown"}` }]);

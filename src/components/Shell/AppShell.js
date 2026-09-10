@@ -5,8 +5,11 @@ import { useThemeContext } from "../context/ThemeContext.js";
 import SecureModePanel, { SecureModeBadge } from "../Modules/SecureModePanel.js";
 const NAV_ITEMS = [
     { path: "/", label: "Dashboard", icon: "⬡", section: "CORE" },
-    { path: "/integrations", icon: "⬢", label: "Integrations", sub: "AWS · Azure · GCP · vCenter" },
+    { path: "/integrations", icon: "⬢", label: "Integrations", section: "ASSET & PQC" },
+    { path: "/remediation", icon: "⚡", label: "Remediation Center", section: "ASSET & PQC" },
+    { path: "/siem", icon: "⛨", label: "SIEM Integration", section: "SECURITY OPS" },
     { path: "/inventory", label: "Asset Inventory", icon: "◈", section: "ASSET & PQC" },
+    { path: "/compliance", label: "Compliance", icon: "✦", section: "CORE" },
     { path: "/discovery", label: "Asset Discovery", icon: "◎", section: null },
     { path: "/cbom", label: "CBOM", icon: "◉", section: null },
     { path: "/registry", label: "Asset Registry", icon: "▦", section: null },

@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
 
 // ── API Base ──────────────────────────────────────────────────────────────────
 const API =
@@ -148,11 +147,12 @@ async function refreshAccessToken(): Promise<string | null> {
 
 /**
  * fetch() wrapper for every /security/wazuh/* call: attaches the current
- * access token, and on a 401 transparently refreshes once and retries the
- * original request with the new token. If the refresh itself fails (refresh
- * token missing/expired), clears both tokens and sends the user back to
- * login — same "session is over" behavior Login.tsx uses when its own
- * refresh-on-mount check fails.
+ * access token (if any — Wazuh is browsable without an active session, same
+ * as the PQC page), and on a 401 transparently refreshes once and retries
+ * the original request with the new token. If there's no refresh token to
+ * try, or the refresh itself fails, this just clears any stale tokens and
+ * returns the original response — callers already handle failed responses
+ * with their own error states, so there's no forced navigation here.
  */
 async function authFetch(url: string, init: RequestInit = {}, _retried = false): Promise<Response> {
   const token = localStorage.getItem("access") || "";
@@ -166,8 +166,7 @@ async function authFetch(url: string, init: RequestInit = {}, _retried = false):
   if (!newToken) {
     localStorage.removeItem("access");
     localStorage.removeItem("refresh");
-    window.location.href = "/login";
-    return res; // navigation is async; return the original 401 for this call
+    return res;
   }
   return authFetch(url, init, true);
 }
@@ -383,8 +382,7 @@ function AgentDetailModal({ token, agent, onClose }: {
 // ── Main Page ───────────────────────────────────────────────────────────────
 export default function WazuhSIEM() {
   const mobile = useMobile();
-  const navigate = useNavigate();
-  const token = localStorage.getItem("access");
+  const token = localStorage.getItem("access") || "";
 
   const [status, setStatus] = useState<WazuhStatus | null>(null);
   const [health, setHealth] = useState<WazuhHealth | null>(null);
@@ -409,12 +407,7 @@ export default function WazuhSIEM() {
   const [offset, setOffset] = useState(0);
   const LIMIT = 25;
 
-  useEffect(() => {
-    if (!token) navigate("/login");
-  }, [token, navigate]);
-
   const loadStatus = useCallback(async () => {
-    if (!token) return;
     try {
       const res = await authFetch(`${API}/security/wazuh/status`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -423,10 +416,9 @@ export default function WazuhSIEM() {
     } catch (e) {
       setStatusError(e instanceof Error ? e.message : "Status check failed");
     }
-  }, [token]);
+  }, []);
 
   const loadHealth = useCallback(async () => {
-    if (!token) return;
     try {
       const res = await authFetch(`${API}/security/wazuh/health`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -436,10 +428,9 @@ export default function WazuhSIEM() {
     } catch {
       setHealth({ status: "error", api_reachable: false, authenticated: false });
     }
-  }, [token]);
+  }, []);
 
   const loadAgents = useCallback(async () => {
-    if (!token) return;
     setAgentsLoading(true); setAgentsError(null);
     try {
       const res = await authFetch(`${API}/security/wazuh/agents`);
@@ -450,10 +441,9 @@ export default function WazuhSIEM() {
       setAgentsError(e instanceof Error ? e.message : "Failed to load agents");
     }
     setAgentsLoading(false);
-  }, [token]);
+  }, []);
 
   const loadAlerts = useCallback(async (poll: boolean, newOffset: number) => {
-    if (!token) return;
     if (poll) setPolling(true); else setAlertsLoading(true);
     setAlertsError(null);
     try {
@@ -470,19 +460,18 @@ export default function WazuhSIEM() {
       setAlertsError(e instanceof Error ? e.message : "Failed to load alerts");
     }
     setPolling(false); setAlertsLoading(false);
-  }, [token, minSeverity, agentFilter]);
+  }, [minSeverity, agentFilter]);
 
   useEffect(() => {
-    if (!token) return;
     loadStatus();
     loadHealth();
-  }, [token, loadStatus, loadHealth]);
+  }, [loadStatus, loadHealth]);
 
   useEffect(() => {
-    if (!token || status?.configured !== true) return;
+    if (status?.configured !== true) return;
     if (tab === "agents" && agents === null) loadAgents();
     if (tab === "alerts" && alerts === null) loadAlerts(false, 0);
-  }, [token, status, tab, agents, alerts, loadAgents, loadAlerts]);
+  }, [status, tab, agents, alerts, loadAgents, loadAlerts]);
 
   const doSync = async () => {
     setSyncing(true);
@@ -512,8 +501,6 @@ export default function WazuhSIEM() {
     }
     setDisconnecting(false);
   };
-
-  if (!token) return null;
 
   const loading = status === null;
   const configured = status?.configured === true;
