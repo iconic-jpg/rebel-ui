@@ -410,13 +410,20 @@ export default function WazuhSIEM() {
   const loadStatus = useCallback(async () => {
     try {
       const res = await authFetch(`${API}/security/wazuh/status`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) {
+        // Resolve status to a fallback even on failure so `loading` can
+        // clear and the page settles into the "not connected" view instead
+        // of spinning forever. A 401 here just means there's no session —
+        // that's the normal unauthenticated state, not a real error, so it
+        // stays quiet and lets the empty-state card speak for itself. Any
+        // other failure (5xx, etc.) still surfaces the banner.
+        setStatus({ configured: false, has_stored_credentials: false });
+        setStatusError(res.status === 401 ? null : `HTTP ${res.status}`);
+        return;
+      }
       setStatus(await res.json());
       setStatusError(null);
     } catch (e) {
-      // Resolve status to a fallback even on failure (e.g. a 401 when
-      // there's no valid session) so `loading` can clear and the page
-      // settles into the "not connected" view instead of spinning forever.
       setStatus({ configured: false, has_stored_credentials: false });
       setStatusError(e instanceof Error ? e.message : "Status check failed");
     }
@@ -535,7 +542,7 @@ export default function WazuhSIEM() {
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          {health && (
+          {health && configured && (
             <span style={{ fontSize: 10, color: healthColor, background: `${healthColor}14`, border: `1px solid ${healthColor}44`, borderRadius: 20, padding: "5px 12px", fontWeight: 700 }}>
               ● {health.status.toUpperCase()}
             </span>
