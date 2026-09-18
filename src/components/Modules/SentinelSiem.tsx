@@ -5,11 +5,10 @@ const API =
   (typeof import.meta !== "undefined" && (import.meta as any).env?.VITE_API_BASE) ||
   "https://r3bel-5464.onrender.com";
 
-// Django auth service — separate host from the FastAPI API above. Matches
-// the exact endpoint/shape Login.tsx already uses for the same purpose.
+// Django auth service — same host/shape Login.tsx and SIEMDashboard.tsx already use.
 const AUTH_API = "https://r3bel.onrender.com";
 
-// ── Light Theme Palette (matches IntegrationsPage / other Modules pages) ──────
+// ── Light Theme Palette (matches SIEMDashboard / IntegrationsPage) ────────────────
 const L = {
   pageBg:      "#f5f7fa",
   panelBg:     "#ffffff",
@@ -77,9 +76,9 @@ function LPanel({ children, style = {} }: { children: React.ReactNode; style?: R
   return <div style={{ ...LS.panel, ...style }}>{children}</div>;
 }
 
-// ── Types (mirrors app/wazuh_security/schemas.py) ─────────────────────────────
-interface WazuhStatus { configured: boolean; has_stored_credentials: boolean; }
-interface WazuhHealth { status: string; api_reachable: boolean; authenticated: boolean; detail?: string; }
+// ── Types (mirrors app/routers/mock_security_providers.py response shapes) ───
+interface ProviderStatus { configured: boolean; has_stored_credentials: boolean; }
+interface ProviderHealth { status: string; api_reachable: boolean; authenticated: boolean; detail?: string; }
 interface UnifiedAgent {
   agent_id: string; hostname: string | null; ip: string | null; os: string | null;
   status: string | null; version: string | null; last_keepalive: string | null;
@@ -93,10 +92,6 @@ interface UnifiedSecurityEvent {
 interface UnifiedVulnerability {
   cve: string | null; package: string | null; version: string | null;
   severity: string | null; status: string | null; references: string[];
-}
-interface UnifiedFimEvent {
-  file: string | null; operation: string | null; timestamp: string | null;
-  username: string | null; hash: string | null; rule_id: string | null;
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -121,9 +116,10 @@ function authHeaders(token: string): Record<string, string> {
 }
 
 /**
- * Refreshes the access token using the same Django endpoint/shape Login.tsx
- * uses. Returns the new access token on success, or null if the refresh
- * token itself is missing/invalid — callers treat null as "session is over".
+ * Refreshes the access token — identical to SIEMDashboard.tsx's helper of the
+ * same name, kept in sync with it deliberately rather than shared via
+ * import, since these mock-provider pages are meant to stay copy-paste
+ * simple ahead of a real vendor integration replacing them individually.
  */
 async function refreshAccessToken(): Promise<string | null> {
   const refresh = localStorage.getItem("refresh");
@@ -146,13 +142,9 @@ async function refreshAccessToken(): Promise<string | null> {
 }
 
 /**
- * fetch() wrapper for every /security/wazuh/* call: attaches the current
- * access token (if any — Wazuh is browsable without an active session, same
- * as the PQC page), and on a 401 transparently refreshes once and retries
- * the original request with the new token. If there's no refresh token to
- * try, or the refresh itself fails, this just clears any stale tokens and
- * returns the original response — callers already handle failed responses
- * with their own error states, so there's no forced navigation here.
+ * fetch() wrapper for every /security/sentinel/* call — same shape as
+ * SIEMDashboard.tsx's authFetch: browsable without a session, transparent
+ * 401-refresh-and-retry once, no forced navigation on failure.
  */
 async function authFetch(url: string, init: RequestInit = {}, _retried = false): Promise<Response> {
   const token = localStorage.getItem("access") || "";
@@ -172,27 +164,22 @@ async function authFetch(url: string, init: RequestInit = {}, _retried = false):
 }
 
 // ── Connect Modal ───────────────────────────────────────────────────────────
+// Sentinel is mock data (see app/connectors/mocks/sentinel_mock.py)
+// — there's nothing to authenticate against yet, so this is a one-click
+// enable rather than a credentials form. Once a real Sentinel
+// integration replaces the mock connector, this modal is where real
+// credential fields would go (see SIEMDashboard.tsx's ConnectModal for the
+// pattern: label + input per required credential).
 function ConnectModal({ onClose, onConnected }: {
   onClose: () => void; onConnected: () => void;
 }) {
-  const [values, setValues] = useState({
-    WAZUH_API_URL: "", WAZUH_USERNAME: "", WAZUH_PASSWORD: "", WAZUH_VERIFY_SSL: "true",
-  });
   const [connecting, setConnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const submit = async () => {
-    const missing = ["WAZUH_API_URL", "WAZUH_USERNAME", "WAZUH_PASSWORD"].filter(
-      k => !values[k as keyof typeof values]?.trim()
-    );
-    if (missing.length) { setError(`Missing: ${missing.join(", ")}`); return; }
     setConnecting(true); setError(null);
     try {
-      const res = await authFetch(`${API}/security/wazuh/connect`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ credentials: values }),
-      });
+      const res = await authFetch(`${API}/security/sentinel/connect`, { method: "POST" });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
       onConnected();
@@ -210,57 +197,14 @@ function ConnectModal({ onClose, onConnected }: {
     }}>
       <div onClick={e => e.stopPropagation()} style={{ ...LS.panel, width: "100%", maxWidth: 440, padding: 20, display: "flex", flexDirection: "column", gap: 14 }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <div style={{ fontSize: 14, fontWeight: 700, color: L.text1 }}>Connect Wazuh</div>
+          <div style={{ fontSize: 14, fontWeight: 700, color: L.text1 }}>Connect Sentinel</div>
           <button onClick={onClose} style={{ ...LS.btn, padding: "4px 9px" }}>✕</button>
         </div>
 
         <div style={{ fontSize: 10, color: L.text3 }}>
-          Credentials are sent directly to your backend and stored there — nothing is kept in the browser after this form closes.
-        </div>
-
-        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-            <label style={{ fontSize: 9, color: L.text4, letterSpacing: ".06em", fontWeight: 600 }}>WAZUH API URL</label>
-            <input
-              value={values.WAZUH_API_URL}
-              onChange={e => setValues(v => ({ ...v, WAZUH_API_URL: e.target.value }))}
-              placeholder="https://wazuh-manager:55000"
-              autoComplete="off"
-              style={LS.input}
-            />
-          </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-            <label style={{ fontSize: 9, color: L.text4, letterSpacing: ".06em", fontWeight: 600 }}>WAZUH USERNAME</label>
-            <input
-              value={values.WAZUH_USERNAME}
-              onChange={e => setValues(v => ({ ...v, WAZUH_USERNAME: e.target.value }))}
-              placeholder="rebel_svc"
-              autoComplete="off"
-              style={LS.input}
-            />
-          </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-            <label style={{ fontSize: 9, color: L.text4, letterSpacing: ".06em", fontWeight: 600 }}>WAZUH PASSWORD</label>
-            <input
-              type="password"
-              value={values.WAZUH_PASSWORD}
-              onChange={e => setValues(v => ({ ...v, WAZUH_PASSWORD: e.target.value }))}
-              placeholder="••••••••"
-              autoComplete="off"
-              style={LS.input}
-            />
-          </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-            <label style={{ fontSize: 9, color: L.text4, letterSpacing: ".06em", fontWeight: 600 }}>VERIFY TLS CERTIFICATE</label>
-            <select
-              value={values.WAZUH_VERIFY_SSL}
-              onChange={e => setValues(v => ({ ...v, WAZUH_VERIFY_SSL: e.target.value }))}
-              style={LS.input as React.CSSProperties}
-            >
-              <option value="true">Verify (recommended)</option>
-              <option value="false">Skip verification (self-signed manager)</option>
-            </select>
-          </div>
+          Sentinel is running against realistic sample data while the real integration
+          is being built — no credentials needed yet. This just turns the mock feed on for your
+          account.
         </div>
 
         {error && (
@@ -284,20 +228,22 @@ function ConnectModal({ onClose, onConnected }: {
   );
 }
 
-// ── Agent Detail Modal (vulnerabilities + FIM for one agent) ──────────────────
-function AgentDetailModal({ token, agent, onClose }: {
-  token: string; agent: UnifiedAgent; onClose: () => void;
+// ── Agent Detail Modal (vulnerabilities for one agent) ─────────────────────────
+// No File Integrity Monitoring section here — FIM is a Wazuh-specific concept
+// (syscheck) that Sentinel's mock connector doesn't model; see
+// SecurityConnector.get_fim_events()'s default-empty behavior in
+// app/connectors/security_base.py.
+function AgentDetailModal({ agent, onClose }: {
+  agent: UnifiedAgent; onClose: () => void;
 }) {
   const [vulns, setVulns] = useState<UnifiedVulnerability[] | null>(null);
-  const [fim, setFim] = useState<UnifiedFimEvent[] | null>(null);
   const [vulnsError, setVulnsError] = useState<string | null>(null);
-  const [fimError, setFimError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const res = await authFetch(`${API}/security/wazuh/vulnerabilities?agent_id=${encodeURIComponent(agent.agent_id)}`);
+        const res = await authFetch(`${API}/security/sentinel/vulnerabilities?agent_id=${encodeURIComponent(agent.agent_id)}`);
         const data = await res.json();
         if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
         if (!cancelled) setVulns(data.vulnerabilities || []);
@@ -305,18 +251,8 @@ function AgentDetailModal({ token, agent, onClose }: {
         if (!cancelled) setVulnsError(e instanceof Error ? e.message : "Failed to load vulnerabilities");
       }
     })();
-    (async () => {
-      try {
-        const res = await authFetch(`${API}/security/wazuh/fim?agent_id=${encodeURIComponent(agent.agent_id)}`);
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
-        if (!cancelled) setFim(data.fim_events || []);
-      } catch (e) {
-        if (!cancelled) setFimError(e instanceof Error ? e.message : "Failed to load FIM events");
-      }
-    })();
     return () => { cancelled = true; };
-  }, [agent.agent_id, token]);
+  }, [agent.agent_id]);
 
   return (
     <div onClick={onClose} style={{
@@ -354,25 +290,6 @@ function AgentDetailModal({ token, agent, onClose }: {
               </div>
             )}
           </div>
-
-          <div>
-            <div style={{ fontSize: 9, color: L.text4, letterSpacing: ".08em", fontWeight: 700, marginBottom: 6 }}>
-              FILE INTEGRITY EVENTS {fim ? `(${fim.length})` : ""}
-            </div>
-            {fimError && <div style={{ fontSize: 11, color: L.red }}>✗ {fimError}</div>}
-            {!fim && !fimError && <Shimmer h={40} />}
-            {fim && fim.length === 0 && <div style={{ fontSize: 11, color: L.text3 }}>No FIM events for this agent.</div>}
-            {fim && fim.length > 0 && (
-              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                {fim.map((f, i) => (
-                  <div key={i} style={{ background: L.subtleBg, border: `1px solid ${L.panelBorder}`, borderRadius: 6, padding: "8px 10px" }}>
-                    <div style={{ fontSize: 11, fontFamily: "'DM Mono',monospace", color: L.text1 }}>{f.file}</div>
-                    <div style={{ fontSize: 10, color: L.text3 }}>{f.operation} · {fmtTime(f.timestamp)}{f.username ? ` · ${f.username}` : ""}</div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
         </div>
       </div>
     </div>
@@ -380,12 +297,11 @@ function AgentDetailModal({ token, agent, onClose }: {
 }
 
 // ── Main Page ───────────────────────────────────────────────────────────────
-export default function WazuhSIEM() {
+export default function SentinelSIEM() {
   const mobile = useMobile();
-  const token = localStorage.getItem("access") || "";
 
-  const [status, setStatus] = useState<WazuhStatus | null>(null);
-  const [health, setHealth] = useState<WazuhHealth | null>(null);
+  const [status, setStatus] = useState<ProviderStatus | null>(null);
+  const [health, setHealth] = useState<ProviderHealth | null>(null);
   const [statusError, setStatusError] = useState<string | null>(null);
 
   const [tab, setTab] = useState<"alerts" | "agents">("alerts");
@@ -395,7 +311,6 @@ export default function WazuhSIEM() {
   const [agents, setAgents] = useState<UnifiedAgent[] | null>(null);
   const [agentsLoading, setAgentsLoading] = useState(false);
   const [agentsError, setAgentsError] = useState<string | null>(null);
-  const [syncing, setSyncing] = useState(false);
   const [selectedAgent, setSelectedAgent] = useState<UnifiedAgent | null>(null);
 
   const [alerts, setAlerts] = useState<UnifiedSecurityEvent[] | null>(null);
@@ -409,14 +324,11 @@ export default function WazuhSIEM() {
 
   const loadStatus = useCallback(async () => {
     try {
-      const res = await authFetch(`${API}/security/wazuh/status`);
+      const res = await authFetch(`${API}/security/sentinel/status`);
       if (!res.ok) {
-        // Resolve status to a fallback even on failure so `loading` can
-        // clear and the page settles into the "not connected" view instead
-        // of spinning forever. A 401 here just means there's no session —
-        // that's the normal unauthenticated state, not a real error, so it
-        // stays quiet and lets the empty-state card speak for itself. Any
-        // other failure (5xx, etc.) still surfaces the banner.
+        // Same reasoning as SIEMDashboard.tsx: a 401 here just means no REBEL
+        // session yet, not a real error — stays quiet. Anything else
+        // (5xx, etc.) surfaces the banner.
         setStatus({ configured: false, has_stored_credentials: false });
         setStatusError(res.status === 401 ? null : `HTTP ${res.status}`);
         return;
@@ -431,7 +343,7 @@ export default function WazuhSIEM() {
 
   const loadHealth = useCallback(async () => {
     try {
-      const res = await authFetch(`${API}/security/wazuh/health`);
+      const res = await authFetch(`${API}/security/sentinel/health`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       if (!data || typeof data.status !== "string") throw new Error("Malformed health response");
@@ -444,7 +356,7 @@ export default function WazuhSIEM() {
   const loadAgents = useCallback(async () => {
     setAgentsLoading(true); setAgentsError(null);
     try {
-      const res = await authFetch(`${API}/security/wazuh/agents`);
+      const res = await authFetch(`${API}/security/sentinel/agents`);
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
       setAgents(data.agents || []);
@@ -462,7 +374,7 @@ export default function WazuhSIEM() {
       if (poll) params.set("poll", "true");
       if (minSeverity) params.set("min_severity", minSeverity);
       if (agentFilter.trim()) params.set("agent_id", agentFilter.trim());
-      const res = await authFetch(`${API}/security/wazuh/alerts?${params.toString()}`);
+      const res = await authFetch(`${API}/security/sentinel/alerts?${params.toString()}`);
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
       setAlerts(data.alerts || []);
@@ -484,23 +396,10 @@ export default function WazuhSIEM() {
     if (tab === "alerts" && alerts === null) loadAlerts(false, 0);
   }, [status, tab, agents, alerts, loadAgents, loadAlerts]);
 
-  const doSync = async () => {
-    setSyncing(true);
-    try {
-      const res = await authFetch(`${API}/security/wazuh/agents/sync`, { method: "POST" });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
-      await loadAgents();
-    } catch (e) {
-      setAgentsError(e instanceof Error ? e.message : "Sync failed");
-    }
-    setSyncing(false);
-  };
-
   const doDisconnect = async () => {
     setDisconnecting(true);
     try {
-      const res = await authFetch(`${API}/security/wazuh/disconnect`, { method: "POST" });
+      const res = await authFetch(`${API}/security/sentinel/disconnect`, { method: "POST" });
       if (!res.ok && res.status !== 404) {
         const data = await res.json().catch(() => ({}));
         throw new Error(data.detail || `HTTP ${res.status}`);
@@ -536,9 +435,9 @@ export default function WazuhSIEM() {
       {/* ── HEADER ── */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
         <div>
-          <div style={{ fontSize: 16, fontWeight: 800, color: L.text1 }}>SIEM Integration — Wazuh</div>
+          <div style={{ fontSize: 16, fontWeight: 800, color: L.text1 }}>SIEM Integration — Sentinel <span style={{ fontSize: 10, fontWeight: 700, color: L.purple, background: `${L.purple}14`, border: `1px solid ${L.purple}44`, borderRadius: 10, padding: "2px 8px", marginLeft: 6, verticalAlign: "middle" }}>MOCK DATA</span></div>
           <div style={{ fontSize: 11, color: L.text3, marginTop: 2 }}>
-            Live security events, agent inventory, and vulnerability data from your Wazuh deployment.
+            Sample security events, endpoint inventory, and vulnerability data — the real Sentinel integration isn't connected yet.
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -555,7 +454,7 @@ export default function WazuhSIEM() {
             </button>
           ) : (
             <button onClick={() => setShowConnect(true)} style={{ ...LS.btn, background: L.blue, color: "#fff", borderColor: L.blue }}>
-              Connect Wazuh
+              Connect Sentinel
             </button>
           )}
         </div>
@@ -569,12 +468,12 @@ export default function WazuhSIEM() {
 
       {!loading && !configured && (
         <LPanel style={{ padding: 32, display: "flex", flexDirection: "column", alignItems: "center", gap: 10, textAlign: "center" }}>
-          <div style={{ fontSize: 13, fontWeight: 700, color: L.text1 }}>Wazuh isn't connected yet</div>
+          <div style={{ fontSize: 13, fontWeight: 700, color: L.text1 }}>Sentinel isn't connected yet</div>
           <div style={{ fontSize: 11, color: L.text3, maxWidth: 380 }}>
-            Connect your Wazuh Manager to pull agent inventory, alerts, vulnerabilities, and file integrity events into REBEL.
+            Enable Sentinel to pull sample alerts, endpoint inventory, and vulnerability data into REBEL while the real integration is being built.
           </div>
           <button onClick={() => setShowConnect(true)} style={{ ...LS.btn, background: L.blue, color: "#fff", borderColor: L.blue, marginTop: 6 }}>
-            Connect Wazuh
+            Connect Sentinel
           </button>
         </LPanel>
       )}
@@ -621,7 +520,7 @@ export default function WazuhSIEM() {
                   disabled={polling}
                   style={{ ...LS.btn, background: L.blue, color: "#fff", borderColor: L.blue, opacity: polling ? 0.7 : 1, marginLeft: "auto" }}
                 >
-                  {polling ? "Polling Wazuh..." : "Poll Wazuh now"}
+                  {polling ? "Polling Sentinel..." : "Poll Sentinel now"}
                 </button>
               </div>
 
@@ -633,7 +532,7 @@ export default function WazuhSIEM() {
               )}
               {alerts && alerts.length === 0 && !alertsLoading && (
                 <div style={{ padding: 24, textAlign: "center", fontSize: 11, color: L.text3 }}>
-                  No alerts stored yet — try "Poll Wazuh now" to pull the latest.
+                  No alerts stored yet — try "Poll Sentinel now" to pull the latest sample data.
                 </div>
               )}
               {alerts && alerts.length > 0 && (
@@ -674,8 +573,8 @@ export default function WazuhSIEM() {
             <LPanel style={{ padding: 0, display: "flex", flexDirection: "column" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 16px", borderBottom: `1px solid ${L.borderLight}` }}>
                 <span style={{ fontSize: 11, color: L.text3 }}>{agents ? `${agents.length} agents` : "Loading agents..."}</span>
-                <button onClick={doSync} disabled={syncing} style={{ ...LS.btn, background: L.blue, color: "#fff", borderColor: L.blue, opacity: syncing ? 0.7 : 1 }}>
-                  {syncing ? "Syncing..." : "Sync from Wazuh"}
+                <button onClick={() => loadAgents()} disabled={agentsLoading} style={{ ...LS.btn, opacity: agentsLoading ? 0.7 : 1 }}>
+                  {agentsLoading ? "Refreshing..." : "Refresh"}
                 </button>
               </div>
 
@@ -687,7 +586,7 @@ export default function WazuhSIEM() {
               )}
               {agents && agents.length === 0 && !agentsLoading && (
                 <div style={{ padding: 24, textAlign: "center", fontSize: 11, color: L.text3 }}>
-                  No agents found on this Wazuh deployment.
+                  No agents found.
                 </div>
               )}
               {agents && agents.length > 0 && (
@@ -714,9 +613,9 @@ export default function WazuhSIEM() {
                       <span style={{ fontSize: 11, color: L.text3 }}>{a.os || "—"}</span>
                       <span style={{
                         fontSize: 9, fontWeight: 700, width: "fit-content",
-                        color: a.status === "active" ? L.green : L.text4,
-                        background: a.status === "active" ? "#f0fdf4" : L.insetBg,
-                        border: `1px solid ${a.status === "active" ? L.green + "44" : L.panelBorder}`,
+                        color: a.status === "active" || a.status === "normal" || a.status === "Active" ? L.green : L.text4,
+                        background: a.status === "active" || a.status === "normal" || a.status === "Active" ? "#f0fdf4" : L.insetBg,
+                        border: `1px solid ${a.status === "active" || a.status === "normal" || a.status === "Active" ? L.green + "44" : L.panelBorder}`,
                         borderRadius: 10, padding: "2px 8px", marginTop: mobile ? 4 : 0,
                       }}>
                         {(a.status || "unknown").toUpperCase()}
@@ -738,7 +637,7 @@ export default function WazuhSIEM() {
         />
       )}
       {selectedAgent && (
-        <AgentDetailModal token={token} agent={selectedAgent} onClose={() => setSelectedAgent(null)} />
+        <AgentDetailModal agent={selectedAgent} onClose={() => setSelectedAgent(null)} />
       )}
     </div>
   );

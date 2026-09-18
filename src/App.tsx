@@ -20,7 +20,7 @@ import RebelSplash from "./components/Modules/RebelSplash.js";
 import GoogleCallback from "./components/Modules/GoogleCallback.js";
 import IntegrationsPage from "./components/Modules/IntegrationsPage.js";
 import RemediationCenter from "./components/Modules/RemediationCenter.js";
-import WazuhSIEM from "./components/Modules/WazuhSIEM.js";
+import SIEMDashboard from "./components/Modules/SIEMDashboard.js";
 
 
 
@@ -61,7 +61,7 @@ export default function App() {
             <Route path="discovery"  element={<AssetDiscoveryPage />} />
             <Route path="registry"   element={<AssetRegistryPage />} />
             <Route path="compliance"   element={<Compliance />} />
-            <Route path="/siem" element={<WazuhSIEM />} />
+            <Route path="/siem" element={<SIEMDashboard />} />
 
             <Route path="cbom" element={<CBOMPage />} />
             <Route path="pqc"  element={<PQCPosturePage />} />
