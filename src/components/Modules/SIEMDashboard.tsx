@@ -183,28 +183,33 @@ async function authFetch(url: string, init: RequestInit = {}, _retried = false):
 
   const refresh = localStorage.getItem("refresh");
   if (!refresh) {
-    // No refresh token to attempt — this 401 does NOT prove the access
-    // token itself is dead (it could be transient, or unrelated to this
-    // specific call). Do NOT clear localStorage here: this function runs
-    // for every SIEM provider's background status check on page load, and
-    // silently wiping tokens as a side effect of ONE of them 401ing was
-    // logging the user out of the ENTIRE app — visible as "navigate back
-    // to the main dashboard and it reverts to login" even right after a
-    // successful login. Just return the 401 and let the caller's own
-    // error state (statusError banner, etc.) handle it.
+    // No refresh token to attempt — nothing more this function can safely
+    // do. Return the 401 and let the caller's own error state handle it.
     return res;
   }
 
   const newToken = await refreshAccessToken();
-  if (!newToken) {
-    // A refresh WAS attempted with a real refresh token and it was
-    // explicitly rejected by the auth service — this is a genuine
-    // "the session is actually dead" signal, safe to clear.
-    localStorage.removeItem("access");
-    localStorage.removeItem("refresh");
-    return res;
+  if (newToken) {
+    return authFetch(url, init, true);
   }
-  return authFetch(url, init, true);
+
+  // Refresh was attempted and rejected. This does NOT clear localStorage.
+  // It's tempting to treat a rejected refresh as proof the session is
+  // fully dead and clean up — but this function runs as a background call
+  // for every SIEM provider's status check on page load, and deleting
+  // `access`/`refresh` here logs the user out of the ENTIRE app as a side
+  // effect of one background request, even when their access token is
+  // still perfectly valid and only the (possibly stale/unrelated) refresh
+  // token failed. That exact chain — a leftover garbage refresh token
+  // from an earlier broken login attempt 401ing here and wiping out an
+  // otherwise-good access token — is what caused "visit the SIEM page,
+  // then the main dashboard bounces you to /login" even right after a
+  // successful login. Session expiry should be discovered passively
+  // (e.g. RebelDashboard.tsx's own mount-time check, or a real 401 on a
+  // primary user-initiated action) or via an explicit logout, never as a
+  // side effect of a background poll deleting storage out from under
+  // whatever page the user is actually looking at.
+  return res;
 }
 
 // ── Connect Modal — adapts to whichever provider was clicked ────────────────
