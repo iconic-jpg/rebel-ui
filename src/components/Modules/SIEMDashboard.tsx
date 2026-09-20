@@ -10,12 +10,14 @@ const AUTH_API = "https://r3bel.onrender.com";
 // ── Providers this page knows about ───────────────────────────────────────────
 // Adding a fifth source later means adding one entry here (plus its backend
 // router) — nothing else in this file branches on provider name.
-interface CredentialField { key: string; label: string; placeholder: string; type?: string; }
+interface CredentialField { key: string; label: string; placeholder: string; type?: string; optional?: boolean; }
 interface ProviderDef {
   slug: string;            // URL segment + `source` value on every row
   label: string;           // display name
   color: string;           // badge color for this source
-  credentialFields: CredentialField[] | null;  // null = mock, one-click connect
+  credentialFields: CredentialField[] | null;  // every current provider needs real credentials;
+                                                // null stays supported as a fallback for a future
+                                                // no-auth-needed source, but nothing uses it today
 }
 
 const L = {
@@ -32,9 +34,28 @@ const PROVIDERS: ProviderDef[] = [
       { key: "WAZUH_USERNAME", label: "USERNAME", placeholder: "rebel_svc" },
       { key: "WAZUH_PASSWORD", label: "PASSWORD", placeholder: "••••••••", type: "password" },
     ] },
-  { slug: "sentinel", label: "Microsoft Sentinel", color: L.cyan, credentialFields: null },
-  { slug: "crowdstrike", label: "CrowdStrike", color: L.red, credentialFields: null },
-  { slug: "splunk", label: "Splunk", color: L.orange, credentialFields: null },
+  { slug: "sentinel", label: "Microsoft Sentinel", color: L.cyan,
+    credentialFields: [
+      { key: "SENTINEL_TENANT_ID", label: "AZURE TENANT ID", placeholder: "00000000-0000-0000-0000-000000000000" },
+      { key: "SENTINEL_CLIENT_ID", label: "APP CLIENT ID", placeholder: "00000000-0000-0000-0000-000000000000" },
+      { key: "SENTINEL_CLIENT_SECRET", label: "APP CLIENT SECRET", placeholder: "••••••••", type: "password" },
+      { key: "SENTINEL_SUBSCRIPTION_ID", label: "SUBSCRIPTION ID", placeholder: "00000000-0000-0000-0000-000000000000" },
+      { key: "SENTINEL_RESOURCE_GROUP", label: "RESOURCE GROUP", placeholder: "rg-security" },
+      { key: "SENTINEL_WORKSPACE_NAME", label: "LOG ANALYTICS WORKSPACE", placeholder: "sentinel-workspace" },
+    ] },
+  { slug: "crowdstrike", label: "CrowdStrike", color: L.red,
+    credentialFields: [
+      { key: "CROWDSTRIKE_CLIENT_ID", label: "API CLIENT ID", placeholder: "" },
+      { key: "CROWDSTRIKE_CLIENT_SECRET", label: "API CLIENT SECRET", placeholder: "••••••••", type: "password" },
+      { key: "CROWDSTRIKE_BASE_URL", label: "BASE URL (region — optional)", placeholder: "https://api.crowdstrike.com", optional: true },
+    ] },
+  { slug: "splunk", label: "Splunk", color: L.orange,
+    credentialFields: [
+      { key: "SPLUNK_BASE_URL", label: "MANAGEMENT URL", placeholder: "https://splunk.example.com:8089" },
+      { key: "SPLUNK_TOKEN", label: "AUTH TOKEN (or use username/password below)", placeholder: "", type: "password", optional: true },
+      { key: "SPLUNK_USERNAME", label: "USERNAME (if no token)", placeholder: "admin", optional: true },
+      { key: "SPLUNK_PASSWORD", label: "PASSWORD (if no token)", placeholder: "••••••••", type: "password", optional: true },
+    ] },
 ];
 
 const LS = {
@@ -179,7 +200,7 @@ function ConnectModal({ provider, onClose, onConnected }: {
 
   const submit = async () => {
     if (provider.credentialFields) {
-      const missing = provider.credentialFields.filter(f => !values[f.key]?.trim());
+      const missing = provider.credentialFields.filter(f => !f.optional && !values[f.key]?.trim());
       if (missing.length) { setError(`Missing: ${missing.map(f => f.label).join(", ")}`); return; }
     }
     setConnecting(true); setError(null);
