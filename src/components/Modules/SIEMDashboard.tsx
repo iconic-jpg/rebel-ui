@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from "react";
+import { useNavigate } from "react-router-dom";
 
 // ── API Base ──────────────────────────────────────────────────────────────────
 const API =
@@ -407,6 +408,14 @@ function AgentDetailModal({ agent, onClose }: {
 // ── Main Page — one SIEM view, data merged across every connected source ────
 export default function SIEMDashboard() {
   const mobile = useMobile();
+  const navigate = useNavigate();
+
+  // Same guard RebelDashboard.tsx uses on the main dashboard — redirect
+  // immediately if there's no session, rather than rendering the "No SIEM
+  // sources connected yet" empty state for what's actually a logged-out
+  // visitor. Matches the rest of the app's behavior instead of being the
+  // one page that stays quietly browsable without a session.
+  useEffect(() => { if (!localStorage.getItem("access")) navigate("/login"); }, [navigate]);
 
   const [statusMap, setStatusMap] = useState<Record<string, ProviderStatus | null>>({});
   const [statusesLoaded, setStatusesLoaded] = useState(false);
