@@ -180,8 +180,25 @@ async function authFetch(url: string, init: RequestInit = {}, _retried = false):
   });
   if (res.status !== 401 || _retried) return res;
 
+  const refresh = localStorage.getItem("refresh");
+  if (!refresh) {
+    // No refresh token to attempt — this 401 does NOT prove the access
+    // token itself is dead (it could be transient, or unrelated to this
+    // specific call). Do NOT clear localStorage here: this function runs
+    // for every SIEM provider's background status check on page load, and
+    // silently wiping tokens as a side effect of ONE of them 401ing was
+    // logging the user out of the ENTIRE app — visible as "navigate back
+    // to the main dashboard and it reverts to login" even right after a
+    // successful login. Just return the 401 and let the caller's own
+    // error state (statusError banner, etc.) handle it.
+    return res;
+  }
+
   const newToken = await refreshAccessToken();
   if (!newToken) {
+    // A refresh WAS attempted with a real refresh token and it was
+    // explicitly rejected by the auth service — this is a genuine
+    // "the session is actually dead" signal, safe to clear.
     localStorage.removeItem("access");
     localStorage.removeItem("refresh");
     return res;
