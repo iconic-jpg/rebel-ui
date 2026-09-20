@@ -29,6 +29,7 @@ const L = {
 };
 
 const PROVIDERS: ProviderDef[] = [
+  { slug: "rebel", label: "REBEL Native", color: L.purple, credentialFields: null },
   { slug: "wazuh", label: "Wazuh", color: L.blue,
     credentialFields: [
       { key: "WAZUH_USERNAME", label: "USERNAME", placeholder: "rebel_svc" },
@@ -235,7 +236,9 @@ function ConnectModal({ provider, onClose, onConnected }: {
         <div style={{ fontSize: 10, color: L.text3 }}>
           {provider.credentialFields
             ? "The manager address is already configured on the backend — just enter the service account credentials REBEL should authenticate with. Nothing is kept in the browser after this form closes."
-            : `${provider.label} is running against realistic sample data while the real integration is being built — no credentials needed yet. This just turns the mock feed on for your account.`}
+            : provider.slug === "rebel"
+              ? "REBEL's own scan history and tracked assets are included in this view automatically — this just turns them back on if they were previously excluded."
+              : `${provider.label} needs no separate credentials to reconnect.`}
         </div>
 
         {provider.credentialFields && (
