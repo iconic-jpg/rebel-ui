@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { BrowserRouter as Router, Routes, Route, useLocation } from "react-router-dom";
+import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
 import RebelDashboard from "./components/RebelDashboard/RebelDashboard.js";
 import Login from "./components/Auth/Login.js";
 import Signup from "./components/Auth/Signup.js";
@@ -36,17 +36,6 @@ export interface VCenterVM {
   power_state: string;
 }
 
-// Same token key RebelDashboard already checks.
-const isLoggedIn = () => !!localStorage.getItem("access");
-
-// Logged-out visitors on "/" see the public landing page (no shell chrome).
-// Every other path, and "/" once signed in, gets the normal AppShell + dashboard.
-function Shell() {
-  const { pathname } = useLocation();
-  if (pathname === "/" && !isLoggedIn()) return <Landing />;
-  return <AppShell />;
-}
-
 export default function App() {
   const [vCenterAssets, setVCenterAssets] = useState<VCenterVM[]>([]);
   const hasVCenterAssets = vCenterAssets.length > 0;
@@ -62,12 +51,15 @@ export default function App() {
           <Route path="/signup"               element={<Signup />} />
           <Route path="/splash"               element={<RebelSplash />} />
 
+          {/* ── Public landing page: always at "/" ── */}
+          <Route path="/"                     element={<Landing />} />
+
           {/* ── Google OAuth callback — MUST be top-level, outside AppShell ── */}
           <Route path="/auth/google/callback" element={<GoogleCallback />} />
 
-          {/* ── "/" shows Landing when logged out, AppShell + dashboard when logged in ── */}
-          <Route path="/" element={<Shell />}>
-            <Route index element={<RebelDashboard />} />
+          {/* ── App pages inside AppShell. The SOC dashboard now lives at /dashboard ── */}
+          <Route element={<AppShell />}>
+            <Route path="dashboard" element={<RebelDashboard />} />
 
             <Route path="inventory"  element={<AssetInventoryPage />} />
             <Route path="discovery"  element={<AssetDiscoveryPage />} />

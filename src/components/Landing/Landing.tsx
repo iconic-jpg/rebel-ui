@@ -93,6 +93,10 @@ const CSS = `
 `;
 
 export default function Landing() {
+  // Signed-in visitors skip the login step and go straight to the dashboard.
+  const loggedIn = !!localStorage.getItem("access");
+  const dashTo = loggedIn ? "/dashboard" : "/login";
+
   // Set the page title and description for crawlers and browser tabs.
   useEffect(() => {
     const prevTitle = document.title;
@@ -134,8 +138,14 @@ export default function Landing() {
             <nav aria-label="Main">
               <a className="hide-sm" href="#platform">Platform</a>
               <a className="hide-sm" href="#how">How it works</a>
-              <Link to="/login">Sign in</Link>
-              <Link className="btn" to="/signup">Get started</Link>
+              {loggedIn ? (
+                <Link className="btn" to="/dashboard">Open dashboard</Link>
+              ) : (
+                <>
+                  <Link to="/login">Sign in</Link>
+                  <Link className="btn" to="/signup">Get started</Link>
+                </>
+              )}
             </nav>
           </div>
 
@@ -148,7 +158,7 @@ export default function Landing() {
               </p>
               <div className="cta">
                 <Link className="btn" to="/signup">Get started</Link>
-                <Link className="btn ghost" to="/login">Open the live dashboard</Link>
+                <Link className="btn ghost" to={dashTo}>Open the live dashboard</Link>
               </div>
             </div>
 
@@ -240,7 +250,7 @@ export default function Landing() {
                     Sign in and you land on the same real-time dashboard, now with your compliance posture beside it.
                   </p>
                 </div>
-                <Link className="btn" to="/login">Open dashboard</Link>
+                <Link className="btn" to={dashTo}>Open dashboard</Link>
               </div>
               <div className="stats">
                 <div className="stat"><small>Packets</small><b>1,284</b></div>
