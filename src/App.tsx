@@ -1,9 +1,10 @@
 import React, { useState } from "react";
-import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
+import { BrowserRouter as Router, Routes, Route, useLocation } from "react-router-dom";
 import RebelDashboard from "./components/RebelDashboard/RebelDashboard.js";
 import Login from "./components/Auth/Login.js";
 import Signup from "./components/Auth/Signup.js";
 import AppShell from "./components/Shell/AppShell.js";
+import Landing from "./components/Landing/Landing.js";
 import AssetInventoryPage from "./components/Modules/AssetInventory.js";
 import AssetRegistryPage from "./components/Modules/AssetRegistryPage.js";
 import AssetDiscoveryPage from "./components/Modules/AssetDiscovery.js";
@@ -35,6 +36,17 @@ export interface VCenterVM {
   power_state: string;
 }
 
+// Same token key RebelDashboard already checks.
+const isLoggedIn = () => !!localStorage.getItem("access");
+
+// Logged-out visitors on "/" see the public landing page (no shell chrome).
+// Every other path, and "/" once signed in, gets the normal AppShell + dashboard.
+function Shell() {
+  const { pathname } = useLocation();
+  if (pathname === "/" && !isLoggedIn()) return <Landing />;
+  return <AppShell />;
+}
+
 export default function App() {
   const [vCenterAssets, setVCenterAssets] = useState<VCenterVM[]>([]);
   const hasVCenterAssets = vCenterAssets.length > 0;
@@ -53,8 +65,8 @@ export default function App() {
           {/* ── Google OAuth callback — MUST be top-level, outside AppShell ── */}
           <Route path="/auth/google/callback" element={<GoogleCallback />} />
 
-          {/* ── Protected routes inside AppShell ── */}
-          <Route path="/" element={<AppShell />}>
+          {/* ── "/" shows Landing when logged out, AppShell + dashboard when logged in ── */}
+          <Route path="/" element={<Shell />}>
             <Route index element={<RebelDashboard />} />
 
             <Route path="inventory"  element={<AssetInventoryPage />} />
