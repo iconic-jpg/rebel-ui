@@ -103,6 +103,11 @@ interface OverallSummary {
 }
 interface FailedControl {
   id: number; control_ref: string; title: string; category: string; severity: string; affected_assets: number;
+  status?: string;
+}
+interface EvidenceItem {
+  evidence_id: string; request_id: string; module: string; result: string; confidence: number;
+  rationale?: string; collected_at: string; sha256: string; source: { uri: string; version: string };
 }
 interface AffectedAsset {
   status: string; reason: string; last_checked: string;
@@ -113,10 +118,14 @@ interface ControlDetail {
   title: string; description: string; category: string; severity: string;
   recommended_fix: string; required_evidence: string; compliance_mapping: string;
   affected_assets: AffectedAsset[];
+  // audit-engine extras (optional so older backends still work)
+  finding_id?: string; status?: string; approval_state?: string; approvals?: Record<string, string>;
+  explanation?: string; evidence?: EvidenceItem[]; source_url?: string; source_verification?: string;
 }
 interface TrendPoint { snapshot_date: string; score: number; pass_rate: number; failed_controls: number; critical_violations: number; }
 
 function severityColor(s: string) { return ({ Critical: L.red, High: L.orange, Medium: L.yellow, Low: L.green }[s] ?? L.text3); }
+function resultColor(r: string) { return ({ pass: L.green, fail: L.red, partial: L.yellow, inconclusive: L.orange }[r] ?? L.text3); }
 function scoreColor(score: number) { if (score >= 80) return L.green; if (score >= 60) return L.yellow; return L.red; }
 
 export default function ComplianceDashboard() {
@@ -138,12 +147,38 @@ export default function ComplianceDashboard() {
   const [controlLoading, setControlLoading] = useState<number | null>(null);
   const [exporting, setExporting] = useState<string | null>(null);
 
+  // ── audit-engine identity + actions ──────────────────────────────────────
+  const [actor, setActor] = useState<string>(() => { try { return localStorage.getItem("rebel_actor") ?? ""; } catch { return ""; } });
+  const [token, setToken] = useState<string>(() => { try { return sessionStorage.getItem("rebel_audit_token") ?? ""; } catch { return ""; } });
+  const [assessing, setAssessing] = useState(false);
+  const [notice, setNotice] = useState<string>("");
+  const [trailStatus, setTrailStatus] = useState<{ ok: boolean; detail: string } | null>(null);
+  const [comment, setComment] = useState("");
+  const [tick, setTick] = useState(0); // bumps after an assessment so the trend chart refetches
+
+  const saveIdentity = (a: string, t: string) => {
+    setActor(a); setToken(t);
+    try { localStorage.setItem("rebel_actor", a); sessionStorage.setItem("rebel_audit_token", t); } catch {}
+  };
+  // every request carries the actor/token the backend uses for audit-trail attribution and the optional token guard
+  const af = (path: string, init: RequestInit = {}) => {
+    const h: Record<string, string> = { ...(init.headers as Record<string, string> | undefined) };
+    if (actor.trim()) h["X-Actor"] = actor.trim();
+    if (token.trim()) h["X-Audit-Token"] = token.trim();
+    if (init.body) h["Content-Type"] = "application/json";
+    return fetch(`${API}${path}`, { ...init, headers: h });
+  };
+  const errText = async (res: Response) => {
+    const b = await res.json().catch(() => null);
+    return typeof b?.detail === "string" ? b.detail : `Request failed (${res.status})`;
+  };
+
   // ── Load framework overview ──────────────────────────────────────────────
   const loadOverview = useCallback(async () => {
     setLoading(true);
     setFetchError(false);
     try {
-      const res = await fetch(`${API}/compliance/frameworks`);
+      const res = await af("/compliance/frameworks");
       if (!res.ok) throw new Error();
       const data = await res.json();
       setFrameworks(data.frameworks ?? []);
@@ -167,7 +202,7 @@ export default function ComplianceDashboard() {
       setExecSummary("");
       return;
     }
-    fetch(`${API}/compliance/frameworks/${selectedFramework}`)
+    af(`/compliance/frameworks/${selectedFramework}`)
       .then(r => r.ok ? r.json() : null)
       .then(d => {
         if (!d) return;
@@ -181,11 +216,11 @@ export default function ComplianceDashboard() {
   useEffect(() => {
     const params = new URLSearchParams({ days: String(trendDays) });
     if (selectedFramework) params.set("framework", selectedFramework);
-    fetch(`${API}/compliance/trend?${params.toString()}`)
+    af(`/compliance/trend?${params.toString()}`)
       .then(r => r.ok ? r.json() : null)
       .then(d => { if (d) setTrend(d.points ?? []); })
       .catch(() => {});
-  }, [selectedFramework, trendDays]);
+  }, [selectedFramework, trendDays, tick]);
 
   // ── Draw trend chart ──────────────────────────────────────────────────────
   useEffect(() => { drawTrend(); }, [trend, mobile]);
@@ -256,7 +291,7 @@ export default function ComplianceDashboard() {
     if (!controlDetail[controlId]) {
       setControlLoading(controlId);
       try {
-        const res = await fetch(`${API}/compliance/controls/${controlId}`);
+        const res = await af(`/compliance/controls/${controlId}`);
         if (res.ok) {
           const d = await res.json();
           setControlDetail(prev => ({ ...prev, [controlId]: d }));
@@ -271,7 +306,7 @@ export default function ComplianceDashboard() {
     try {
       const params = new URLSearchParams({ format });
       if (selectedFramework) params.set("framework", selectedFramework);
-      const res = await fetch(`${API}/compliance/export?${params.toString()}`);
+      const res = await af(`/compliance/export?${params.toString()}`);
       if (!res.ok) {
         const body = await res.json().catch(() => null);
         alert(body?.detail || `Export failed (${res.status})`);
@@ -292,6 +327,56 @@ export default function ComplianceDashboard() {
       alert("Export failed — network error.");
     }
     setExporting(null);
+  };
+
+  const reloadAll = useCallback(async () => {
+    await loadOverview();
+    setControlDetail({});
+    if (selectedFramework) {
+      const r = await af(`/compliance/frameworks/${selectedFramework}`).catch(() => null);
+      if (r && r.ok) { const d = await r.json(); setFailedControls(d.failed_controls ?? []); setExecSummary(d.executive_summary ?? ""); }
+    }
+    // eslint-disable-next-line
+  }, [loadOverview, selectedFramework, actor, token]);
+
+  const runAssessment = async () => {
+    if (!actor.trim()) { setNotice("Enter your name first — it is written to the audit trail."); return; }
+    setAssessing(true); setNotice("");
+    try {
+      const res = await af("/audit/assess", { method: "POST", body: JSON.stringify({}) });
+      if (!res.ok) setNotice(await errText(res));
+      else {
+        const d = await res.json();
+        setNotice(d.warning ?? `Assessment complete — ${d.assessment.controls_in_scope} controls in scope.`);
+        setTrailStatus(null);
+        await reloadAll();
+        setTick(t => t + 1);
+      }
+    } catch { setNotice("Network error while running the assessment."); }
+    setAssessing(false);
+  };
+
+  const verifyTrail = async () => {
+    try {
+      const res = await af("/audit/trail/verify");
+      if (res.ok) setTrailStatus(await res.json()); else setNotice(await errText(res));
+    } catch { setNotice("Network error while verifying the trail."); }
+  };
+
+  const approvalStep = async (findingId: string, step: string) => {
+    if (!actor.trim()) { setNotice("Enter your name first."); return; }
+    setNotice("");
+    try {
+      const res = await af(`/audit/findings/${findingId}/${step}`, { method: "POST", body: JSON.stringify({ comment }) });
+      if (!res.ok) { setNotice(await errText(res)); return; }
+      setComment("");
+      const open = expandedControl;
+      setControlDetail({});
+      if (open !== null) {
+        const r = await af(`/compliance/controls/${open}`);
+        if (r.ok) { const d = await r.json(); setControlDetail({ [open]: d }); }
+      }
+    } catch { setNotice("Network error."); }
   };
 
   const activeFramework = frameworks.find(f => f.code === selectedFramework) || null;
@@ -325,6 +410,27 @@ export default function ComplianceDashboard() {
           {frameworks.map(f => <option key={f.code} value={f.code}>{f.name}</option>)}
         </select>
       </div>
+
+      {/* ── ASSESSMENT CONTROLS (audit engine) ── */}
+      <LPanel>
+        <div style={{ padding: "10px 14px", display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          <input value={actor} onChange={e => saveIdentity(e.target.value, token)} placeholder="your name (audit actor)" style={{ ...LS.select, width: 170 }} />
+          <input value={token} type="password" onChange={e => saveIdentity(actor, e.target.value)} placeholder="audit token (if set)" style={{ ...LS.select, width: 140 }} />
+          <button onClick={runAssessment} disabled={assessing} style={{ ...LS.btn, background: L.blue, color: "#fff", borderColor: L.blue, opacity: assessing ? 0.6 : 1 }}>
+            {assessing ? "Assessing…" : "▶ Run assessment"}
+          </button>
+          <button onClick={verifyTrail} style={LS.btn}>Verify audit trail</button>
+          {trailStatus && (
+            <span style={{ fontSize: 9, fontWeight: 700, color: trailStatus.ok ? L.green : L.red }}>
+              {trailStatus.ok ? "✓ TRAIL INTACT" : "✗ TRAIL BROKEN"} · {trailStatus.detail}
+            </span>
+          )}
+          {notice && <span style={{ fontSize: 10, color: L.orange }}>⚠ {notice}</span>}
+        </div>
+        <div style={{ padding: "0 14px 10px", fontSize: 9, color: L.text4 }}>
+          Scores are evidence-gated: controls with no collected evidence count as not assessed (zero), never as compliant. Statuses stay PROPOSED until a maker, reviewer and approver (three different people) sign off.
+        </div>
+      </LPanel>
 
       {/* ── SCORE CARDS ── */}
       <div style={{ display: "grid", gridTemplateColumns: mobile ? "1fr 1fr" : "repeat(5,1fr)", gap: mobile ? 8 : 9 }}>
@@ -449,6 +555,7 @@ export default function ComplianceDashboard() {
                     onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
                   >
                     <span style={{ fontSize: 8, fontWeight: 700, color: severityColor(c.severity), border: `1px solid ${severityColor(c.severity)}44`, borderRadius: 3, padding: "2px 6px", flexShrink: 0 }}>{c.severity}</span>
+                    {c.status && <span style={{ fontSize: 8, fontWeight: 700, color: resultColor(c.status), flexShrink: 0, textTransform: "uppercase" as const }}>{c.status}</span>}
                     <span style={{ fontSize: 9, color: L.text4, fontFamily: "'DM Mono',monospace", flexShrink: 0, width: mobile ? 50 : 70 }}>{c.control_ref}</span>
                     <span style={{ fontSize: 11, color: L.text1, flex: 1, fontWeight: 500 }}>{c.title}</span>
                     {!mobile && <Badge v="gray">{c.category}</Badge>}
@@ -494,6 +601,39 @@ export default function ComplianceDashboard() {
                               </div>
                             )}
                           </div>
+
+                          {/* ── evidence & approval (audit engine) ── */}
+                          {detail.evidence && (
+                            <div>
+                              <div style={{ fontSize: 7, color: L.text4, letterSpacing: ".1em", marginBottom: 6, textTransform: "uppercase" as const, fontWeight: 600 }}>
+                                Evidence ({detail.evidence.length}) · {detail.source_verification?.replace(/_/g, " ")}
+                              </div>
+                              {detail.evidence.length === 0 && <div style={{ fontSize: 9, color: L.text4 }}>No evidence collected — this control cannot be marked compliant.</div>}
+                              {detail.evidence.map(e => (
+                                <div key={e.evidence_id} style={{ background: L.panelBg, border: `1px solid ${L.panelBorder}`, borderRadius: 5, padding: "6px 10px", marginBottom: 4 }}>
+                                  <span style={{ fontSize: 8, fontWeight: 700, color: resultColor(e.result), textTransform: "uppercase" as const }}>{e.result}</span>
+                                  <span style={{ fontSize: 9, color: L.text3 }}> · {e.request_id} · conf {e.confidence} — {e.rationale}</span>
+                                  <div style={{ fontSize: 8, color: L.text4, fontFamily: "'DM Mono',monospace" }}>
+                                    {e.source.uri} · v{e.source.version} · {e.collected_at} · sha256 {e.sha256.slice(0, 16)}…
+                                  </div>
+                                </div>
+                              ))}
+                              <div style={{ fontSize: 9, color: L.text3, marginTop: 6 }}>
+                                Approval: <b>{(detail.approval_state ?? "proposed").toUpperCase()}</b>
+                                {detail.approvals && Object.keys(detail.approvals).length > 0 && " · " + Object.entries(detail.approvals).map(([k, v]) => `${k}: ${v}`).join(" · ")}
+                              </div>
+                              {detail.finding_id && (
+                                <div style={{ display: "flex", gap: 6, marginTop: 6, flexWrap: "wrap", alignItems: "center" }}>
+                                  <input value={comment} onChange={e => setComment(e.target.value)} placeholder="comment (required to reject)" style={{ ...LS.select, width: 200 }} />
+                                  {detail.approval_state === "proposed" && <button style={LS.btn} onClick={() => approvalStep(detail.finding_id!, "submit")}>Submit (maker)</button>}
+                                  {detail.approval_state === "submitted" && <button style={LS.btn} onClick={() => approvalStep(detail.finding_id!, "review")}>Review (reviewer)</button>}
+                                  {detail.approval_state === "reviewed" && <button style={LS.btn} onClick={() => approvalStep(detail.finding_id!, "approve")}>Approve (approver)</button>}
+                                  {(detail.approval_state === "submitted" || detail.approval_state === "reviewed") &&
+                                    <button style={{ ...LS.btn, color: L.red }} onClick={() => approvalStep(detail.finding_id!, "reject")}>Reject</button>}
+                                </div>
+                              )}
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>
