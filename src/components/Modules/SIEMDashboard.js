@@ -4,7 +4,7 @@ import { useNavigate } from "react-router-dom";
 // ── API Base ──────────────────────────────────────────────────────────────────
 const API = (typeof import.meta !== "undefined" && import.meta.env?.VITE_API_BASE) ||
     "https://r3bel-5464.onrender.com";
-const AUTH_API = "https://r3bel.onrender.com";
+const AUTH_API = "https://https://r3bel-5464.onrender.com";
 const L = {
     pageBg: "#f5f7fa", panelBg: "#ffffff", panelBorder: "#e2e8f0",
     subtleBg: "#f8fafc", insetBg: "#f1f5f9", borderLight: "#f1f5f9",

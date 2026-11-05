@@ -1,7 +1,7 @@
 import { jsx as _jsx, Fragment as _Fragment, jsxs as _jsxs } from "react/jsx-runtime";
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-const API = "https://r3bel.onrender.com";
+const API = "https://https://r3bel-5464.onrender.com";
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID;
 // Real path — works now that we're on BrowserRouter
 const REDIRECT_URI = `${window.location.origin}/auth/google/callback`;

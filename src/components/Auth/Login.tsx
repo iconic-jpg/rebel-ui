@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 
-const API = "https://r3bel.onrender.com";
+const API = "https://https://r3bel-5464.onrender.com";
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID as string;
 
 // Real path — works now that we're on BrowserRouter
