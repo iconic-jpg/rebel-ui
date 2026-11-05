@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
-const API = "https://https://r3bel-5464.onrender.com";
+const API = "https://r3bel-5464.onrender.com";
 const REDIRECT_URI = `${window.location.origin}/auth/google/callback`;
 
 const styles = `
