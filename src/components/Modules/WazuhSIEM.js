@@ -5,7 +5,7 @@ const API = (typeof import.meta !== "undefined" && import.meta.env?.VITE_API_BAS
     "https://r3bel-5464.onrender.com";
 // Django auth service — separate host from the FastAPI API above. Matches
 // the exact endpoint/shape Login.tsx already uses for the same purpose.
-const AUTH_API = "https://r3bel.onrender.com";
+const AUTH_API = "https://r3bel-5464.onrender.com";
 // ── Light Theme Palette (matches IntegrationsPage / other Modules pages) ──────
 const L = {
     pageBg: "#f5f7fa",
