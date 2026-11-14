@@ -5,6 +5,7 @@ import { useThemeContext } from "../context/ThemeContext.js";
 import SecureModePanel, { SecureModeBadge } from "../Modules/SecureModePanel.js";
 const NAV_ITEMS = [
     { path: "/", label: "Dashboard", icon: "⬡", section: "CORE" },
+    { path: "/connect", label: "Rebel Connect", icon: "⇄", section: "INSTITUTION" },
     { path: "/integrations", icon: "⬢", label: "Integrations", section: "ASSET & PQC" },
     { path: "/remediation", icon: "⚡", label: "Remediation Center", section: "ASSET & PQC" },
     { path: "/siem", icon: "⛨", label: "SIEM Integration", section: "SECURITY OPS" },

@@ -8,6 +8,7 @@ import Signup from "./components/Auth/Signup.js";
 import AppShell from "./components/Shell/AppShell.js";
 import Landing from "./components/Landing/Landing.js";
 import InstitutionOnboarding from "./components/Institution/InstitutionOnboarding.js";
+import ConnectWorkspace from "./components/Institution/ConnectWorkspace.js";
 
 import AssetInventoryPage from "./components/Modules/AssetInventory.js";
 import AssetRegistryPage from "./components/Modules/AssetRegistryPage.js";
@@ -52,12 +53,13 @@ export default function App() {
           <Route path="/login" element={<Login />} />
           <Route path="/signup" element={<Signup />} />
           <Route path="/splash" element={<RebelSplash />} />
+
           <Route
             path="/auth/google/callback"
             element={<GoogleCallback />}
           />
 
-          {/* Institutional onboarding — standalone, outside AppShell */}
+          {/* Institutional onboarding — standalone */}
           <Route
             path="/onboarding"
             element={<InstitutionOnboarding />}
@@ -66,6 +68,12 @@ export default function App() {
           {/* Existing Rebel application */}
           <Route element={<AppShell />}>
             <Route path="dashboard" element={<RebelDashboard />} />
+
+            {/* Institution connectivity */}
+            <Route
+              path="connect"
+              element={<ConnectWorkspace />}
+            />
 
             <Route path="inventory" element={<AssetInventoryPage />} />
             <Route path="discovery" element={<AssetDiscoveryPage />} />
