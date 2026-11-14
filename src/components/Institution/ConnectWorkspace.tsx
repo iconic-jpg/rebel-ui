@@ -1,4 +1,6 @@
-import { useCallback, useEffect, useState } from "react";
+
+import React, { useCallback, useEffect, useState } from "react";
+import { refreshSession } from "../Auth/authApi.js";
 
 const API_BASE = "https://r3bel-5464.onrender.com";
 
@@ -110,6 +112,76 @@ const styles = `
 }
 `;
 
+async function getFreshAccessToken(): Promise<string> {
+  const refresh = localStorage.getItem("refresh");
+
+  if (!refresh) {
+    throw new Error("Your Rebel session has expired. Please sign in again.");
+  }
+
+  try {
+    const data = await refreshSession(refresh);
+
+    if (!data.access) {
+      throw new Error("The authentication server did not return an access token.");
+    }
+
+    localStorage.setItem("access", data.access);
+
+    if (data.refresh) {
+      localStorage.setItem("refresh", data.refresh);
+    }
+
+    return data.access;
+  } catch {
+    localStorage.removeItem("access");
+    localStorage.removeItem("refresh");
+
+    throw new Error("Your Rebel session has expired. Please sign in again.");
+  }
+}
+
+async function connectRequest(
+  path: string,
+  options: RequestInit = {},
+): Promise<Response> {
+  let token = localStorage.getItem("access");
+
+  if (!token) {
+    token = await getFreshAccessToken();
+  }
+
+  const send = (accessToken: string) =>
+    fetch(`${API_BASE}${path}`, {
+      ...options,
+      headers: {
+        ...options.headers,
+        Authorization: `Bearer ${accessToken}`,
+      },
+    });
+
+  let response = await send(token);
+
+  if (response.status === 401) {
+    token = await getFreshAccessToken();
+    response = await send(token);
+  }
+
+  return response;
+}
+
+async function readResponse(response: Response) {
+  const data = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    throw new Error(
+      data.detail || data.message || `Connect request failed (${response.status}).`,
+    );
+  }
+
+  return data;
+}
+
 export default function ConnectWorkspace() {
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
   const [loading, setLoading] = useState(true);
@@ -118,76 +190,58 @@ export default function ConnectWorkspace() {
   const [institutionName, setInstitutionName] = useState("");
   const [jurisdiction, setJurisdiction] = useState("");
 
-  const token = localStorage.getItem("access");
-
   const loadWorkspace = useCallback(async () => {
-    if (!token) {
-      setError("Your Rebel session is missing. Please sign in again.");
-      setLoading(false);
-      return;
-    }
-
     setLoading(true);
     setError("");
 
     try {
-      const response = await fetch(`${API_BASE}/connect/workspace`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const response = await connectRequest("/connect/workspace");
 
       if (response.status === 404) {
         setWorkspace(null);
         return;
       }
 
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.detail || "Unable to load your institution workspace.");
-      }
-
+      const data = await readResponse(response);
       setWorkspace(data);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Connect service unavailable.");
+      setError(
+        err instanceof Error ? err.message : "Connect service unavailable.",
+      );
     } finally {
       setLoading(false);
     }
-  }, [token]);
+  }, []);
 
   useEffect(() => {
     void loadWorkspace();
   }, [loadWorkspace]);
 
-  const createWorkspace = async (event: React.FormEvent<HTMLFormElement>) => {
+  const createWorkspace = async (
+    event: React.FormEvent<HTMLFormElement>,
+  ) => {
     event.preventDefault();
-    if (!token) {
-      setError("Please sign in again.");
-      return;
-    }
-
     setCreating(true);
     setError("");
 
     try {
-      const response = await fetch(`${API_BASE}/connect/institutions`, {
+      const response = await connectRequest("/connect/institutions", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
-          name: institutionName,
-          jurisdiction,
+          name: institutionName.trim(),
+          jurisdiction: jurisdiction.trim(),
         }),
       });
 
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.detail || "Could not create institution workspace.");
-      }
-
+      await readResponse(response);
       await loadWorkspace();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Workspace creation failed.");
+      setError(
+        err instanceof Error ? err.message : "Workspace creation failed.",
+      );
     } finally {
       setCreating(false);
     }
@@ -196,17 +250,26 @@ export default function ConnectWorkspace() {
   return (
     <>
       <style>{styles}</style>
+
       <main className="connect-page">
         <div className="connect-wrap">
-          <div className="connect-eyebrow">REBEL // INSTITUTIONAL CONNECT</div>
+          <div className="connect-eyebrow">
+            REBEL // INSTITUTIONAL CONNECT
+          </div>
+
           <h1 className="connect-title">Institution Connect</h1>
+
           <p className="connect-subtitle">
-            Connect your institution's systems to Rebel. Manage machine identities,
-            monitor evidence ingestion and establish the data foundation for
-            security and compliance assessments.
+            Connect your institution's systems to Rebel. Manage machine
+            identities, monitor evidence ingestion and establish the data
+            foundation for security and compliance assessments.
           </p>
 
-          {error && <div className="connect-error" role="alert">{error}</div>}
+          {error && (
+            <div className="connect-error" role="alert">
+              {error}
+            </div>
+          )}
 
           {loading ? (
             <div className="connect-card" style={{ marginTop: 25 }}>
@@ -216,13 +279,19 @@ export default function ConnectWorkspace() {
             <>
               <section className="connect-card" style={{ marginTop: 25 }}>
                 <div className="connect-eyebrow">ACTIVE INSTITUTION</div>
+
                 <h2 style={{ fontSize: 23, margin: "9px 0" }}>
                   {workspace.institution.name}
                 </h2>
+
                 <div className="connect-muted">
                   {workspace.institution.jurisdiction} · {workspace.institution.role}
                 </div>
-                <div className="connect-muted" style={{ fontSize: 11, marginTop: 8 }}>
+
+                <div
+                  className="connect-muted"
+                  style={{ fontSize: 11, marginTop: 8 }}
+                >
                   Institution ID: {workspace.institution.institution_id}
                 </div>
               </section>
@@ -230,20 +299,29 @@ export default function ConnectWorkspace() {
               <section className="connect-grid">
                 <div className="connect-card">
                   <div className="connect-card-label">Registered agents</div>
-                  <div className="connect-metric">{workspace.metrics.agents_total}</div>
+                  <div className="connect-metric">
+                    {workspace.metrics.agents_total}
+                  </div>
                 </div>
+
                 <div className="connect-card">
                   <div className="connect-card-label">Active agents</div>
-                  <div className="connect-metric">{workspace.metrics.agents_active}</div>
+                  <div className="connect-metric">
+                    {workspace.metrics.agents_active}
+                  </div>
                 </div>
+
                 <div className="connect-card">
                   <div className="connect-card-label">Evidence submissions</div>
-                  <div className="connect-metric">{workspace.metrics.evidence_total}</div>
+                  <div className="connect-metric">
+                    {workspace.metrics.evidence_total}
+                  </div>
                 </div>
               </section>
 
               <section className="connect-card" style={{ marginBottom: 18 }}>
                 <h2 className="connect-section-title">Connected agents</h2>
+
                 {workspace.agents.length === 0 ? (
                   <div className="connect-muted">
                     No agents have been provisioned for this institution yet.
@@ -253,25 +331,44 @@ export default function ConnectWorkspace() {
                     <table className="connect-table">
                       <thead>
                         <tr>
-                          <th>Agent</th><th>Status</th><th>Created</th><th>Last heartbeat</th>
+                          <th>Agent</th>
+                          <th>Status</th>
+                          <th>Created</th>
+                          <th>Last heartbeat</th>
                         </tr>
                       </thead>
+
                       <tbody>
                         {workspace.agents.map((agent) => (
                           <tr key={agent.agent_id}>
                             <td>
                               <strong>{agent.name}</strong>
-                              <div className="connect-muted" style={{ fontSize: 10 }}>
+                              <div
+                                className="connect-muted"
+                                style={{ fontSize: 10 }}
+                              >
                                 {agent.agent_id}
                               </div>
                             </td>
                             <td>
-                              <span className={`connect-status ${agent.status === "active" ? "active" : ""}`}>
+                              <span
+                                className={`connect-status ${
+                                  agent.status === "active" ? "active" : ""
+                                }`}
+                              >
                                 {agent.status}
                               </span>
                             </td>
-                            <td>{agent.created_at ? new Date(agent.created_at).toLocaleString() : "—"}</td>
-                            <td>{agent.last_seen_at ? new Date(agent.last_seen_at).toLocaleString() : "Never"}</td>
+                            <td>
+                              {agent.created_at
+                                ? new Date(agent.created_at).toLocaleString()
+                                : "—"}
+                            </td>
+                            <td>
+                              {agent.last_seen_at
+                                ? new Date(agent.last_seen_at).toLocaleString()
+                                : "Never"}
+                            </td>
                           </tr>
                         ))}
                       </tbody>
@@ -282,26 +379,36 @@ export default function ConnectWorkspace() {
 
               <section className="connect-card" style={{ marginBottom: 18 }}>
                 <h2 className="connect-section-title">Recent evidence</h2>
+
                 {workspace.recent_evidence.length === 0 ? (
                   <div className="connect-muted">
-                    No evidence has been received. Once an institution agent submits
-                    evidence, its source, type, timestamp and integrity hash will appear here.
+                    No evidence has been received. Once an institution agent
+                    submits evidence, its source, type, timestamp and integrity
+                    hash will appear here.
                   </div>
                 ) : (
                   <div className="connect-table-wrap">
                     <table className="connect-table">
                       <thead>
                         <tr>
-                          <th>Source</th><th>Evidence type</th><th>Received</th><th>Integrity hash</th>
+                          <th>Source</th>
+                          <th>Evidence type</th>
+                          <th>Received</th>
+                          <th>Integrity hash</th>
                         </tr>
                       </thead>
+
                       <tbody>
                         {workspace.recent_evidence.map((item) => (
                           <tr key={item.submission_id}>
                             <td>{item.source_system}</td>
                             <td>{item.evidence_type}</td>
-                            <td>{new Date(item.received_at).toLocaleString()}</td>
-                            <td className="connect-hash">{item.payload_sha256}</td>
+                            <td>
+                              {new Date(item.received_at).toLocaleString()}
+                            </td>
+                            <td className="connect-hash">
+                              {item.payload_sha256}
+                            </td>
                           </tr>
                         ))}
                       </tbody>
@@ -311,11 +418,11 @@ export default function ConnectWorkspace() {
               </section>
 
               <div className="connect-info">
-                <strong>Next integration step:</strong> provision an institution-specific
-                agent with the minimum required scopes, install it in the institution's
-                environment, and begin sending signed-provenance evidence to Rebel.
-                Agent provisioning is intentionally restricted to the controlled
-                provisioning service.
+                <strong>Next integration step:</strong> provision an
+                institution-specific agent with the minimum required scopes,
+                install it in the institution's environment, and begin sending
+                signed-provenance evidence to Rebel. Agent provisioning remains
+                restricted to the controlled provisioning service.
               </div>
 
               <button
@@ -327,19 +434,30 @@ export default function ConnectWorkspace() {
               </button>
             </>
           ) : (
-            <section className="connect-card" style={{ maxWidth: 650, marginTop: 25 }}>
+            <section
+              className="connect-card"
+              style={{ maxWidth: 650, marginTop: 25 }}
+            >
               <div className="connect-eyebrow">INITIALIZE WORKSPACE</div>
+
               <h2 style={{ fontSize: 23, margin: "10px 0" }}>
                 Register your institution
               </h2>
-              <p className="connect-muted" style={{ lineHeight: 1.6, marginBottom: 18 }}>
+
+              <p
+                className="connect-muted"
+                style={{ lineHeight: 1.6, marginBottom: 18 }}
+              >
                 Create the institution workspace that will own your connected
-                systems, agents and evidence. Your account will become its initial
-                institution owner.
+                systems, agents and evidence. Your account will become its
+                initial institution owner.
               </p>
 
               <form onSubmit={createWorkspace}>
-                <label htmlFor="institution-name">Legal or operating institution name</label>
+                <label htmlFor="institution-name">
+                  Legal or operating institution name
+                </label>
+
                 <input
                   id="institution-name"
                   className="connect-input"
@@ -351,7 +469,10 @@ export default function ConnectWorkspace() {
                   required
                 />
 
-                <label htmlFor="institution-jurisdiction">Primary jurisdiction</label>
+                <label htmlFor="institution-jurisdiction">
+                  Primary jurisdiction
+                </label>
+
                 <input
                   id="institution-jurisdiction"
                   className="connect-input"
@@ -363,14 +484,23 @@ export default function ConnectWorkspace() {
                   required
                 />
 
-                <button className="connect-button" disabled={creating} type="submit">
-                  {creating ? "Creating workspace…" : "Create institution workspace"}
+                <button
+                  className="connect-button"
+                  disabled={creating}
+                  type="submit"
+                >
+                  {creating
+                    ? "Creating workspace…"
+                    : "Create institution workspace"}
                 </button>
               </form>
 
-              <p className="connect-muted" style={{ fontSize: 12, marginTop: 18 }}>
-                Joining an existing institution by invitation will be added as the
-                next membership workflow.
+              <p
+                className="connect-muted"
+                style={{ fontSize: 12, marginTop: 18 }}
+              >
+                Joining an existing institution by invitation will be added as
+                the next membership workflow.
               </p>
             </section>
           )}
