@@ -69,6 +69,7 @@ function LMetricCard({ label, value, sub, color, loading }) {
     return (_jsxs("div", { style: { background: L.panelBg, border: `1px solid ${L.panelBorder}`, borderRadius: 8, padding: "14px 16px", boxShadow: "0 1px 3px rgba(0,0,0,0.05)" }, children: [_jsx("div", { style: { fontSize: 8, color: L.text4, textTransform: "uppercase", letterSpacing: ".12em", marginBottom: 6, fontWeight: 600 }, children: label }), loading ? _jsx(Shimmer, { w: "60%", h: 22, style: { marginBottom: 8 } }) : _jsx("div", { style: { fontSize: 22, fontWeight: 800, color, lineHeight: 1 }, children: value }), _jsx("div", { style: { fontSize: 9, color: L.text3, marginTop: 5 }, children: sub })] }));
 }
 function severityColor(s) { return ({ Critical: L.red, High: L.orange, Medium: L.yellow, Low: L.green }[s] ?? L.text3); }
+function resultColor(r) { return ({ pass: L.green, fail: L.red, partial: L.yellow, inconclusive: L.orange }[r] ?? L.text3); }
 function scoreColor(score) { if (score >= 80)
     return L.green; if (score >= 60)
     return L.yellow; return L.red; }
@@ -88,12 +89,54 @@ export default function ComplianceDashboard() {
     const [controlDetail, setControlDetail] = useState({});
     const [controlLoading, setControlLoading] = useState(null);
     const [exporting, setExporting] = useState(null);
+    // ── audit-engine identity + actions ──────────────────────────────────────
+    const [actor, setActor] = useState(() => { try {
+        return localStorage.getItem("rebel_actor") ?? "";
+    }
+    catch {
+        return "";
+    } });
+    const [token, setToken] = useState(() => { try {
+        return sessionStorage.getItem("rebel_audit_token") ?? "";
+    }
+    catch {
+        return "";
+    } });
+    const [assessing, setAssessing] = useState(false);
+    const [notice, setNotice] = useState("");
+    const [trailStatus, setTrailStatus] = useState(null);
+    const [comment, setComment] = useState("");
+    const [tick, setTick] = useState(0); // bumps after an assessment so the trend chart refetches
+    const saveIdentity = (a, t) => {
+        setActor(a);
+        setToken(t);
+        try {
+            localStorage.setItem("rebel_actor", a);
+            sessionStorage.setItem("rebel_audit_token", t);
+        }
+        catch { }
+    };
+    // every request carries the actor/token the backend uses for audit-trail attribution and the optional token guard
+    const af = (path, init = {}) => {
+        const h = { ...init.headers };
+        if (actor.trim())
+            h["X-Actor"] = actor.trim();
+        if (token.trim())
+            h["X-Audit-Token"] = token.trim();
+        if (init.body)
+            h["Content-Type"] = "application/json";
+        return fetch(`${API}${path}`, { ...init, headers: h });
+    };
+    const errText = async (res) => {
+        const b = await res.json().catch(() => null);
+        return typeof b?.detail === "string" ? b.detail : `Request failed (${res.status})`;
+    };
     // ── Load framework overview ──────────────────────────────────────────────
     const loadOverview = useCallback(async () => {
         setLoading(true);
         setFetchError(false);
         try {
-            const res = await fetch(`${API}/compliance/frameworks`);
+            const res = await af("/compliance/frameworks");
             if (!res.ok)
                 throw new Error();
             const data = await res.json();
@@ -117,7 +160,7 @@ export default function ComplianceDashboard() {
             setExecSummary("");
             return;
         }
-        fetch(`${API}/compliance/frameworks/${selectedFramework}`)
+        af(`/compliance/frameworks/${selectedFramework}`)
             .then(r => r.ok ? r.json() : null)
             .then(d => {
             if (!d)
@@ -132,12 +175,12 @@ export default function ComplianceDashboard() {
         const params = new URLSearchParams({ days: String(trendDays) });
         if (selectedFramework)
             params.set("framework", selectedFramework);
-        fetch(`${API}/compliance/trend?${params.toString()}`)
+        af(`/compliance/trend?${params.toString()}`)
             .then(r => r.ok ? r.json() : null)
             .then(d => { if (d)
             setTrend(d.points ?? []); })
             .catch(() => { });
-    }, [selectedFramework, trendDays]);
+    }, [selectedFramework, trendDays, tick]);
     // ── Draw trend chart ──────────────────────────────────────────────────────
     useEffect(() => { drawTrend(); }, [trend, mobile]);
     function drawTrend() {
@@ -219,7 +262,7 @@ export default function ComplianceDashboard() {
         if (!controlDetail[controlId]) {
             setControlLoading(controlId);
             try {
-                const res = await fetch(`${API}/compliance/controls/${controlId}`);
+                const res = await af(`/compliance/controls/${controlId}`);
                 if (res.ok) {
                     const d = await res.json();
                     setControlDetail(prev => ({ ...prev, [controlId]: d }));
@@ -235,7 +278,7 @@ export default function ComplianceDashboard() {
             const params = new URLSearchParams({ format });
             if (selectedFramework)
                 params.set("framework", selectedFramework);
-            const res = await fetch(`${API}/compliance/export?${params.toString()}`);
+            const res = await af(`/compliance/export?${params.toString()}`);
             if (!res.ok) {
                 const body = await res.json().catch(() => null);
                 alert(body?.detail || `Export failed (${res.status})`);
@@ -258,6 +301,82 @@ export default function ComplianceDashboard() {
         }
         setExporting(null);
     };
+    const reloadAll = useCallback(async () => {
+        await loadOverview();
+        setControlDetail({});
+        if (selectedFramework) {
+            const r = await af(`/compliance/frameworks/${selectedFramework}`).catch(() => null);
+            if (r && r.ok) {
+                const d = await r.json();
+                setFailedControls(d.failed_controls ?? []);
+                setExecSummary(d.executive_summary ?? "");
+            }
+        }
+        // eslint-disable-next-line
+    }, [loadOverview, selectedFramework, actor, token]);
+    const runAssessment = async () => {
+        if (!actor.trim()) {
+            setNotice("Enter your name first — it is written to the audit trail.");
+            return;
+        }
+        setAssessing(true);
+        setNotice("");
+        try {
+            const res = await af("/audit/assess", { method: "POST", body: JSON.stringify({}) });
+            if (!res.ok)
+                setNotice(await errText(res));
+            else {
+                const d = await res.json();
+                setNotice(d.warning ?? `Assessment complete — ${d.assessment.controls_in_scope} controls in scope.`);
+                setTrailStatus(null);
+                await reloadAll();
+                setTick(t => t + 1);
+            }
+        }
+        catch {
+            setNotice("Network error while running the assessment.");
+        }
+        setAssessing(false);
+    };
+    const verifyTrail = async () => {
+        try {
+            const res = await af("/audit/trail/verify");
+            if (res.ok)
+                setTrailStatus(await res.json());
+            else
+                setNotice(await errText(res));
+        }
+        catch {
+            setNotice("Network error while verifying the trail.");
+        }
+    };
+    const approvalStep = async (findingId, step) => {
+        if (!actor.trim()) {
+            setNotice("Enter your name first.");
+            return;
+        }
+        setNotice("");
+        try {
+            const res = await af(`/audit/findings/${findingId}/${step}`, { method: "POST", body: JSON.stringify({ comment }) });
+            if (!res.ok) {
+                setNotice(await errText(res));
+                return;
+            }
+            setComment("");
+            const open = expandedControl;
+            setControlDetail({});
+            if (open !== null) {
+                const r = await af(`/compliance/controls/${open}`);
+                if (r.ok) {
+                    const d = await r.json();
+                    setControlDetail({ [open]: d });
+                }
+            }
+        }
+        catch {
+            setNotice("Network error.");
+        }
+    };
     const activeFramework = frameworks.find(f => f.code === selectedFramework) || null;
     const displaySummary = activeFramework || overall;
     return (_jsxs("div", { style: LS.page, children: [_jsx("style", { children: `
@@ -268,9 +387,10 @@ export default function ComplianceDashboard() {
         ::-webkit-scrollbar-track{background:${L.insetBg};}
         ::-webkit-scrollbar-thumb{background:${L.panelBorder};border-radius:3px;}
         select option { background: ${L.panelBg}; color: ${L.text1}; }
-      ` }), _jsxs("div", { style: { display: "flex", alignItems: "center", gap: 10, justifyContent: "space-between", flexWrap: "wrap" }, children: [_jsxs("div", { style: { display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }, children: [_jsx("span", { style: { fontSize: 7, fontFamily: "'DM Mono',monospace", color: L.text4, letterSpacing: ".08em" }, children: "API" }), _jsxs("span", { style: { fontSize: 8, fontFamily: "'DM Mono',monospace", color: fetchError ? L.red : L.green, fontWeight: 600 }, children: [fetchError ? "✗" : "✓", " ", API] }), _jsx("span", { style: { fontSize: 8, fontFamily: "'DM Mono',monospace", fontWeight: 700, color: L.cyan, background: `${L.cyan}10`, border: `1px solid ${L.cyan}44`, borderRadius: 3, padding: "2px 6px" }, children: "\u2192 /compliance" })] }), _jsxs("select", { value: selectedFramework, onChange: e => setSelectedFramework(e.target.value), style: LS.select, children: [_jsx("option", { value: "", children: "All Frameworks" }), frameworks.map(f => _jsx("option", { value: f.code, children: f.name }, f.code))] })] }), _jsxs("div", { style: { display: "grid", gridTemplateColumns: mobile ? "1fr 1fr" : "repeat(5,1fr)", gap: mobile ? 8 : 9 }, children: [_jsx(LMetricCard, { label: "OVERALL COMPLIANCE SCORE", value: displaySummary ? `${displaySummary.overall_compliance_score}%` : "—", sub: activeFramework ? activeFramework.name : "All frameworks combined", color: displaySummary ? scoreColor(displaySummary.overall_compliance_score) : L.text3, loading: loading }), _jsx(LMetricCard, { label: "FAILED CONTROLS", value: displaySummary?.failed_controls ?? "—", sub: "Across selected scope", color: L.red, loading: loading }), _jsx(LMetricCard, { label: "PENDING EVIDENCE", value: displaySummary?.pending_evidence ?? "—", sub: "Awaiting submission", color: L.yellow, loading: loading }), _jsx(LMetricCard, { label: "CRITICAL VIOLATIONS", value: displaySummary?.critical_violations ?? "—", sub: "Highest severity", color: L.red, loading: loading }), _jsx("div", { style: mobile ? { gridColumn: "1/-1" } : {}, children: _jsx(LMetricCard, { label: "ASSETS OUT OF COMPLIANCE", value: displaySummary?.assets_out_of_compliance ?? "—", sub: "Distinct assets affected", color: L.orange, loading: loading }) })] }), !selectedFramework && (_jsx("div", { style: { display: "grid", gridTemplateColumns: mobile ? "1fr" : "repeat(2,1fr)", gap: mobile ? 8 : 10 }, children: loading ? (Array.from({ length: 4 }).map((_, i) => _jsx(LPanel, { style: { padding: 16 }, children: _jsx(Shimmer, { w: "100%", h: 60 }) }, i))) : (frameworks.map(f => (_jsx(LPanel, { style: { cursor: "pointer" }, children: _jsxs("div", { onClick: () => setSelectedFramework(f.code), style: { padding: 14 }, children: [_jsxs("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }, children: [_jsx("span", { style: { fontSize: 12, fontWeight: 700, color: L.text1 }, children: f.name }), _jsxs("span", { style: { fontSize: 18, fontWeight: 800, color: scoreColor(f.overall_compliance_score) }, children: [f.overall_compliance_score, "%"] })] }), _jsx("div", { style: { height: 5, background: L.insetBg, borderRadius: 3, overflow: "hidden", marginBottom: 8 }, children: _jsx("div", { style: { width: `${f.control_pass_rate}%`, height: "100%", background: scoreColor(f.overall_compliance_score), borderRadius: 3 } }) }), _jsxs("div", { style: { display: "flex", gap: 10, flexWrap: "wrap" }, children: [_jsxs("span", { style: { fontSize: 9, color: L.text3 }, children: [f.failed_controls, " failed"] }), _jsxs("span", { style: { fontSize: 9, color: L.text3 }, children: [f.critical_violations, " critical"] }), _jsxs("span", { style: { fontSize: 9, color: L.text3 }, children: [f.pending_evidence, " pending"] })] })] }) }, f.code)))) })), selectedFramework && execSummary && (_jsxs(LPanel, { children: [_jsx(LPanelHeader, { left: "EXECUTIVE SUMMARY" }), _jsx("div", { style: { padding: 14 }, children: _jsx("p", { style: { fontSize: 11, color: L.text2, lineHeight: 1.7, margin: 0 }, children: execSummary }) })] })), _jsxs(LPanel, { children: [_jsx(LPanelHeader, { left: "COMPLIANCE TREND", right: _jsx("div", { style: { display: "flex", gap: 4 }, children: [30, 90, 365].map(d => (_jsxs("button", { onClick: () => setTrendDays(d), style: { ...LS.btn, padding: "3px 9px", background: trendDays === d ? `${L.blue}15` : L.subtleBg, color: trendDays === d ? L.blue : L.text3, borderColor: trendDays === d ? `${L.blue}40` : L.panelBorder }, children: [d, "d"] }, d))) }) }), _jsx("div", { style: { padding: 14 }, children: _jsx("canvas", { ref: trendRef, style: { width: "100%", height: 180, display: "block" } }) })] }), _jsxs(LPanel, { children: [_jsx(LPanelHeader, { left: "FAILED CONTROLS", right: _jsxs("div", { style: { display: "flex", gap: 6 }, children: [_jsx("button", { onClick: () => doExport("csv"), disabled: exporting !== null, style: { ...LS.btn, opacity: exporting ? 0.6 : 1 }, children: exporting === "csv" ? "..." : "⬇ CSV" }), _jsx("button", { onClick: () => doExport("json"), disabled: exporting !== null, style: { ...LS.btn, opacity: exporting ? 0.6 : 1 }, children: exporting === "json" ? "..." : "⬇ JSON" }), _jsx("button", { onClick: () => doExport("pdf"), disabled: exporting !== null, style: { ...LS.btn, opacity: exporting ? 0.6 : 1, background: L.blue, color: "#fff", borderColor: L.blue }, children: exporting === "pdf" ? "Generating..." : "⬇ PDF Report" })] }) }), !selectedFramework ? (_jsx("div", { style: { padding: 20, fontSize: 11, color: L.text3, textAlign: "center" }, children: "Select a framework above to see its failed controls in detail \u2014 or download the combined PDF/CSV/JSON for every framework using the buttons above (they respect the \"All Frameworks\" scope)." })) : loading ? (_jsx("div", { style: { padding: 14 }, children: Array.from({ length: 4 }).map((_, i) => _jsx(Shimmer, { w: "100%", h: 12, style: { marginBottom: 10 } }, i)) })) : failedControls.length === 0 ? (_jsx("div", { style: { padding: 20, fontSize: 11, color: L.green, textAlign: "center" }, children: "\u2713 No failed controls for this framework." })) : (_jsx("div", { children: failedControls.map(c => {
+      ` }), _jsxs("div", { style: { display: "flex", alignItems: "center", gap: 10, justifyContent: "space-between", flexWrap: "wrap" }, children: [_jsxs("div", { style: { display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }, children: [_jsx("span", { style: { fontSize: 7, fontFamily: "'DM Mono',monospace", color: L.text4, letterSpacing: ".08em" }, children: "API" }), _jsxs("span", { style: { fontSize: 8, fontFamily: "'DM Mono',monospace", color: fetchError ? L.red : L.green, fontWeight: 600 }, children: [fetchError ? "✗" : "✓", " ", API] }), _jsx("span", { style: { fontSize: 8, fontFamily: "'DM Mono',monospace", fontWeight: 700, color: L.cyan, background: `${L.cyan}10`, border: `1px solid ${L.cyan}44`, borderRadius: 3, padding: "2px 6px" }, children: "\u2192 /compliance" })] }), _jsxs("select", { value: selectedFramework, onChange: e => setSelectedFramework(e.target.value), style: LS.select, children: [_jsx("option", { value: "", children: "All Frameworks" }), frameworks.map(f => _jsx("option", { value: f.code, children: f.name }, f.code))] })] }), _jsxs(LPanel, { children: [_jsxs("div", { style: { padding: "10px 14px", display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }, children: [_jsx("input", { value: actor, onChange: e => saveIdentity(e.target.value, token), placeholder: "your name (audit actor)", style: { ...LS.select, width: 170 } }), _jsx("input", { value: token, type: "password", onChange: e => saveIdentity(actor, e.target.value), placeholder: "audit token (if set)", style: { ...LS.select, width: 140 } }), _jsx("button", { onClick: runAssessment, disabled: assessing, style: { ...LS.btn, background: L.blue, color: "#fff", borderColor: L.blue, opacity: assessing ? 0.6 : 1 }, children: assessing ? "Assessing…" : "▶ Run assessment" }), _jsx("button", { onClick: verifyTrail, style: LS.btn, children: "Verify audit trail" }), trailStatus && (_jsxs("span", { style: { fontSize: 9, fontWeight: 700, color: trailStatus.ok ? L.green : L.red }, children: [trailStatus.ok ? "✓ TRAIL INTACT" : "✗ TRAIL BROKEN", " \u00B7 ", trailStatus.detail] })), notice && _jsxs("span", { style: { fontSize: 10, color: L.orange }, children: ["\u26A0 ", notice] })] }), _jsx("div", { style: { padding: "0 14px 10px", fontSize: 9, color: L.text4 }, children: "Scores are evidence-gated: controls with no collected evidence count as not assessed (zero), never as compliant. Statuses stay PROPOSED until a maker, reviewer and approver (three different people) sign off." })] }), _jsxs("div", { style: { display: "grid", gridTemplateColumns: mobile ? "1fr 1fr" : "repeat(5,1fr)", gap: mobile ? 8 : 9 }, children: [_jsx(LMetricCard, { label: "OVERALL COMPLIANCE SCORE", value: displaySummary ? `${displaySummary.overall_compliance_score}%` : "—", sub: activeFramework ? activeFramework.name : "All frameworks combined", color: displaySummary ? scoreColor(displaySummary.overall_compliance_score) : L.text3, loading: loading }), _jsx(LMetricCard, { label: "FAILED CONTROLS", value: displaySummary?.failed_controls ?? "—", sub: "Across selected scope", color: L.red, loading: loading }), _jsx(LMetricCard, { label: "PENDING EVIDENCE", value: displaySummary?.pending_evidence ?? "—", sub: "Awaiting submission", color: L.yellow, loading: loading }), _jsx(LMetricCard, { label: "CRITICAL VIOLATIONS", value: displaySummary?.critical_violations ?? "—", sub: "Highest severity", color: L.red, loading: loading }), _jsx("div", { style: mobile ? { gridColumn: "1/-1" } : {}, children: _jsx(LMetricCard, { label: "ASSETS OUT OF COMPLIANCE", value: displaySummary?.assets_out_of_compliance ?? "—", sub: "Distinct assets affected", color: L.orange, loading: loading }) })] }), !selectedFramework && (_jsx("div", { style: { display: "grid", gridTemplateColumns: mobile ? "1fr" : "repeat(2,1fr)", gap: mobile ? 8 : 10 }, children: loading ? (Array.from({ length: 4 }).map((_, i) => _jsx(LPanel, { style: { padding: 16 }, children: _jsx(Shimmer, { w: "100%", h: 60 }) }, i))) : (frameworks.map(f => (_jsx(LPanel, { style: { cursor: "pointer" }, children: _jsxs("div", { onClick: () => setSelectedFramework(f.code), style: { padding: 14 }, children: [_jsxs("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }, children: [_jsx("span", { style: { fontSize: 12, fontWeight: 700, color: L.text1 }, children: f.name }), _jsxs("span", { style: { fontSize: 18, fontWeight: 800, color: scoreColor(f.overall_compliance_score) }, children: [f.overall_compliance_score, "%"] })] }), _jsx("div", { style: { height: 5, background: L.insetBg, borderRadius: 3, overflow: "hidden", marginBottom: 8 }, children: _jsx("div", { style: { width: `${f.control_pass_rate}%`, height: "100%", background: scoreColor(f.overall_compliance_score), borderRadius: 3 } }) }), _jsxs("div", { style: { display: "flex", gap: 10, flexWrap: "wrap" }, children: [_jsxs("span", { style: { fontSize: 9, color: L.text3 }, children: [f.failed_controls, " failed"] }), _jsxs("span", { style: { fontSize: 9, color: L.text3 }, children: [f.critical_violations, " critical"] }), _jsxs("span", { style: { fontSize: 9, color: L.text3 }, children: [f.pending_evidence, " pending"] })] })] }) }, f.code)))) })), selectedFramework && execSummary && (_jsxs(LPanel, { children: [_jsx(LPanelHeader, { left: "EXECUTIVE SUMMARY" }), _jsx("div", { style: { padding: 14 }, children: _jsx("p", { style: { fontSize: 11, color: L.text2, lineHeight: 1.7, margin: 0 }, children: execSummary }) })] })), _jsxs(LPanel, { children: [_jsx(LPanelHeader, { left: "COMPLIANCE TREND", right: _jsx("div", { style: { display: "flex", gap: 4 }, children: [30, 90, 365].map(d => (_jsxs("button", { onClick: () => setTrendDays(d), style: { ...LS.btn, padding: "3px 9px", background: trendDays === d ? `${L.blue}15` : L.subtleBg, color: trendDays === d ? L.blue : L.text3, borderColor: trendDays === d ? `${L.blue}40` : L.panelBorder }, children: [d, "d"] }, d))) }) }), _jsx("div", { style: { padding: 14 }, children: _jsx("canvas", { ref: trendRef, style: { width: "100%", height: 180, display: "block" } }) })] }), _jsxs(LPanel, { children: [_jsx(LPanelHeader, { left: "FAILED CONTROLS", right: _jsxs("div", { style: { display: "flex", gap: 6 }, children: [_jsx("button", { onClick: () => doExport("csv"), disabled: exporting !== null, style: { ...LS.btn, opacity: exporting ? 0.6 : 1 }, children: exporting === "csv" ? "..." : "⬇ CSV" }), _jsx("button", { onClick: () => doExport("json"), disabled: exporting !== null, style: { ...LS.btn, opacity: exporting ? 0.6 : 1 }, children: exporting === "json" ? "..." : "⬇ JSON" }), _jsx("button", { onClick: () => doExport("pdf"), disabled: exporting !== null, style: { ...LS.btn, opacity: exporting ? 0.6 : 1, background: L.blue, color: "#fff", borderColor: L.blue }, children: exporting === "pdf" ? "Generating..." : "⬇ PDF Report" })] }) }), !selectedFramework ? (_jsx("div", { style: { padding: 20, fontSize: 11, color: L.text3, textAlign: "center" }, children: "Select a framework above to see its failed controls in detail \u2014 or download the combined PDF/CSV/JSON for every framework using the buttons above (they respect the \"All Frameworks\" scope)." })) : loading ? (_jsx("div", { style: { padding: 14 }, children: Array.from({ length: 4 }).map((_, i) => _jsx(Shimmer, { w: "100%", h: 12, style: { marginBottom: 10 } }, i)) })) : failedControls.length === 0 ? (_jsx("div", { style: { padding: 20, fontSize: 11, color: L.green, textAlign: "center" }, children: "\u2713 No failed controls for this framework." })) : (_jsx("div", { children: failedControls.map(c => {
                             const isOpen = expandedControl === c.id;
                             const detail = controlDetail[c.id];
-                            return (_jsxs("div", { children: [_jsxs("div", { onClick: () => toggleControl(c.id), style: { display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderBottom: `1px solid ${L.borderLight}`, cursor: "pointer" }, onMouseEnter: e => (e.currentTarget.style.background = L.insetBg), onMouseLeave: e => (e.currentTarget.style.background = "transparent"), children: [_jsx("span", { style: { fontSize: 8, fontWeight: 700, color: severityColor(c.severity), border: `1px solid ${severityColor(c.severity)}44`, borderRadius: 3, padding: "2px 6px", flexShrink: 0 }, children: c.severity }), _jsx("span", { style: { fontSize: 9, color: L.text4, fontFamily: "'DM Mono',monospace", flexShrink: 0, width: mobile ? 50 : 70 }, children: c.control_ref }), _jsx("span", { style: { fontSize: 11, color: L.text1, flex: 1, fontWeight: 500 }, children: c.title }), !mobile && _jsx(Badge, { v: "gray", children: c.category }), _jsxs("span", { style: { fontSize: 9, color: L.text3, flexShrink: 0 }, children: [c.affected_assets, " assets"] }), _jsx("span", { style: { fontSize: 11, color: L.text4, flexShrink: 0 }, children: isOpen ? "▲" : "▼" })] }), isOpen && (_jsx("div", { style: { padding: "12px 14px", background: L.insetBg, borderBottom: `1px solid ${L.borderLight}` }, children: controlLoading === c.id || !detail ? (_jsx(Shimmer, { w: "100%", h: 40 })) : (_jsxs("div", { style: { display: "flex", flexDirection: "column", gap: 10 }, children: [_jsxs("div", { style: { display: "grid", gridTemplateColumns: mobile ? "1fr" : "1fr 1fr", gap: 10 }, children: [_jsxs("div", { children: [_jsx("div", { style: { fontSize: 7, color: L.text4, letterSpacing: ".1em", marginBottom: 4, textTransform: "uppercase", fontWeight: 600 }, children: "Recommended Fix" }), _jsx("div", { style: { fontSize: 10, color: L.text2 }, children: detail.recommended_fix })] }), _jsxs("div", { children: [_jsx("div", { style: { fontSize: 7, color: L.text4, letterSpacing: ".1em", marginBottom: 4, textTransform: "uppercase", fontWeight: 600 }, children: "Required Evidence" }), _jsx("div", { style: { fontSize: 10, color: L.text2 }, children: detail.required_evidence })] })] }), _jsxs("div", { children: [_jsxs("div", { style: { fontSize: 7, color: L.text4, letterSpacing: ".1em", marginBottom: 6, textTransform: "uppercase", fontWeight: 600 }, children: ["Affected Assets (", detail.affected_assets.filter(a => a.status !== "Pass").length, ")"] }), _jsxs("div", { style: { display: "flex", flexDirection: "column", gap: 4 }, children: [detail.affected_assets.filter(a => a.status !== "Pass").map(a => (_jsxs("div", { style: { display: "flex", alignItems: "center", gap: 8, background: L.panelBg, border: `1px solid ${L.panelBorder}`, borderRadius: 5, padding: "6px 10px" }, children: [_jsx("span", { style: { fontSize: 8, fontWeight: 700, color: a.status === "Fail" ? L.red : L.yellow, flexShrink: 0 }, children: a.status }), _jsx("span", { style: { fontSize: 10, color: L.blue, fontWeight: 600 }, children: a.asset_name }), _jsxs("span", { style: { fontSize: 8, color: L.text4 }, children: ["(", a.asset_type, ")"] }), _jsx("span", { style: { fontSize: 9, color: L.text3, marginLeft: "auto" }, children: a.team || a.business_owner || "—" })] }, a.asset_id))), detail.affected_assets.filter(a => a.status !== "Pass").length === 0 && (_jsx("div", { style: { fontSize: 9, color: L.text4 }, children: "No individual failing assets recorded." }))] }), detail.affected_assets[0]?.reason && (_jsxs("div", { style: { fontSize: 9, color: L.text3, marginTop: 8, fontStyle: "italic" }, children: ["Typical reason: ", detail.affected_assets.find(a => a.reason)?.reason] }))] })] })) }))] }, c.id));
+                            return (_jsxs("div", { children: [_jsxs("div", { onClick: () => toggleControl(c.id), style: { display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderBottom: `1px solid ${L.borderLight}`, cursor: "pointer" }, onMouseEnter: e => (e.currentTarget.style.background = L.insetBg), onMouseLeave: e => (e.currentTarget.style.background = "transparent"), children: [_jsx("span", { style: { fontSize: 8, fontWeight: 700, color: severityColor(c.severity), border: `1px solid ${severityColor(c.severity)}44`, borderRadius: 3, padding: "2px 6px", flexShrink: 0 }, children: c.severity }), c.status && _jsx("span", { style: { fontSize: 8, fontWeight: 700, color: resultColor(c.status), flexShrink: 0, textTransform: "uppercase" }, children: c.status }), _jsx("span", { style: { fontSize: 9, color: L.text4, fontFamily: "'DM Mono',monospace", flexShrink: 0, width: mobile ? 50 : 70 }, children: c.control_ref }), _jsx("span", { style: { fontSize: 11, color: L.text1, flex: 1, fontWeight: 500 }, children: c.title }), !mobile && _jsx(Badge, { v: "gray", children: c.category }), _jsxs("span", { style: { fontSize: 9, color: L.text3, flexShrink: 0 }, children: [c.affected_assets, " assets"] }), _jsx("span", { style: { fontSize: 11, color: L.text4, flexShrink: 0 }, children: isOpen ? "▲" : "▼" })] }), isOpen && (_jsx("div", { style: { padding: "12px 14px", background: L.insetBg, borderBottom: `1px solid ${L.borderLight}` }, children: controlLoading === c.id || !detail ? (_jsx(Shimmer, { w: "100%", h: 40 })) : (_jsxs("div", { style: { display: "flex", flexDirection: "column", gap: 10 }, children: [_jsxs("div", { style: { display: "grid", gridTemplateColumns: mobile ? "1fr" : "1fr 1fr", gap: 10 }, children: [_jsxs("div", { children: [_jsx("div", { style: { fontSize: 7, color: L.text4, letterSpacing: ".1em", marginBottom: 4, textTransform: "uppercase", fontWeight: 600 }, children: "Recommended Fix" }), _jsx("div", { style: { fontSize: 10, color: L.text2 }, children: detail.recommended_fix })] }), _jsxs("div", { children: [_jsx("div", { style: { fontSize: 7, color: L.text4, letterSpacing: ".1em", marginBottom: 4, textTransform: "uppercase", fontWeight: 600 }, children: "Required Evidence" }), _jsx("div", { style: { fontSize: 10, color: L.text2 }, children: detail.required_evidence })] })] }), _jsxs("div", { children: [_jsxs("div", { style: { fontSize: 7, color: L.text4, letterSpacing: ".1em", marginBottom: 6, textTransform: "uppercase", fontWeight: 600 }, children: ["Affected Assets (", detail.affected_assets.filter(a => a.status !== "Pass").length, ")"] }), _jsxs("div", { style: { display: "flex", flexDirection: "column", gap: 4 }, children: [detail.affected_assets.filter(a => a.status !== "Pass").map(a => (_jsxs("div", { style: { display: "flex", alignItems: "center", gap: 8, background: L.panelBg, border: `1px solid ${L.panelBorder}`, borderRadius: 5, padding: "6px 10px" }, children: [_jsx("span", { style: { fontSize: 8, fontWeight: 700, color: a.status === "Fail" ? L.red : L.yellow, flexShrink: 0 }, children: a.status }), _jsx("span", { style: { fontSize: 10, color: L.blue, fontWeight: 600 }, children: a.asset_name }), _jsxs("span", { style: { fontSize: 8, color: L.text4 }, children: ["(", a.asset_type, ")"] }), _jsx("span", { style: { fontSize: 9, color: L.text3, marginLeft: "auto" }, children: a.team || a.business_owner || "—" })] }, a.asset_id))), detail.affected_assets.filter(a => a.status !== "Pass").length === 0 && (_jsx("div", { style: { fontSize: 9, color: L.text4 }, children: "No individual failing assets recorded." }))] }), detail.affected_assets[0]?.reason && (_jsxs("div", { style: { fontSize: 9, color: L.text3, marginTop: 8, fontStyle: "italic" }, children: ["Typical reason: ", detail.affected_assets.find(a => a.reason)?.reason] }))] }), detail.evidence && (_jsxs("div", { children: [_jsxs("div", { style: { fontSize: 7, color: L.text4, letterSpacing: ".1em", marginBottom: 6, textTransform: "uppercase", fontWeight: 600 }, children: ["Evidence (", detail.evidence.length, ") \u00B7 ", detail.source_verification?.replace(/_/g, " ")] }), detail.evidence.length === 0 && _jsx("div", { style: { fontSize: 9, color: L.text4 }, children: "No evidence collected \u2014 this control cannot be marked compliant." }), detail.evidence.map(e => (_jsxs("div", { style: { background: L.panelBg, border: `1px solid ${L.panelBorder}`, borderRadius: 5, padding: "6px 10px", marginBottom: 4 }, children: [_jsx("span", { style: { fontSize: 8, fontWeight: 700, color: resultColor(e.result), textTransform: "uppercase" }, children: e.result }), _jsxs("span", { style: { fontSize: 9, color: L.text3 }, children: [" \u00B7 ", e.request_id, " \u00B7 conf ", e.confidence, " \u2014 ", e.rationale] }), _jsxs("div", { style: { fontSize: 8, color: L.text4, fontFamily: "'DM Mono',monospace" }, children: [e.source.uri, " \u00B7 v", e.source.version, " \u00B7 ", e.collected_at, " \u00B7 sha256 ", e.sha256.slice(0, 16), "\u2026"] })] }, e.evidence_id))), _jsxs("div", { style: { fontSize: 9, color: L.text3, marginTop: 6 }, children: ["Approval: ", _jsx("b", { children: (detail.approval_state ?? "proposed").toUpperCase() }), detail.approvals && Object.keys(detail.approvals).length > 0 && " · " + Object.entries(detail.approvals).map(([k, v]) => `${k}: ${v}`).join(" · ")] }), detail.finding_id && (_jsxs("div", { style: { display: "flex", gap: 6, marginTop: 6, flexWrap: "wrap", alignItems: "center" }, children: [_jsx("input", { value: comment, onChange: e => setComment(e.target.value), placeholder: "comment (required to reject)", style: { ...LS.select, width: 200 } }), detail.approval_state === "proposed" && _jsx("button", { style: LS.btn, onClick: () => approvalStep(detail.finding_id, "submit"), children: "Submit (maker)" }), detail.approval_state === "submitted" && _jsx("button", { style: LS.btn, onClick: () => approvalStep(detail.finding_id, "review"), children: "Review (reviewer)" }), detail.approval_state === "reviewed" && _jsx("button", { style: LS.btn, onClick: () => approvalStep(detail.finding_id, "approve"), children: "Approve (approver)" }), (detail.approval_state === "submitted" || detail.approval_state === "reviewed") &&
+                                                                    _jsx("button", { style: { ...LS.btn, color: L.red }, onClick: () => approvalStep(detail.finding_id, "reject"), children: "Reject" })] }))] }))] })) }))] }, c.id));
                         }) }))] })] }));
 }

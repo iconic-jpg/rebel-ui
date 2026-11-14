@@ -5,6 +5,8 @@ import RebelDashboard from "./components/RebelDashboard/RebelDashboard.js";
 import Login from "./components/Auth/Login.js";
 import Signup from "./components/Auth/Signup.js";
 import AppShell from "./components/Shell/AppShell.js";
+import Landing from "./components/Landing/Landing.js";
+import InstitutionOnboarding from "./components/Institution/InstitutionOnboarding.js";
 import AssetInventoryPage from "./components/Modules/AssetInventory.js";
 import AssetRegistryPage from "./components/Modules/AssetRegistryPage.js";
 import AssetDiscoveryPage from "./components/Modules/AssetDiscovery.js";
@@ -14,7 +16,6 @@ import Compliance from "./components/Modules/Compliance.js";
 import PQCReadinessPage from "./components/Modules/PQCReadiness.js";
 import CyberRatingPage from "./components/Modules/CyberRating.js";
 import ReportingPage from "./components/Modules/Reporting.js";
-import { ThemeProvider } from './components/context/ThemeContext.js';
 import KeyRotationPanel from "./components/Modules/KeyRotationPanel.js";
 import VCenterConnect from "./components/Modules/VCenterConnect.js";
 import RebelSplash from "./components/Modules/RebelSplash.js";
@@ -22,9 +23,10 @@ import GoogleCallback from "./components/Modules/GoogleCallback.js";
 import IntegrationsPage from "./components/Modules/IntegrationsPage.js";
 import RemediationCenter from "./components/Modules/RemediationCenter.js";
 import SIEMDashboard from "./components/Modules/SIEMDashboard.js";
+import { ThemeProvider } from "./components/context/ThemeContext.js";
 const API_BASE = "https://r3bel-5464.onrender.com";
 export default function App() {
     const [vCenterAssets, setVCenterAssets] = useState([]);
     const hasVCenterAssets = vCenterAssets.length > 0;
-    return (_jsx(ThemeProvider, { children: _jsx(Router, { children: _jsxs(Routes, { children: [_jsx(Route, { path: "/login", element: _jsx(Login, {}) }), _jsx(Route, { path: "/signup", element: _jsx(Signup, {}) }), _jsx(Route, { path: "/splash", element: _jsx(RebelSplash, {}) }), _jsx(Route, { path: "/auth/google/callback", element: _jsx(GoogleCallback, {}) }), _jsxs(Route, { path: "/", element: _jsx(AppShell, {}), children: [_jsx(Route, { index: true, element: _jsx(RebelDashboard, {}) }), _jsx(Route, { path: "inventory", element: _jsx(AssetInventoryPage, {}) }), _jsx(Route, { path: "discovery", element: _jsx(AssetDiscoveryPage, {}) }), _jsx(Route, { path: "registry", element: _jsx(AssetRegistryPage, {}) }), _jsx(Route, { path: "compliance", element: _jsx(Compliance, {}) }), _jsx(Route, { path: "/siem", element: _jsx(SIEMDashboard, {}) }), _jsx(Route, { path: "cbom", element: _jsx(CBOMPage, {}) }), _jsx(Route, { path: "pqc", element: _jsx(PQCPosturePage, {}) }), _jsx(Route, { path: "/remediation", element: _jsx(RemediationCenter, {}) }), _jsx(Route, { path: "pqc-readiness", element: _jsx(PQCReadinessPage, { vcenterAssets: hasVCenterAssets ? vCenterAssets : undefined }) }), _jsx(Route, { path: "rating", element: _jsx(CyberRatingPage, {}) }), _jsx(Route, { path: "reporting", element: _jsx(ReportingPage, {}) }), _jsx(Route, { path: "key-rotation", element: _jsx(KeyRotationPanel, { apiBase: API_BASE, assets: vCenterAssets }) }), _jsx(Route, { path: "/integrations", element: _jsx(IntegrationsPage, {}) }), _jsx(Route, { path: "vcenter", element: _jsx(VCenterConnect, { apiBase: API_BASE, onAssets: (vms) => setVCenterAssets(vms) }) }), _jsx(Route, { path: "settings/assets", element: _jsx(AssetRegistryPage, {}) })] })] }) }) }));
+    return (_jsx(ThemeProvider, { children: _jsx(Router, { children: _jsxs(Routes, { children: [_jsx(Route, { path: "/", element: _jsx(Landing, {}) }), _jsx(Route, { path: "/login", element: _jsx(Login, {}) }), _jsx(Route, { path: "/signup", element: _jsx(Signup, {}) }), _jsx(Route, { path: "/splash", element: _jsx(RebelSplash, {}) }), _jsx(Route, { path: "/auth/google/callback", element: _jsx(GoogleCallback, {}) }), _jsx(Route, { path: "/onboarding", element: _jsx(InstitutionOnboarding, {}) }), _jsxs(Route, { element: _jsx(AppShell, {}), children: [_jsx(Route, { path: "dashboard", element: _jsx(RebelDashboard, {}) }), _jsx(Route, { path: "inventory", element: _jsx(AssetInventoryPage, {}) }), _jsx(Route, { path: "discovery", element: _jsx(AssetDiscoveryPage, {}) }), _jsx(Route, { path: "registry", element: _jsx(AssetRegistryPage, {}) }), _jsx(Route, { path: "compliance", element: _jsx(Compliance, {}) }), _jsx(Route, { path: "siem", element: _jsx(SIEMDashboard, {}) }), _jsx(Route, { path: "cbom", element: _jsx(CBOMPage, {}) }), _jsx(Route, { path: "pqc", element: _jsx(PQCPosturePage, {}) }), _jsx(Route, { path: "remediation", element: _jsx(RemediationCenter, {}) }), _jsx(Route, { path: "pqc-readiness", element: _jsx(PQCReadinessPage, { vcenterAssets: hasVCenterAssets ? vCenterAssets : undefined }) }), _jsx(Route, { path: "rating", element: _jsx(CyberRatingPage, {}) }), _jsx(Route, { path: "reporting", element: _jsx(ReportingPage, {}) }), _jsx(Route, { path: "key-rotation", element: _jsx(KeyRotationPanel, { apiBase: API_BASE, assets: vCenterAssets }) }), _jsx(Route, { path: "integrations", element: _jsx(IntegrationsPage, {}) }), _jsx(Route, { path: "vcenter", element: _jsx(VCenterConnect, { apiBase: API_BASE, onAssets: (vms) => setVCenterAssets(vms) }) }), _jsx(Route, { path: "settings/assets", element: _jsx(AssetRegistryPage, {}) })] })] }) }) }));
 }

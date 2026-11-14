@@ -1,10 +1,8 @@
 import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-runtime";
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { useNavigate } from "react-router-dom";
 // ── API Base ──────────────────────────────────────────────────────────────────
 const API = (typeof import.meta !== "undefined" && import.meta.env?.VITE_API_BASE) ||
     "https://r3bel-5464.onrender.com";
-const AUTH_API = "https://https://r3bel-5464.onrender.com";
 const L = {
     pageBg: "#f5f7fa", panelBg: "#ffffff", panelBorder: "#e2e8f0",
     subtleBg: "#f8fafc", insetBg: "#f1f5f9", borderLight: "#f1f5f9",
@@ -113,68 +111,19 @@ function fmtTime(ts) {
         return ts;
     }
 }
-function authHeaders(token) {
-    return { Authorization: `Bearer ${token}` };
-}
-async function refreshAccessToken() {
-    const refresh = localStorage.getItem("refresh");
-    if (!refresh)
-        return null;
-    try {
-        const res = await fetch(`${AUTH_API}/api/token/refresh/`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ refresh }),
-        });
-        if (!res.ok)
-            return null;
-        const data = await res.json();
-        if (!data?.access)
-            return null;
-        localStorage.setItem("access", data.access);
-        if (data.refresh)
-            localStorage.setItem("refresh", data.refresh);
-        return data.access;
-    }
-    catch {
-        return null;
-    }
-}
-async function authFetch(url, init = {}, _retried = false) {
-    const token = localStorage.getItem("access") || "";
-    const res = await fetch(url, {
+// Plain fetch. If a session token happens to exist it is attached, but there is
+// no login redirect, no token refresh, and no retry-on-401 anywhere on this
+// page. A 401 (or any other status) is simply returned to the caller, whose own
+// error handling decides what to show.
+async function authFetch(url, init = {}) {
+    const token = localStorage.getItem("access");
+    return fetch(url, {
         ...init,
-        headers: { ...(init.headers || {}), ...authHeaders(token) },
+        headers: {
+            ...(init.headers || {}),
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
     });
-    if (res.status !== 401 || _retried)
-        return res;
-    const refresh = localStorage.getItem("refresh");
-    if (!refresh) {
-        // No refresh token to attempt — nothing more this function can safely
-        // do. Return the 401 and let the caller's own error state handle it.
-        return res;
-    }
-    const newToken = await refreshAccessToken();
-    if (newToken) {
-        return authFetch(url, init, true);
-    }
-    // Refresh was attempted and rejected. This does NOT clear localStorage.
-    // It's tempting to treat a rejected refresh as proof the session is
-    // fully dead and clean up — but this function runs as a background call
-    // for every SIEM provider's status check on page load, and deleting
-    // `access`/`refresh` here logs the user out of the ENTIRE app as a side
-    // effect of one background request, even when their access token is
-    // still perfectly valid and only the (possibly stale/unrelated) refresh
-    // token failed. That exact chain — a leftover garbage refresh token
-    // from an earlier broken login attempt 401ing here and wiping out an
-    // otherwise-good access token — is what caused "visit the SIEM page,
-    // then the main dashboard bounces you to /login" even right after a
-    // successful login. Session expiry should be discovered passively
-    // (e.g. RebelDashboard.tsx's own mount-time check, or a real 401 on a
-    // primary user-initiated action) or via an explicit logout, never as a
-    // side effect of a background poll deleting storage out from under
-    // whatever page the user is actually looking at.
-    return res;
 }
 // ── Connect Modal — adapts to whichever provider was clicked ────────────────
 function ConnectModal({ provider, onClose, onConnected }) {
@@ -268,14 +217,6 @@ function AgentDetailModal({ agent, onClose }) {
 // ── Main Page — one SIEM view, data merged across every connected source ────
 export default function SIEMDashboard() {
     const mobile = useMobile();
-    const navigate = useNavigate();
-    // Same guard RebelDashboard.tsx uses on the main dashboard — redirect
-    // immediately if there's no session, rather than rendering the "No SIEM
-    // sources connected yet" empty state for what's actually a logged-out
-    // visitor. Matches the rest of the app's behavior instead of being the
-    // one page that stays quietly browsable without a session.
-    useEffect(() => { if (!localStorage.getItem("access"))
-        navigate("/login"); }, [navigate]);
     const [statusMap, setStatusMap] = useState({});
     const [statusesLoaded, setStatusesLoaded] = useState(false);
     const [statusBanner, setStatusBanner] = useState(null);
@@ -300,7 +241,8 @@ export default function SIEMDashboard() {
             try {
                 const res = await authFetch(`${API}/security/${p.slug}/status`);
                 if (!res.ok) {
-                    // A 401 just means no REBEL session yet — normal, stays quiet.
+                    // A 401 is treated as "not connected" and stays quiet — no redirect,
+                    // no banner. Any other failure is surfaced in the banner.
                     return { slug: p.slug, status: { configured: false, has_stored_credentials: false }, error: res.status === 401 ? null : `HTTP ${res.status}` };
                 }
                 return { slug: p.slug, status: await res.json(), error: null };
