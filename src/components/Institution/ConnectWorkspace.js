@@ -1,5 +1,6 @@
 import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-runtime";
 import { useCallback, useEffect, useState } from "react";
+import { refreshSession } from "../Auth/authApi.js";
 const API_BASE = "https://r3bel-5464.onrender.com";
 const styles = `
 .connect-page {
@@ -69,6 +70,54 @@ const styles = `
   .connect-table { min-width: 620px; }
 }
 `;
+async function getFreshAccessToken() {
+    const refresh = localStorage.getItem("refresh");
+    if (!refresh) {
+        throw new Error("Your Rebel session has expired. Please sign in again.");
+    }
+    try {
+        const data = await refreshSession(refresh);
+        if (!data.access) {
+            throw new Error("The authentication server did not return an access token.");
+        }
+        localStorage.setItem("access", data.access);
+        if (data.refresh) {
+            localStorage.setItem("refresh", data.refresh);
+        }
+        return data.access;
+    }
+    catch {
+        localStorage.removeItem("access");
+        localStorage.removeItem("refresh");
+        throw new Error("Your Rebel session has expired. Please sign in again.");
+    }
+}
+async function connectRequest(path, options = {}) {
+    let token = localStorage.getItem("access");
+    if (!token) {
+        token = await getFreshAccessToken();
+    }
+    const send = (accessToken) => fetch(`${API_BASE}${path}`, {
+        ...options,
+        headers: {
+            ...options.headers,
+            Authorization: `Bearer ${accessToken}`,
+        },
+    });
+    let response = await send(token);
+    if (response.status === 401) {
+        token = await getFreshAccessToken();
+        response = await send(token);
+    }
+    return response;
+}
+async function readResponse(response) {
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+        throw new Error(data.detail || data.message || `Connect request failed (${response.status}).`);
+    }
+    return data;
+}
 export default function ConnectWorkspace() {
     const [workspace, setWorkspace] = useState(null);
     const [loading, setLoading] = useState(true);
@@ -76,27 +125,16 @@ export default function ConnectWorkspace() {
     const [error, setError] = useState("");
     const [institutionName, setInstitutionName] = useState("");
     const [jurisdiction, setJurisdiction] = useState("");
-    const token = localStorage.getItem("access");
     const loadWorkspace = useCallback(async () => {
-        if (!token) {
-            setError("Your Rebel session is missing. Please sign in again.");
-            setLoading(false);
-            return;
-        }
         setLoading(true);
         setError("");
         try {
-            const response = await fetch(`${API_BASE}/connect/workspace`, {
-                headers: { Authorization: `Bearer ${token}` },
-            });
+            const response = await connectRequest("/connect/workspace");
             if (response.status === 404) {
                 setWorkspace(null);
                 return;
             }
-            const data = await response.json();
-            if (!response.ok) {
-                throw new Error(data.detail || "Unable to load your institution workspace.");
-            }
+            const data = await readResponse(response);
             setWorkspace(data);
         }
         catch (err) {
@@ -105,34 +143,26 @@ export default function ConnectWorkspace() {
         finally {
             setLoading(false);
         }
-    }, [token]);
+    }, []);
     useEffect(() => {
         void loadWorkspace();
     }, [loadWorkspace]);
     const createWorkspace = async (event) => {
         event.preventDefault();
-        if (!token) {
-            setError("Please sign in again.");
-            return;
-        }
         setCreating(true);
         setError("");
         try {
-            const response = await fetch(`${API_BASE}/connect/institutions`, {
+            const response = await connectRequest("/connect/institutions", {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
-                    Authorization: `Bearer ${token}`,
                 },
                 body: JSON.stringify({
-                    name: institutionName,
-                    jurisdiction,
+                    name: institutionName.trim(),
+                    jurisdiction: jurisdiction.trim(),
                 }),
             });
-            const data = await response.json();
-            if (!response.ok) {
-                throw new Error(data.detail || "Could not create institution workspace.");
-            }
+            await readResponse(response);
             await loadWorkspace();
         }
         catch (err) {
@@ -142,5 +172,11 @@ export default function ConnectWorkspace() {
             setCreating(false);
         }
     };
-    return (_jsxs(_Fragment, { children: [_jsx("style", { children: styles }), _jsx("main", { className: "connect-page", children: _jsxs("div", { className: "connect-wrap", children: [_jsx("div", { className: "connect-eyebrow", children: "REBEL // INSTITUTIONAL CONNECT" }), _jsx("h1", { className: "connect-title", children: "Institution Connect" }), _jsx("p", { className: "connect-subtitle", children: "Connect your institution's systems to Rebel. Manage machine identities, monitor evidence ingestion and establish the data foundation for security and compliance assessments." }), error && _jsx("div", { className: "connect-error", role: "alert", children: error }), loading ? (_jsx("div", { className: "connect-card", style: { marginTop: 25 }, children: "Loading institution workspace\u2026" })) : workspace ? (_jsxs(_Fragment, { children: [_jsxs("section", { className: "connect-card", style: { marginTop: 25 }, children: [_jsx("div", { className: "connect-eyebrow", children: "ACTIVE INSTITUTION" }), _jsx("h2", { style: { fontSize: 23, margin: "9px 0" }, children: workspace.institution.name }), _jsxs("div", { className: "connect-muted", children: [workspace.institution.jurisdiction, " \u00B7 ", workspace.institution.role] }), _jsxs("div", { className: "connect-muted", style: { fontSize: 11, marginTop: 8 }, children: ["Institution ID: ", workspace.institution.institution_id] })] }), _jsxs("section", { className: "connect-grid", children: [_jsxs("div", { className: "connect-card", children: [_jsx("div", { className: "connect-card-label", children: "Registered agents" }), _jsx("div", { className: "connect-metric", children: workspace.metrics.agents_total })] }), _jsxs("div", { className: "connect-card", children: [_jsx("div", { className: "connect-card-label", children: "Active agents" }), _jsx("div", { className: "connect-metric", children: workspace.metrics.agents_active })] }), _jsxs("div", { className: "connect-card", children: [_jsx("div", { className: "connect-card-label", children: "Evidence submissions" }), _jsx("div", { className: "connect-metric", children: workspace.metrics.evidence_total })] })] }), _jsxs("section", { className: "connect-card", style: { marginBottom: 18 }, children: [_jsx("h2", { className: "connect-section-title", children: "Connected agents" }), workspace.agents.length === 0 ? (_jsx("div", { className: "connect-muted", children: "No agents have been provisioned for this institution yet." })) : (_jsx("div", { className: "connect-table-wrap", children: _jsxs("table", { className: "connect-table", children: [_jsx("thead", { children: _jsxs("tr", { children: [_jsx("th", { children: "Agent" }), _jsx("th", { children: "Status" }), _jsx("th", { children: "Created" }), _jsx("th", { children: "Last heartbeat" })] }) }), _jsx("tbody", { children: workspace.agents.map((agent) => (_jsxs("tr", { children: [_jsxs("td", { children: [_jsx("strong", { children: agent.name }), _jsx("div", { className: "connect-muted", style: { fontSize: 10 }, children: agent.agent_id })] }), _jsx("td", { children: _jsx("span", { className: `connect-status ${agent.status === "active" ? "active" : ""}`, children: agent.status }) }), _jsx("td", { children: agent.created_at ? new Date(agent.created_at).toLocaleString() : "—" }), _jsx("td", { children: agent.last_seen_at ? new Date(agent.last_seen_at).toLocaleString() : "Never" })] }, agent.agent_id))) })] }) }))] }), _jsxs("section", { className: "connect-card", style: { marginBottom: 18 }, children: [_jsx("h2", { className: "connect-section-title", children: "Recent evidence" }), workspace.recent_evidence.length === 0 ? (_jsx("div", { className: "connect-muted", children: "No evidence has been received. Once an institution agent submits evidence, its source, type, timestamp and integrity hash will appear here." })) : (_jsx("div", { className: "connect-table-wrap", children: _jsxs("table", { className: "connect-table", children: [_jsx("thead", { children: _jsxs("tr", { children: [_jsx("th", { children: "Source" }), _jsx("th", { children: "Evidence type" }), _jsx("th", { children: "Received" }), _jsx("th", { children: "Integrity hash" })] }) }), _jsx("tbody", { children: workspace.recent_evidence.map((item) => (_jsxs("tr", { children: [_jsx("td", { children: item.source_system }), _jsx("td", { children: item.evidence_type }), _jsx("td", { children: new Date(item.received_at).toLocaleString() }), _jsx("td", { className: "connect-hash", children: item.payload_sha256 })] }, item.submission_id))) })] }) }))] }), _jsxs("div", { className: "connect-info", children: [_jsx("strong", { children: "Next integration step:" }), " provision an institution-specific agent with the minimum required scopes, install it in the institution's environment, and begin sending signed-provenance evidence to Rebel. Agent provisioning is intentionally restricted to the controlled provisioning service."] }), _jsx("button", { className: "connect-button", style: { marginTop: 18 }, onClick: () => void loadWorkspace(), children: "Refresh workspace" })] })) : (_jsxs("section", { className: "connect-card", style: { maxWidth: 650, marginTop: 25 }, children: [_jsx("div", { className: "connect-eyebrow", children: "INITIALIZE WORKSPACE" }), _jsx("h2", { style: { fontSize: 23, margin: "10px 0" }, children: "Register your institution" }), _jsx("p", { className: "connect-muted", style: { lineHeight: 1.6, marginBottom: 18 }, children: "Create the institution workspace that will own your connected systems, agents and evidence. Your account will become its initial institution owner." }), _jsxs("form", { onSubmit: createWorkspace, children: [_jsx("label", { htmlFor: "institution-name", children: "Legal or operating institution name" }), _jsx("input", { id: "institution-name", className: "connect-input", value: institutionName, onChange: (event) => setInstitutionName(event.target.value), placeholder: "e.g. Vestro Bank", minLength: 2, maxLength: 200, required: true }), _jsx("label", { htmlFor: "institution-jurisdiction", children: "Primary jurisdiction" }), _jsx("input", { id: "institution-jurisdiction", className: "connect-input", value: jurisdiction, onChange: (event) => setJurisdiction(event.target.value), placeholder: "e.g. Zimbabwe", minLength: 2, maxLength: 100, required: true }), _jsx("button", { className: "connect-button", disabled: creating, type: "submit", children: creating ? "Creating workspace…" : "Create institution workspace" })] }), _jsx("p", { className: "connect-muted", style: { fontSize: 12, marginTop: 18 }, children: "Joining an existing institution by invitation will be added as the next membership workflow." })] }))] }) })] }));
+    return (_jsxs(_Fragment, { children: [_jsx("style", { children: styles }), _jsx("main", { className: "connect-page", children: _jsxs("div", { className: "connect-wrap", children: [_jsx("div", { className: "connect-eyebrow", children: "REBEL // INSTITUTIONAL CONNECT" }), _jsx("h1", { className: "connect-title", children: "Institution Connect" }), _jsx("p", { className: "connect-subtitle", children: "Connect your institution's systems to Rebel. Manage machine identities, monitor evidence ingestion and establish the data foundation for security and compliance assessments." }), error && (_jsx("div", { className: "connect-error", role: "alert", children: error })), loading ? (_jsx("div", { className: "connect-card", style: { marginTop: 25 }, children: "Loading institution workspace\u2026" })) : workspace ? (_jsxs(_Fragment, { children: [_jsxs("section", { className: "connect-card", style: { marginTop: 25 }, children: [_jsx("div", { className: "connect-eyebrow", children: "ACTIVE INSTITUTION" }), _jsx("h2", { style: { fontSize: 23, margin: "9px 0" }, children: workspace.institution.name }), _jsxs("div", { className: "connect-muted", children: [workspace.institution.jurisdiction, " \u00B7 ", workspace.institution.role] }), _jsxs("div", { className: "connect-muted", style: { fontSize: 11, marginTop: 8 }, children: ["Institution ID: ", workspace.institution.institution_id] })] }), _jsxs("section", { className: "connect-grid", children: [_jsxs("div", { className: "connect-card", children: [_jsx("div", { className: "connect-card-label", children: "Registered agents" }), _jsx("div", { className: "connect-metric", children: workspace.metrics.agents_total })] }), _jsxs("div", { className: "connect-card", children: [_jsx("div", { className: "connect-card-label", children: "Active agents" }), _jsx("div", { className: "connect-metric", children: workspace.metrics.agents_active })] }), _jsxs("div", { className: "connect-card", children: [_jsx("div", { className: "connect-card-label", children: "Evidence submissions" }), _jsx("div", { className: "connect-metric", children: workspace.metrics.evidence_total })] })] }), _jsxs("section", { className: "connect-card", style: { marginBottom: 18 }, children: [_jsx("h2", { className: "connect-section-title", children: "Connected agents" }), workspace.agents.length === 0 ? (_jsx("div", { className: "connect-muted", children: "No agents have been provisioned for this institution yet." })) : (_jsx("div", { className: "connect-table-wrap", children: _jsxs("table", { className: "connect-table", children: [_jsx("thead", { children: _jsxs("tr", { children: [_jsx("th", { children: "Agent" }), _jsx("th", { children: "Status" }), _jsx("th", { children: "Created" }), _jsx("th", { children: "Last heartbeat" })] }) }), _jsx("tbody", { children: workspace.agents.map((agent) => (_jsxs("tr", { children: [_jsxs("td", { children: [_jsx("strong", { children: agent.name }), _jsx("div", { className: "connect-muted", style: { fontSize: 10 }, children: agent.agent_id })] }), _jsx("td", { children: _jsx("span", { className: `connect-status ${agent.status === "active" ? "active" : ""}`, children: agent.status }) }), _jsx("td", { children: agent.created_at
+                                                                        ? new Date(agent.created_at).toLocaleString()
+                                                                        : "—" }), _jsx("td", { children: agent.last_seen_at
+                                                                        ? new Date(agent.last_seen_at).toLocaleString()
+                                                                        : "Never" })] }, agent.agent_id))) })] }) }))] }), _jsxs("section", { className: "connect-card", style: { marginBottom: 18 }, children: [_jsx("h2", { className: "connect-section-title", children: "Recent evidence" }), workspace.recent_evidence.length === 0 ? (_jsx("div", { className: "connect-muted", children: "No evidence has been received. Once an institution agent submits evidence, its source, type, timestamp and integrity hash will appear here." })) : (_jsx("div", { className: "connect-table-wrap", children: _jsxs("table", { className: "connect-table", children: [_jsx("thead", { children: _jsxs("tr", { children: [_jsx("th", { children: "Source" }), _jsx("th", { children: "Evidence type" }), _jsx("th", { children: "Received" }), _jsx("th", { children: "Integrity hash" })] }) }), _jsx("tbody", { children: workspace.recent_evidence.map((item) => (_jsxs("tr", { children: [_jsx("td", { children: item.source_system }), _jsx("td", { children: item.evidence_type }), _jsx("td", { children: new Date(item.received_at).toLocaleString() }), _jsx("td", { className: "connect-hash", children: item.payload_sha256 })] }, item.submission_id))) })] }) }))] }), _jsxs("div", { className: "connect-info", children: [_jsx("strong", { children: "Next integration step:" }), " provision an institution-specific agent with the minimum required scopes, install it in the institution's environment, and begin sending signed-provenance evidence to Rebel. Agent provisioning remains restricted to the controlled provisioning service."] }), _jsx("button", { className: "connect-button", style: { marginTop: 18 }, onClick: () => void loadWorkspace(), children: "Refresh workspace" })] })) : (_jsxs("section", { className: "connect-card", style: { maxWidth: 650, marginTop: 25 }, children: [_jsx("div", { className: "connect-eyebrow", children: "INITIALIZE WORKSPACE" }), _jsx("h2", { style: { fontSize: 23, margin: "10px 0" }, children: "Register your institution" }), _jsx("p", { className: "connect-muted", style: { lineHeight: 1.6, marginBottom: 18 }, children: "Create the institution workspace that will own your connected systems, agents and evidence. Your account will become its initial institution owner." }), _jsxs("form", { onSubmit: createWorkspace, children: [_jsx("label", { htmlFor: "institution-name", children: "Legal or operating institution name" }), _jsx("input", { id: "institution-name", className: "connect-input", value: institutionName, onChange: (event) => setInstitutionName(event.target.value), placeholder: "e.g. Vestro Bank", minLength: 2, maxLength: 200, required: true }), _jsx("label", { htmlFor: "institution-jurisdiction", children: "Primary jurisdiction" }), _jsx("input", { id: "institution-jurisdiction", className: "connect-input", value: jurisdiction, onChange: (event) => setJurisdiction(event.target.value), placeholder: "e.g. Zimbabwe", minLength: 2, maxLength: 100, required: true }), _jsx("button", { className: "connect-button", disabled: creating, type: "submit", children: creating
+                                                ? "Creating workspace…"
+                                                : "Create institution workspace" })] }), _jsx("p", { className: "connect-muted", style: { fontSize: 12, marginTop: 18 }, children: "Joining an existing institution by invitation will be added as the next membership workflow." })] }))] }) })] }));
 }

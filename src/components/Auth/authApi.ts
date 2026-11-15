@@ -12,7 +12,7 @@ export interface AuthError {
 
 const AUTH_API = (
   import.meta.env.VITE_AUTH_API_URL ||
-  "https://r3bel-5464.onrender.com"
+  "https://r3bel-ue0h.onrender.com"
 ).replace(/\/+$/, "");
 
 async function request(
