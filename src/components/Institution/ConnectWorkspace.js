@@ -1,6 +1,5 @@
 import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-runtime";
 import { useCallback, useEffect, useState } from "react";
-import { refreshSession } from "../Auth/authApi.js";
 const API_BASE = "https://r3bel-5464.onrender.com";
 const styles = `
 .connect-page {
@@ -70,47 +69,21 @@ const styles = `
   .connect-table { min-width: 620px; }
 }
 `;
-async function getFreshAccessToken() {
-    const refresh = localStorage.getItem("refresh");
-    if (!refresh) {
-        throw new Error("Your Rebel session has expired. Please sign in again.");
-    }
-    try {
-        const data = await refreshSession(refresh);
-        if (!data.access) {
-            throw new Error("The authentication server did not return an access token.");
-        }
-        localStorage.setItem("access", data.access);
-        if (data.refresh) {
-            localStorage.setItem("refresh", data.refresh);
-        }
-        return data.access;
-    }
-    catch {
-        localStorage.removeItem("access");
-        localStorage.removeItem("refresh");
-        throw new Error("Your Rebel session has expired. Please sign in again.");
-    }
-}
+
 async function connectRequest(path, options = {}) {
-    let token = localStorage.getItem("access");
-    if (!token) {
-        token = await getFreshAccessToken();
-    }
-    const send = (accessToken) => fetch(`${API_BASE}${path}`, {
+    const token = localStorage.getItem("access") || "";
+
+    return fetch(`${API_BASE}${path}`, {
         ...options,
         headers: {
-            ...options.headers,
-            Authorization: `Bearer ${accessToken}`,
+            ...(options.headers || {}),
+            ...(token && token !== "undefined" && token !== "null"
+                ? { Authorization: `Bearer ${token}` }
+                : {}),
         },
     });
-    let response = await send(token);
-    if (response.status === 401) {
-        token = await getFreshAccessToken();
-        response = await send(token);
-    }
-    return response;
 }
+
 async function readResponse(response) {
     const data = await response.json().catch(() => ({}));
     if (!response.ok) {
