@@ -1,8 +1,71 @@
 
 import { useCallback, useEffect, useState } from "react";
+import type { FormEvent } from "react";
 
 const API_BASE = "https://r3bel-5464.onrender.com";
-const AUTH_API = "https://r3bel-ue0h.onrender.com";
+
+interface Agent {
+  agent_id: string;
+  name: string;
+  status: string;
+  created_at?: string | null;
+  last_seen_at?: string | null;
+}
+
+interface Evidence {
+  submission_id: string;
+  source_system: string;
+  evidence_type: string;
+  received_at: string;
+  payload_sha256: string;
+}
+
+interface Institution {
+  institution_id: string;
+  name: string;
+  jurisdiction: string;
+  role: string;
+}
+
+interface Workspace {
+  institution: Institution;
+  metrics: {
+    agents_total: number;
+    agents_active: number;
+    evidence_total: number;
+  };
+  agents: Agent[];
+  recent_evidence: Evidence[];
+}
+
+async function connectRequest(
+  path: string,
+  options: RequestInit = {}
+): Promise<Response> {
+  const token = localStorage.getItem("access");
+
+  return fetch(`${API_BASE}${path}`, {
+    ...options,
+    headers: {
+      ...(options.headers || {}),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+  });
+}
+
+async function readResponse<T>(response: Response): Promise<T> {
+  const data = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    throw new Error(
+      data.detail ||
+      data.message ||
+      `Connect request failed (${response.status}).`
+    );
+  }
+
+  return data as T;
+}
 
 const styles = `
 .connect-page {
@@ -106,114 +169,8 @@ const styles = `
 }
 `;
 
-function isValidJwt(token) {
-  if (typeof token !== "string") return false;
-  if (!token || token === "undefined" || token === "null") return false;
-  return token.split(".").length === 3;
-}
-
-// Same Django SimpleJWT refresh endpoint used by Rebel's other pages.
-async function refreshAccessToken() {
-  const refresh = localStorage.getItem("refresh");
-
-  if (!isValidJwt(refresh)) {
-    return null;
-  }
-
-  try {
-    const response = await fetch(`${AUTH_API}/api/token/refresh/`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "application/json",
-      },
-      body: JSON.stringify({ refresh }),
-    });
-
-    if (!response.ok) return null;
-
-    const data = await response.json();
-
-    if (!isValidJwt(data.access)) {
-      return null;
-    }
-
-    localStorage.setItem("access", data.access);
-
-    if (isValidJwt(data.refresh)) {
-      localStorage.setItem("refresh", data.refresh);
-    }
-
-    return data.access;
-  } catch {
-    return null;
-  }
-}
-
-// Authenticated request using the same localStorage session as other Rebel pages.
-// On 401, refresh once and retry once.
-async function connectRequest(path, options = {}, retried = false) {
-  const token = localStorage.getItem("access");
-
-  const headers = {
-    ...(options.headers || {}),
-  };
-
-  if (isValidJwt(token)) {
-    headers.Authorization = `Bearer ${token}`;
-  } else {
-    delete headers.Authorization;
-  }
-
-  const response = await fetch(`${API_BASE}${path}`, {
-    ...options,
-    headers,
-  });
-
-  if (response.status !== 401 || retried) {
-    return response;
-  }
-
-  const newToken = await refreshAccessToken();
-
-  if (!newToken) {
-    localStorage.removeItem("access");
-    localStorage.removeItem("refresh");
-    return response;
-  }
-
-  return connectRequest(path, options, true);
-}
-
-async function readResponse(response) {
-  const data = await response.json().catch(() => ({}));
-
-  if (!response.ok) {
-    if (response.status === 401) {
-      throw new Error(
-        "Your Rebel session is invalid or expired. Please sign in again."
-      );
-    }
-
-    if (response.status === 503) {
-      throw new Error(
-        data.detail ||
-        "Connect authentication is not configured on the backend."
-      );
-    }
-
-    throw new Error(
-      data.detail ||
-      data.message ||
-      `Connect request failed (${response.status}).`
-    );
-  }
-
-  return data;
-}
-
 export default function ConnectWorkspace() {
-  const [workspace, setWorkspace] = useState(null);
+  const [workspace, setWorkspace] = useState<Workspace | null>(null);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState("");
@@ -232,7 +189,7 @@ export default function ConnectWorkspace() {
         return;
       }
 
-      const data = await readResponse(response);
+      const data = await readResponse<Workspace>(response);
       setWorkspace(data);
     } catch (err) {
       setError(
@@ -249,9 +206,10 @@ export default function ConnectWorkspace() {
     void loadWorkspace();
   }, [loadWorkspace]);
 
-  const createWorkspace = async (event) => {
+  const createWorkspace = async (
+    event: FormEvent<HTMLFormElement>
+  ) => {
     event.preventDefault();
-
     setCreating(true);
     setError("");
 
@@ -270,7 +228,7 @@ export default function ConnectWorkspace() {
         }
       );
 
-      await readResponse(response);
+      await readResponse<unknown>(response);
       await loadWorkspace();
     } catch (err) {
       setError(
