@@ -6,7 +6,7 @@ const API =
   "https://r3bel-5464.onrender.com";
 
 // Django auth service — same host/shape Login.tsx and SIEMDashboard.tsx already use.
-const AUTH_API = "https://https://r3bel-5464.onrender.com";
+const AUTH_API = "https://r3bel-ue0h.onrender.com";
 
 // ── Light Theme Palette (matches SIEMDashboard / IntegrationsPage) ────────────────
 const L = {
