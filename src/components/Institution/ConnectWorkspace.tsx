@@ -1,6 +1,5 @@
 
 import React, { useCallback, useEffect, useState } from "react";
-import { refreshSession } from "../Auth/authApi.js";
 
 const API_BASE = "https://r3bel-5464.onrender.com";
 
@@ -112,62 +111,23 @@ const styles = `
 }
 `;
 
-async function getFreshAccessToken(): Promise<string> {
-  const refresh = localStorage.getItem("refresh");
-
-  if (!refresh) {
-    throw new Error("Your Rebel session has expired. Please sign in again.");
-  }
-
-  try {
-    const data = await refreshSession(refresh);
-
-    if (!data.access) {
-      throw new Error("The authentication server did not return an access token.");
-    }
-
-    localStorage.setItem("access", data.access);
-
-    if (data.refresh) {
-      localStorage.setItem("refresh", data.refresh);
-    }
-
-    return data.access;
-  } catch {
-    localStorage.removeItem("access");
-    localStorage.removeItem("refresh");
-
-    throw new Error("Your Rebel session has expired. Please sign in again.");
-  }
-}
-
 async function connectRequest(
   path: string,
   options: RequestInit = {},
 ): Promise<Response> {
-  let token = localStorage.getItem("access");
+  const token = localStorage.getItem("access");
 
-  if (!token) {
-    token = await getFreshAccessToken();
+  if (!token || token === "undefined" || token === "null") {
+    throw new Error("Please sign in to access your institution workspace.");
   }
 
-  const send = (accessToken: string) =>
-    fetch(`${API_BASE}${path}`, {
-      ...options,
-      headers: {
-        ...options.headers,
-        Authorization: `Bearer ${accessToken}`,
-      },
-    });
-
-  let response = await send(token);
-
-  if (response.status === 401) {
-    token = await getFreshAccessToken();
-    response = await send(token);
-  }
-
-  return response;
+  return fetch(`${API_BASE}${path}`, {
+    ...options,
+    headers: {
+      ...(options.headers || {}),
+      Authorization: `Bearer ${token}`,
+    },
+  });
 }
 
 async function readResponse(response: Response) {
