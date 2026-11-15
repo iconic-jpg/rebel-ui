@@ -1,4 +1,3 @@
-
 import React, { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { loginWithEmail, refreshSession } from "./authApi.js";
@@ -298,7 +297,10 @@ export default function Login() {
     let active = true;
     const refresh = localStorage.getItem("refresh");
 
-    if (!refresh) {
+    // Do not attempt to refresh an absent or invalid stored value.
+    if (!refresh || refresh === "undefined" || refresh === "null") {
+      localStorage.removeItem("access");
+      localStorage.removeItem("refresh");
       setCheckingSession(false);
       return;
     }
@@ -306,14 +308,26 @@ export default function Login() {
     refreshSession(refresh)
       .then((data) => {
         if (!active) return;
+
+        if (!data.access) {
+          throw new Error("The authentication server returned an invalid access token.");
+        }
+
         localStorage.setItem("access", data.access);
-        if (data.refresh) localStorage.setItem("refresh", data.refresh);
+
+        if (data.refresh) {
+          localStorage.setItem("refresh", data.refresh);
+        }
+
         navigate("/", { replace: true });
       })
       .catch(() => {
         localStorage.removeItem("access");
         localStorage.removeItem("refresh");
-        if (active) setCheckingSession(false);
+
+        if (active) {
+          setCheckingSession(false);
+        }
       });
 
     return () => {
@@ -326,6 +340,7 @@ export default function Login() {
       setError("Google login is not configured.");
       return;
     }
+
     window.location.href = buildGoogleOAuthURL();
   };
 
@@ -337,12 +352,20 @@ export default function Login() {
     try {
       const data = await loginWithEmail(email, password);
 
-      if (!data.access || !data.refresh) {
+      if (
+        !data.access ||
+        !data.refresh ||
+        data.access === "undefined" ||
+        data.refresh === "undefined" ||
+        data.access === "null" ||
+        data.refresh === "null"
+      ) {
         throw new Error("The authentication server returned an invalid response.");
       }
 
       localStorage.setItem("access", data.access);
       localStorage.setItem("refresh", data.refresh);
+
       navigate("/splash");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Invalid credentials.");
