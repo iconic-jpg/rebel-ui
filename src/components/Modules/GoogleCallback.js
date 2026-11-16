@@ -1,14 +1,17 @@
 import { jsx as _jsx, Fragment as _Fragment, jsxs as _jsxs } from "react/jsx-runtime";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-const API = "https://r3bel-5464.onrender.com";
+const API = (import.meta.env.VITE_AUTH_API_URL ||
+    "https://r3bel-ue0h.onrender.com").replace(/\/+$/, "");
 const REDIRECT_URI = `${window.location.origin}/auth/google/callback`;
 const styles = `
   @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap');
+
   @keyframes blink {
     0%, 100% { opacity: 0.4; }
-    50%       { opacity: 1;   }
+    50% { opacity: 1; }
   }
+
   .cb-root {
     min-height: 100vh;
     background: #020b18;
@@ -19,12 +22,14 @@ const styles = `
     font-family: 'Share Tech Mono', monospace;
     gap: 16px;
   }
+
   .cb-text {
     font-size: 10px;
     letter-spacing: 4px;
     color: rgba(0,200,255,.35);
     animation: blink 1.2s ease-in-out infinite;
   }
+
   .cb-error {
     font-size: 10px;
     letter-spacing: 2px;
@@ -35,6 +40,7 @@ const styles = `
     max-width: 420px;
     text-align: center;
   }
+
   .cb-back {
     font-size: 9px;
     letter-spacing: 3px;
@@ -44,45 +50,80 @@ const styles = `
     padding-bottom: 2px;
     transition: color 0.2s;
   }
-  .cb-back:hover { color: #00c8ff; }
+
+  .cb-back:hover {
+    color: #00c8ff;
+  }
 `;
 export default function GoogleCallback() {
     const navigate = useNavigate();
     const [error, setError] = useState("");
     useEffect(() => {
-        const params = new URLSearchParams(window.location.search);
-        const code = params.get("code");
-        const state = params.get("state");
-        const saved = sessionStorage.getItem("google_oauth_state");
-        // Clear the code from the URL bar immediately
-        window.history.replaceState({}, "", "/auth/google/callback");
-        if (!code) {
-            setError("No authorisation code received from Google.");
-            return;
-        }
-        // CSRF check — only enforce if we actually stored a state value
-        if (saved && state !== saved) {
-            setError("OAuth state mismatch — possible CSRF. Please try again.");
-            return;
-        }
-        sessionStorage.removeItem("google_oauth_state");
-        // Exchange code → tokens via backend
-        fetch(`${API}/api/auth/google/`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ code, redirect_uri: REDIRECT_URI }),
-        })
-            .then(res => res.json().then(data => ({ ok: res.ok, data })))
-            .then(({ ok, data }) => {
-            if (!ok) {
-                setError(data.detail || data.error || "Google login failed.");
+        let cancelled = false;
+        const authenticate = async () => {
+            const params = new URLSearchParams(window.location.search);
+            const code = params.get("code");
+            const state = params.get("state");
+            const saved = sessionStorage.getItem("google_oauth_state");
+            // Remove the authorization code from the URL.
+            window.history.replaceState({}, "", "/auth/google/callback");
+            if (!code) {
+                setError("No authorisation code received from Google.");
                 return;
             }
-            localStorage.setItem("access", data.access);
-            localStorage.setItem("refresh", data.refresh);
-            navigate("/splash", { replace: true });
-        })
-            .catch(() => setError("Network error — could not complete Google login."));
+            // Verify OAuth state to protect against CSRF.
+            if (saved && state !== saved) {
+                sessionStorage.removeItem("google_oauth_state");
+                setError("OAuth state mismatch — possible CSRF. Please try again.");
+                return;
+            }
+            sessionStorage.removeItem("google_oauth_state");
+            try {
+                const response = await fetch(`${API}/api/auth/google/`, {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                        Accept: "application/json",
+                    },
+                    credentials: "include",
+                    body: JSON.stringify({
+                        code,
+                        redirect_uri: REDIRECT_URI,
+                    }),
+                });
+                const data = await response
+                    .json()
+                    .catch(() => ({}));
+                if (!response.ok) {
+                    throw new Error(data.detail ||
+                        data.error ||
+                        `Google authentication failed (${response.status}).`);
+                }
+                // Django must return a valid SimpleJWT access/refresh pair.
+                if (typeof data.access !== "string" ||
+                    typeof data.refresh !== "string" ||
+                    data.access.split(".").length !== 3 ||
+                    data.refresh.split(".").length !== 3) {
+                    throw new Error("Google sign-in did not return a valid Rebel session. Please try again.");
+                }
+                if (cancelled)
+                    return;
+                localStorage.setItem("access", data.access);
+                localStorage.setItem("refresh", data.refresh);
+                navigate("/splash", { replace: true });
+            }
+            catch (err) {
+                if (cancelled)
+                    return;
+                setError(err instanceof Error
+                    ? err.message
+                    : "Network error — could not complete Google login.");
+            }
+        };
+        void authenticate();
+        return () => {
+            cancelled = true;
+        };
     }, [navigate]);
     return (_jsxs(_Fragment, { children: [_jsx("style", { children: styles }), _jsx("div", { className: "cb-root", children: error ? (_jsxs(_Fragment, { children: [_jsx("div", { className: "cb-error", children: error }), _jsx("a", { href: "/login", className: "cb-back", children: "\u2190 back to login" })] })) : (_jsx("span", { className: "cb-text", children: "// authenticating with google..." })) })] }));
 }

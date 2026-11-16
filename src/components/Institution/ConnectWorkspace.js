@@ -2,27 +2,17 @@ import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-run
 import { useCallback, useEffect, useState } from "react";
 const API_BASE = "https://r3bel-5464.onrender.com";
 async function connectRequest(path, options = {}) {
-    const token = localStorage.getItem("access")?.trim();
-
-    if (!token || token === "undefined" || token === "null") {
-        localStorage.removeItem("access");
-        localStorage.removeItem("refresh");
-        throw new Error("Your session is missing or invalid. Please sign in again to open Connect.");
-    }
-
+    const token = localStorage.getItem("access");
     return fetch(`${API_BASE}${path}`, {
         ...options,
         headers: {
             ...(options.headers || {}),
-            Authorization: `Bearer ${token}`,
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
     });
 }
 async function readResponse(response) {
     const data = await response.json().catch(() => ({}));
-    if (response.status === 401) {
-        throw new Error("Your session could not be verified. Please sign in again.");
-    }
     if (!response.ok) {
         throw new Error(data.detail ||
             data.message ||
@@ -177,7 +167,6 @@ const styles = `
 `;
 export default function ConnectWorkspace() {
     const [workspace, setWorkspace] = useState(null);
-    const [createdInstitution, setCreatedInstitution] = useState(null);
     const [loading, setLoading] = useState(true);
     const [creating, setCreating] = useState(false);
     const [error, setError] = useState("");
@@ -222,14 +211,7 @@ export default function ConnectWorkspace() {
                     jurisdiction: jurisdiction.trim(),
                 }),
             });
-            const result = await readResponse(response);
-
-            if (result.claimed === false) {
-                setCreatedInstitution(result);
-                setWorkspace(null);
-                return;
-            }
-
+            await readResponse(response);
             await loadWorkspace();
         }
         catch (err) {
@@ -241,15 +223,7 @@ export default function ConnectWorkspace() {
             setCreating(false);
         }
     };
-    return (_jsxs(_Fragment, { children: [_jsx("style", { children: styles }), _jsx("main", { className: "connect-page", children: _jsxs("div", { className: "connect-wrap", children: [_jsx("div", { className: "connect-eyebrow", children: "REBEL // INSTITUTIONAL CONNECT" }), _jsx("h1", { className: "connect-title", children: "Institution Connect" }), _jsx("p", { className: "connect-subtitle", children: "Connect your institution's systems to Rebel. Manage machine identities, monitor evidence ingestion and establish the data foundation for security and compliance assessments." }), error && (_jsx("div", { className: "connect-error", role: "alert", children: error })), loading ? (_jsx("div", { className: "connect-card", style: { marginTop: 25 }, children: "Loading institution workspace\u2026" })) : createdInstitution ? (_jsxs("section", { className: "connect-card", style: { maxWidth: 650, marginTop: 25 }, children: [
-            _jsx("div", { className: "connect-eyebrow", children: "INSTITUTION CREATED" }),
-            _jsx("h2", { style: { fontSize: 23, margin: "10px 0" }, children: "Your institution is registered" }),
-            _jsx("p", { className: "connect-muted", style: { lineHeight: 1.6 }, children: createdInstitution.message }),
-            _jsx("h3", { children: createdInstitution.institution.name }),
-            _jsx("p", { className: "connect-muted", children: createdInstitution.institution.jurisdiction }),
-            _jsxs("p", { className: "connect-muted", children: ["Institution ID: ", createdInstitution.institution.institution_id] }),
-            _jsx("p", { className: "connect-info", children: "This institution is currently unclaimed. Sign-in and institution ownership must be established before accessing its private workspace." })
-        ] })) : workspace ? (_jsxs(_Fragment, { children: [_jsxs("section", { className: "connect-card", style: { marginTop: 25 }, children: [_jsx("div", { className: "connect-eyebrow", children: "ACTIVE INSTITUTION" }), _jsx("h2", { style: { fontSize: 23, margin: "9px 0" }, children: workspace.institution.name }), _jsxs("div", { className: "connect-muted", children: [workspace.institution.jurisdiction, " · ", workspace.institution.role] }), _jsxs("div", { className: "connect-muted", style: { fontSize: 11, marginTop: 8 }, children: ["Institution ID:", " ", workspace.institution.institution_id] })] }), _jsxs("section", { className: "connect-grid", children: [_jsxs("div", { className: "connect-card", children: [_jsx("div", { className: "connect-card-label", children: "Registered agents" }), _jsx("div", { className: "connect-metric", children: workspace.metrics.agents_total })] }), _jsxs("div", { className: "connect-card", children: [_jsx("div", { className: "connect-card-label", children: "Active agents" }), _jsx("div", { className: "connect-metric", children: workspace.metrics.agents_active })] }), _jsxs("div", { className: "connect-card", children: [_jsx("div", { className: "connect-card-label", children: "Evidence submissions" }), _jsx("div", { className: "connect-metric", children: workspace.metrics.evidence_total })] })] }), _jsxs("section", { className: "connect-card", style: { marginBottom: 18 }, children: [_jsx("h2", { className: "connect-section-title", children: "Connected agents" }), workspace.agents.length === 0 ? (_jsx("div", { className: "connect-muted", children: "No agents have been provisioned for this institution yet." })) : (_jsx("div", { className: "connect-table-wrap", children: _jsxs("table", { className: "connect-table", children: [_jsx("thead", { children: _jsxs("tr", { children: [_jsx("th", { children: "Agent" }), _jsx("th", { children: "Status" }), _jsx("th", { children: "Created" }), _jsx("th", { children: "Last heartbeat" })] }) }), _jsx("tbody", { children: workspace.agents.map((agent) => (_jsxs("tr", { children: [_jsxs("td", { children: [_jsx("strong", { children: agent.name }), _jsx("div", { className: "connect-muted", style: { fontSize: 10 }, children: agent.agent_id })] }), _jsx("td", { children: _jsx("span", { className: `connect-status ${agent.status === "active"
+    return (_jsxs(_Fragment, { children: [_jsx("style", { children: styles }), _jsx("main", { className: "connect-page", children: _jsxs("div", { className: "connect-wrap", children: [_jsx("div", { className: "connect-eyebrow", children: "REBEL // INSTITUTIONAL CONNECT" }), _jsx("h1", { className: "connect-title", children: "Institution Connect" }), _jsx("p", { className: "connect-subtitle", children: "Connect your institution's systems to Rebel. Manage machine identities, monitor evidence ingestion and establish the data foundation for security and compliance assessments." }), error && (_jsx("div", { className: "connect-error", role: "alert", children: error })), loading ? (_jsx("div", { className: "connect-card", style: { marginTop: 25 }, children: "Loading institution workspace\u2026" })) : workspace ? (_jsxs(_Fragment, { children: [_jsxs("section", { className: "connect-card", style: { marginTop: 25 }, children: [_jsx("div", { className: "connect-eyebrow", children: "ACTIVE INSTITUTION" }), _jsx("h2", { style: { fontSize: 23, margin: "9px 0" }, children: workspace.institution.name }), _jsxs("div", { className: "connect-muted", children: [workspace.institution.jurisdiction, " · ", workspace.institution.role] }), _jsxs("div", { className: "connect-muted", style: { fontSize: 11, marginTop: 8 }, children: ["Institution ID:", " ", workspace.institution.institution_id] })] }), _jsxs("section", { className: "connect-grid", children: [_jsxs("div", { className: "connect-card", children: [_jsx("div", { className: "connect-card-label", children: "Registered agents" }), _jsx("div", { className: "connect-metric", children: workspace.metrics.agents_total })] }), _jsxs("div", { className: "connect-card", children: [_jsx("div", { className: "connect-card-label", children: "Active agents" }), _jsx("div", { className: "connect-metric", children: workspace.metrics.agents_active })] }), _jsxs("div", { className: "connect-card", children: [_jsx("div", { className: "connect-card-label", children: "Evidence submissions" }), _jsx("div", { className: "connect-metric", children: workspace.metrics.evidence_total })] })] }), _jsxs("section", { className: "connect-card", style: { marginBottom: 18 }, children: [_jsx("h2", { className: "connect-section-title", children: "Connected agents" }), workspace.agents.length === 0 ? (_jsx("div", { className: "connect-muted", children: "No agents have been provisioned for this institution yet." })) : (_jsx("div", { className: "connect-table-wrap", children: _jsxs("table", { className: "connect-table", children: [_jsx("thead", { children: _jsxs("tr", { children: [_jsx("th", { children: "Agent" }), _jsx("th", { children: "Status" }), _jsx("th", { children: "Created" }), _jsx("th", { children: "Last heartbeat" })] }) }), _jsx("tbody", { children: workspace.agents.map((agent) => (_jsxs("tr", { children: [_jsxs("td", { children: [_jsx("strong", { children: agent.name }), _jsx("div", { className: "connect-muted", style: { fontSize: 10 }, children: agent.agent_id })] }), _jsx("td", { children: _jsx("span", { className: `connect-status ${agent.status === "active"
                                                                             ? "active"
                                                                             : ""}`, children: agent.status }) }), _jsx("td", { children: agent.created_at
                                                                         ? new Date(agent.created_at).toLocaleString()
