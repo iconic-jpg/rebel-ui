@@ -5,6 +5,25 @@ import { MOCK_CBOM, MOCK_ASSETS, } from "./shared.js";
 import { fullAnalysis, normaliseTLS, pqcReadinessScore, } from "./cipherAnalysis.js";
 const API = (typeof import.meta !== "undefined" && import.meta.env?.VITE_API_BASE) ||
     "https://r3bel-5464.onrender.com";
+// Authenticated API requests — uses the same JWT as ConnectWorkspace.
+function apiFetch(path, init = {}) {
+    let token = "";
+    try {
+        token = localStorage.getItem("access") ?? "";
+    }
+    catch { }
+    const headers = new Headers(init.headers || {});
+    if (token) {
+        headers.set("Authorization", `Bearer ${token}`);
+    }
+    else {
+        headers.delete("Authorization");
+    }
+    return fetch(`${API}${path}`, {
+        ...init,
+        headers,
+    });
+}
 // ── Cache config ──────────────────────────────────────────────────────────────
 const CACHE_TTL_MS = 12 * 60 * 60 * 1000;
 const CACHE_KEY_CBOM = "rebel_cache_cbom_pqcr";
@@ -397,7 +416,7 @@ export default function PQCReadinessPage({ vcenterAssets } = {}) {
                 }
             }
             try {
-                const d = await fetch(`${API}/ghost/assets`).then(r => {
+                const d = await apiFetch("/ghost/assets").then(r => {
                     if (!r.ok)
                         throw new Error();
                     return r.json();
@@ -439,9 +458,9 @@ export default function PQCReadinessPage({ vcenterAssets } = {}) {
             }
             try {
                 const [cbom, assetsData] = await Promise.all([
-                    fetch(`${API}/cbom`).then(r => { if (!r.ok)
+                    apiFetch("/cbom").then(r => { if (!r.ok)
                         throw new Error(); return r.json(); }),
-                    fetch(`${API}/assets`).then(r => { if (!r.ok)
+                    apiFetch("/assets").then(r => { if (!r.ok)
                         throw new Error(); return r.json(); }),
                 ]);
                 cacheSet(CACHE_KEY_CBOM, cbom);
