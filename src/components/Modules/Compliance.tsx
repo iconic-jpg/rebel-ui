@@ -191,18 +191,62 @@ export default function ComplianceDashboard() {
   const [comment, setComment] = useState("");
   const [tick, setTick] = useState(0); // bumps after an assessment so the trend chart refetches
 
+
   const saveIdentity = (a: string, t: string) => {
-    setActor(a); setToken(t);
-    try { localStorage.setItem("rebel_actor", a); sessionStorage.setItem("rebel_audit_token", t); } catch {}
+    setActor(a);
+    setToken(t);
+
+    try {
+      localStorage.setItem("rebel_actor", a);
+      sessionStorage.setItem("rebel_audit_token", t);
+    } catch {}
   };
-  // every request carries the actor/token the backend uses for audit-trail attribution and the optional token guard
+
+  // Use the same JWT authentication as ConnectWorkspace.
+  // Read credentials for every request so callbacks cannot retain stale tokens.
   const af = (path: string, init: RequestInit = {}) => {
-    const h: Record<string, string> = { ...(init.headers as Record<string, string> | undefined) };
-    if (actor.trim()) h["X-Actor"] = actor.trim();
-    if (token.trim()) h["X-Audit-Token"] = token.trim();
-    if (init.body) h["Content-Type"] = "application/json";
-    return fetch(`${API}${path}`, { ...init, headers: h });
+    const headers = new Headers(init.headers || {});
+
+    let accessToken = "";
+    let currentActor = actor;
+    let auditToken = token;
+
+    try {
+      accessToken = localStorage.getItem("access") ?? "";
+      currentActor = localStorage.getItem("rebel_actor") ?? actor;
+      auditToken = sessionStorage.getItem("rebel_audit_token") ?? token;
+    } catch {}
+
+    if (accessToken) {
+      headers.set("Authorization", `Bearer ${accessToken}`);
+    } else {
+      headers.delete("Authorization");
+    }
+
+    if (currentActor.trim()) {
+      headers.set("X-Actor", currentActor.trim());
+    } else {
+      headers.delete("X-Actor");
+    }
+
+    // Retained for compatibility with any other endpoint that still uses it.
+    if (auditToken.trim()) {
+      headers.set("X-Audit-Token", auditToken.trim());
+    } else {
+      headers.delete("X-Audit-Token");
+    }
+
+    if (init.body && !headers.has("Content-Type")) {
+      headers.set("Content-Type", "application/json");
+    }
+
+    return fetch(`${API}${path}`, {
+      ...init,
+      headers,
+    });
   };
+
+
   const errText = async (res: Response) => {
     const b = await res.json().catch(() => null);
     return typeof b?.detail === "string" ? b.detail : `Request failed (${res.status})`;
