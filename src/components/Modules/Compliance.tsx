@@ -106,8 +106,18 @@ interface FailedControl {
   status?: string;
 }
 interface EvidenceItem {
-  evidence_id: string; request_id: string; module: string; result: string; confidence: number;
-  rationale?: string; collected_at: string; sha256: string; source: { uri: string; version: string };
+  evidence_id: string;
+  request_id: string;
+  module: string;
+  result: string;
+  confidence?: number;
+  rationale?: string;
+  collected_at?: string;
+  sha256?: string;
+  source?: {
+    uri?: string;
+    version?: string;
+  } | null;
 }
 interface AffectedAsset {
   status: string; reason: string; last_checked: string;
@@ -127,6 +137,31 @@ interface TrendPoint { snapshot_date: string; score: number; pass_rate: number; 
 function severityColor(s: string) { return ({ Critical: L.red, High: L.orange, Medium: L.yellow, Low: L.green }[s] ?? L.text3); }
 function resultColor(r: string) { return ({ pass: L.green, fail: L.red, partial: L.yellow, inconclusive: L.orange }[r] ?? L.text3); }
 function scoreColor(score: number) { if (score >= 80) return L.green; if (score >= 60) return L.yellow; return L.red; }
+
+// Display only. Keep aligned with app/audit_engine.py MIN_CONFIDENCE.
+// The backend remains authoritative and performs the actual scoring.
+const DISPLAY_MIN_CONFIDENCE = 0.6;
+
+function evidenceEligibleForScoring(e: EvidenceItem): boolean {
+  return (
+    typeof e.confidence === "number" &&
+    e.confidence >= DISPLAY_MIN_CONFIDENCE &&
+    Boolean(e.source?.uri?.trim()) &&
+    Boolean(e.sha256?.trim())
+  );
+}
+
+function evidenceEligibilityReason(e: EvidenceItem): string {
+  const reasons: string[] = [];
+
+  if (typeof e.confidence !== "number" || e.confidence < DISPLAY_MIN_CONFIDENCE) {
+    reasons.push(`confidence below ${DISPLAY_MIN_CONFIDENCE.toFixed(2)}`);
+  }
+  if (!e.source?.uri?.trim()) reasons.push("source URI missing");
+  if (!e.sha256?.trim()) reasons.push("SHA-256 missing");
+
+  return reasons.join(" · ");
+}
 
 export default function ComplianceDashboard() {
   const mobile = useMobile();
@@ -609,15 +644,32 @@ export default function ComplianceDashboard() {
                                 Evidence ({detail.evidence.length}) · {detail.source_verification?.replace(/_/g, " ")}
                               </div>
                               {detail.evidence.length === 0 && <div style={{ fontSize: 9, color: L.text4 }}>No evidence collected — this control cannot be marked compliant.</div>}
-                              {detail.evidence.map(e => (
-                                <div key={e.evidence_id} style={{ background: L.panelBg, border: `1px solid ${L.panelBorder}`, borderRadius: 5, padding: "6px 10px", marginBottom: 4 }}>
-                                  <span style={{ fontSize: 8, fontWeight: 700, color: resultColor(e.result), textTransform: "uppercase" as const }}>{e.result}</span>
-                                  <span style={{ fontSize: 9, color: L.text3 }}> · {e.request_id} · conf {e.confidence} — {e.rationale}</span>
-                                  <div style={{ fontSize: 8, color: L.text4, fontFamily: "'DM Mono',monospace" }}>
-                                    {e.source.uri} · v{e.source.version} · {e.collected_at} · sha256 {e.sha256.slice(0, 16)}…
+                              {detail.evidence.map(e => {
+                                const eligible = evidenceEligibleForScoring(e);
+                                const eligibilityReason = evidenceEligibilityReason(e);
+                                return (
+                                  <div key={e.evidence_id} style={{ background: L.panelBg, border: `1px solid ${L.panelBorder}`, borderRadius: 5, padding: "7px 10px", marginBottom: 4 }}>
+                                    <div style={{ display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap", marginBottom: 3 }}>
+                                      <span style={{ fontSize: 8, fontWeight: 700, color: resultColor(e.result), textTransform: "uppercase" as const }}>{e.result}</span>
+                                      <span style={{ fontSize: 8, fontWeight: 700, color: eligible ? L.green : L.yellow, background: eligible ? `${L.green}12` : `${L.yellow}12`, border: `1px solid ${eligible ? `${L.green}44` : `${L.yellow}44`}`, borderRadius: 3, padding: "2px 6px" }}>
+                                        {eligible ? "ELIGIBLE FOR SCORING" : "RECEIVED · NOT ELIGIBLE FOR SCORING"}
+                                      </span>
+                                    </div>
+                                    <div style={{ fontSize: 9, color: L.text3 }}>
+                                      {e.request_id} · confidence {typeof e.confidence === "number" ? e.confidence.toFixed(2) : "n/a"}
+                                      {e.rationale ? ` — ${e.rationale}` : ""}
+                                    </div>
+                                    {!eligible && (
+                                      <div style={{ fontSize: 8, color: L.yellow, marginTop: 3 }}>
+                                        Scoring exclusion: {eligibilityReason || "eligibility requirements not met"}
+                                      </div>
+                                    )}
+                                    <div style={{ fontSize: 8, color: L.text4, fontFamily: "'DM Mono',monospace", marginTop: 3, overflowWrap: "anywhere" }}>
+                                      {e.source?.uri || "source URI unavailable"} · v{e.source?.version || "n/a"} · {e.collected_at || "collection time unavailable"} · sha256 {e.sha256 ? `${e.sha256.slice(0, 16)}…` : "unavailable"}
+                                    </div>
                                   </div>
-                                </div>
-                              ))}
+                                );
+                              })}
                               <div style={{ fontSize: 9, color: L.text3, marginTop: 6 }}>
                                 Approval: <b>{(detail.approval_state ?? "proposed").toUpperCase()}</b>
                                 {detail.approvals && Object.keys(detail.approvals).length > 0 && " · " + Object.entries(detail.approvals).map(([k, v]) => `${k}: ${v}`).join(" · ")}
