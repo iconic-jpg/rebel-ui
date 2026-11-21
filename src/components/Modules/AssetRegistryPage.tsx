@@ -37,6 +37,23 @@ const CRIT_COLOR: Record<string, string> = {
   Critical: L.red, High: L.orange, Medium: L.yellow, Low: L.green,
 };
 
+// Authenticated asset registry requests.
+function assetApiFetch(path: string, init: RequestInit = {}): Promise<Response> {
+  let token = "";
+  try {
+    token = localStorage.getItem("access") ?? "";
+  } catch {}
+
+  const headers = new Headers(init.headers || {});
+  if (token) {
+    headers.set("Authorization", `Bearer ${token}`);
+  } else {
+    headers.delete("Authorization");
+  }
+
+  return fetch(`${API}${path}`, { ...init, headers });
+}
+
 const EMPTY_FORM = {
   name:"", url:"", type:"Web App", criticality:"Medium",
   owner:"", owner_email:"", business_unit:"",
@@ -352,7 +369,7 @@ export default function AssetRegistryPage() {
   async function load() {
     setLoading(true);
     try {
-      const r = await fetch(`${API}/assets`);
+      const r = await assetApiFetch("/assets");
       const d = await r.json();
       setAssets((d.assets ?? []).filter((a: any) => a.id));
     } catch { showToast("Failed to load registry", false); }
@@ -406,7 +423,7 @@ export default function AssetRegistryPage() {
   async function handleScan(id: number, name: string) {
     setScanningId(id);
     try {
-      const r = await fetch(`${API}/assets/${id}/scan`, { method: "POST" });
+      const r = await assetApiFetch(`/assets/${id}/scan`, { method: "POST" });
       const d = await r.json();
       d.status === "scanned"
         ? showToast(`Scanned ${name} — TLS ${d.tls_version ?? "?"}`)
@@ -418,7 +435,7 @@ export default function AssetRegistryPage() {
 
   async function handleDelete(id: number) {
     try {
-      const r = await fetch(`${API}/assets/${id}`, { method: "DELETE" });
+      const r = await assetApiFetch(`/assets/${id}`, { method: "DELETE" });
       const d = await r.json();
       r.ok ? showToast(`Deactivated ${d.name}`) : showToast(d.detail ?? "Failed", false);
       setConfirmId(null);
