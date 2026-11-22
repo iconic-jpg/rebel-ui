@@ -1,4 +1,3 @@
-
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, CSSProperties, DragEvent, FormEvent } from "react";
 import "./ConnectWorkspace.css";
@@ -38,17 +37,32 @@ interface Workspace {
     agents_total: number;
     agents_active: number;
     evidence_total: number;
+    apis_pending?: number;
+    apis_approved?: number;
+    apis_rejected?: number;
   };
   agents: Agent[];
   recent_evidence: Evidence[];
 }
 
+type ApprovalStatus = "pending" | "approved" | "rejected";
+
 interface DiscoveredEndpoint {
+  endpoint_id: string;
   path: string;
   method: string;
   description?: string;
   category?: string;
   read_only: boolean;
+  read_only_declared?: boolean;
+  classification_source?: string;
+  operation_class?: string;
+  side_effects?: string[];
+  approval_status: ApprovalStatus;
+  approvable: boolean;
+  approval_blocker?: string | null;
+  decided_at?: string | null;
+  decision_note?: string | null;
 }
 
 interface DiscoveryResult {
@@ -60,7 +74,8 @@ interface DiscoveryResult {
   authentication_methods: string[];
   endpoints: DiscoveredEndpoint[];
   warnings: string[];
-  discovery_id?: string;
+  discovery_id: string;
+  created_at?: string;
 }
 
 async function connectRequest(
@@ -239,16 +254,12 @@ interface StoredReport {
 }
 
 interface LocalStore {
-  discovery: DiscoveryResult | null;
-  selected: string[];
   files: FileRecord[];
   declarations: Declaration[];
   report: StoredReport | null;
 }
 
 const EMPTY_STORE: LocalStore = {
-  discovery: null,
-  selected: [],
   files: [],
   declarations: [],
   report: null,
@@ -287,6 +298,22 @@ function formatDate(value?: string | null): string {
   if (!value) return "—";
   const d = new Date(value);
   return Number.isNaN(d.getTime()) ? "—" : d.toLocaleString();
+}
+
+function countApis(d: DiscoveryResult | null) {
+  const counts = { pending: 0, approved: 0, rejected: 0, total: 0 };
+
+  if (!d) return counts;
+
+  for (const endpoint of d.endpoints) {
+    counts.total += 1;
+
+    if (endpoint.approval_status === "approved") counts.approved += 1;
+    else if (endpoint.approval_status === "rejected") counts.rejected += 1;
+    else counts.pending += 1;
+  }
+
+  return counts;
 }
 
 function shortHash(h: string): string {
@@ -881,6 +908,19 @@ const STATUS_LABEL: Record<StageStatus, string> = {
   optional: "Optional · later",
 };
 
+const APPROVAL_LABEL: Record<ApprovalStatus, string> = {
+  pending: "Pending approval",
+  approved: "Approved",
+  rejected: "Rejected",
+};
+
+// Reuses the existing connect-status colour variants.
+const APPROVAL_CLASS: Record<ApprovalStatus, string> = {
+  pending: "in_progress",
+  approved: "complete",
+  rejected: "not_started",
+};
+
 /* ------------------------------------------------------------------ */
 /* Small presentational components                                     */
 /* ------------------------------------------------------------------ */
@@ -991,7 +1031,8 @@ export default function ConnectWorkspace() {
 
   const [tab, setTab] = useState<TabId>("overview");
 
-  // This data remains browser-local until server persistence endpoints exist.
+  // Documents and declarations remain browser-local. API discovery and
+  // endpoint approvals are persisted by the server.
   const [store, setStore] = useState<LocalStore>(EMPTY_STORE);
   const [hydratedInstitutionId, setHydratedInstitutionId] = useState<
     string | null
@@ -1013,8 +1054,15 @@ export default function ConnectWorkspace() {
   const [filter, setFilter] = useState<Provenance | "all">("all");
   const fileInput = useRef<HTMLInputElement>(null);
 
-  const discovery = store.discovery;
-  const selectedEndpoints = store.selected;
+  const [discovery, setDiscovery] = useState<DiscoveryResult | null>(
+    null
+  );
+  const [decidingId, setDecidingId] = useState<string | null>(null);
+  const [decisionError, setDecisionError] = useState("");
+  const [scanNote, setScanNote] = useState("");
+  const [endpointFilter, setEndpointFilter] = useState<
+    ApprovalStatus | "all"
+  >("all");
 
   /* ---------------- persistence ---------------- */
 
@@ -1034,14 +1082,15 @@ export default function ConnectWorkspace() {
         ? (JSON.parse(raw) as Partial<LocalStore>)
         : {};
 
+      // Discovery results and selections from earlier versions were kept
+      // in this browser. They are intentionally not carried over: the
+      // server is now the only source of truth for the API inventory.
       setStore({
-        ...EMPTY_STORE,
-        ...saved,
-        selected: Array.isArray(saved.selected) ? saved.selected : [],
         files: Array.isArray(saved.files) ? saved.files : [],
         declarations: Array.isArray(saved.declarations)
           ? saved.declarations
           : [],
+        report: saved.report ?? null,
       });
     } catch {
       setStore(EMPTY_STORE);
@@ -1077,8 +1126,8 @@ export default function ConnectWorkspace() {
 
   /* ---------------- server calls ---------------- */
 
-  const loadWorkspace = useCallback(async () => {
-    setLoading(true);
+  const loadWorkspace = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
     setError("");
 
     try {
@@ -1105,6 +1154,32 @@ export default function ConnectWorkspace() {
   useEffect(() => {
     void loadWorkspace();
   }, [loadWorkspace]);
+
+  const loadInventory = useCallback(async () => {
+    try {
+      const response = await connectRequest("/connect/discovery/latest");
+      const data = await readResponse<{
+        discovery: DiscoveryResult | null;
+      }>(response);
+
+      setDiscovery(data.discovery);
+    } catch (err) {
+      setDiscoveryError(
+        err instanceof Error
+          ? err.message
+          : "Could not load the saved API inventory."
+      );
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!institutionId) {
+      setDiscovery(null);
+      return;
+    }
+
+    void loadInventory();
+  }, [institutionId, loadInventory]);
 
   const createWorkspace = async (
     event: FormEvent<HTMLFormElement>
@@ -1149,7 +1224,8 @@ export default function ConnectWorkspace() {
 
     setDiscovering(true);
     setDiscoveryError("");
-    patchStore({ discovery: null, selected: [] });
+    setDecisionError("");
+    setScanNote("");
 
     try {
       const submittedUrl = sourceUrl.trim();
@@ -1169,6 +1245,19 @@ export default function ConnectWorkspace() {
         );
       }
 
+      const approvedBefore = countApis(discovery).approved;
+
+      if (
+        approvedBefore > 0 &&
+        !window.confirm(
+          `A new scan replaces the current inventory. Your ${approvedBefore} approved API${
+            approvedBefore === 1 ? "" : "s"
+          } will not carry over and every newly discovered endpoint starts as pending. Continue?`
+        )
+      ) {
+        return;
+      }
+
       const response = await connectRequest(
         "/connect/discovery/scan",
         {
@@ -1186,15 +1275,19 @@ export default function ConnectWorkspace() {
 
       const result = await readResponse<DiscoveryResult>(response);
 
-      patchStore({
-        discovery: result,
-        selected: result.endpoints
-          .filter((endpoint) => endpoint.read_only)
-          .map(
-            (endpoint) =>
-              `${endpoint.method.toUpperCase()}:${endpoint.path}`
-          ),
-      });
+      if (result.endpoints.length > 0 || !discovery) {
+        setDiscovery(result);
+        setEndpointFilter("all");
+      } else {
+        // An empty scan must not hide an inventory already under review.
+        setScanNote(
+          `The latest scan found no endpoints, so your existing inventory was kept. ${
+            result.warnings[0] ?? ""
+          }`.trim()
+        );
+      }
+
+      void loadWorkspace(true);
     } catch (err) {
       setDiscoveryError(
         err instanceof Error
@@ -1206,13 +1299,51 @@ export default function ConnectWorkspace() {
     }
   };
 
-  const toggleEndpoint = (key: string) => {
-    setStore((current) => ({
-      ...current,
-      selected: current.selected.includes(key)
-        ? current.selected.filter((item) => item !== key)
-        : [...current.selected, key],
-    }));
+  const decideEndpoint = async (
+    endpoint: DiscoveredEndpoint,
+    decision: "approved" | "rejected"
+  ) => {
+    setDecidingId(endpoint.endpoint_id);
+    setDecisionError("");
+
+    try {
+      const response = await connectRequest(
+        `/connect/discovery/endpoints/${encodeURIComponent(
+          endpoint.endpoint_id
+        )}/decision`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ decision }),
+        }
+      );
+
+      // The server's record replaces the local one.
+      const updated = await readResponse<DiscoveredEndpoint>(response);
+
+      setDiscovery((current) =>
+        current
+          ? {
+              ...current,
+              endpoints: current.endpoints.map((item) =>
+                item.endpoint_id === updated.endpoint_id
+                  ? updated
+                  : item
+              ),
+            }
+          : current
+      );
+
+      void loadWorkspace(true);
+    } catch (err) {
+      setDecisionError(
+        err instanceof Error
+          ? err.message
+          : "Could not record the decision."
+      );
+    } finally {
+      setDecidingId(null);
+    }
   };
 
   /* ---------------- evidence intake ---------------- */
@@ -1395,44 +1526,59 @@ export default function ConnectWorkspace() {
       });
     });
 
-    if (store.discovery) {
+    if (discovery) {
       const host = (() => {
         try {
-          return new URL(store.discovery!.target_url).host;
+          return new URL(discovery.target_url).host;
         } catch {
-          return store.discovery!.target_url;
+          return discovery.target_url;
         }
       })();
 
-      if (store.discovery.endpoints.length > 0) {
+      const counts = countApis(discovery);
+
+      if (counts.total > 0) {
         output.push({
-          id: "u-discovery-inventory",
+          id: `u-discovery-inventory-${discovery.discovery_id}-${counts.approved}-${counts.pending}-${counts.rejected}`,
           domain: "api_inventory",
           provenance: "unverified",
-          title: `${store.discovery.endpoints.length} endpoints discovered`,
+          title: `${counts.total} endpoints discovered`,
           source: host,
-          at: new Date().toISOString(),
-          detail:
-            "From API discovery. Not yet confirmed by the institution.",
+          at: discovery.created_at ?? "",
+          detail: `${counts.approved} approved · ${counts.pending} pending · ${counts.rejected} rejected. From API discovery; not yet confirmed by the institution.`,
         });
       }
 
-      if (store.discovery.authentication_methods.length > 0) {
+      if (counts.approved > 0) {
+        output.push({
+          id: `u-discovery-approved-${discovery.discovery_id}-${counts.approved}`,
+          domain: "api_inventory",
+          provenance: "unverified",
+          title: `${counts.approved} read-only API${
+            counts.approved === 1 ? "" : "s"
+          } approved, awaiting collection`,
+          source: host,
+          at: discovery.created_at ?? "",
+          detail:
+            "Approved by the institution owner. No data has been collected, so nothing here is verified.",
+        });
+      }
+
+      if (discovery.authentication_methods.length > 0) {
         output.push({
           id: "u-discovery-auth",
           domain: "authentication",
           provenance: "unverified",
           title: "Authentication methods discovered",
           source: host,
-          at: new Date().toISOString(),
-          detail:
-            store.discovery.authentication_methods.join(", "),
+          at: discovery.created_at ?? "",
+          detail: discovery.authentication_methods.join(", "),
         });
       }
     }
 
     return output;
-  }, [workspace, store]);
+  }, [workspace, store, discovery]);
 
   const stableItems = useMemo(() => items, [items]);
 
@@ -1475,6 +1621,8 @@ export default function ConnectWorkspace() {
   const hasSystems =
     Boolean(discovery && discovery.endpoints.length > 0) ||
     store.files.some((file) => file.kind === "spec");
+
+  const apiCounts = useMemo(() => countApis(discovery), [discovery]);
 
   const stages = useMemo<Stage[]>(() => {
     if (!workspace) return [];
@@ -1662,6 +1810,32 @@ export default function ConnectWorkspace() {
       });
     }
 
+    if (apiCounts.pending > 0) {
+      list.push({
+        id: "apis-pending",
+        severity: "blocker",
+        title: `${apiCounts.pending} discovered API${
+          apiCounts.pending === 1 ? "" : "s"
+        } awaiting approval`,
+        detail:
+          "Approve or reject each endpoint. Nothing is accessed or collected from a pending API.",
+        tab: "discover",
+      });
+    }
+
+    if (apiCounts.approved > 0) {
+      list.push({
+        id: "apis-approved-uncollected",
+        severity: "warning",
+        title: `${apiCounts.approved} approved API${
+          apiCounts.approved === 1 ? "" : "s"
+        } not yet collected`,
+        detail:
+          "Bank authentication and collection are not configured, so approved APIs remain unverified.",
+        tab: "discover",
+      });
+    }
+
     if (metrics.agents_total === 0) {
       list.push({
         id: "no-agent",
@@ -1698,6 +1872,7 @@ export default function ConnectWorkspace() {
     workspace,
     stableItems.length,
     discovery,
+    apiCounts,
     reportStale,
   ]);
 
@@ -1745,6 +1920,19 @@ export default function ConnectWorkspace() {
       });
     }
 
+    if (apiCounts.pending > 0) {
+      list.push({
+        id: "review-apis",
+        title: `Review ${apiCounts.pending} discovered API${
+          apiCounts.pending === 1 ? "" : "s"
+        }`,
+        detail:
+          "Approve the read-only endpoints Rebel may use and reject the rest.",
+        tab: "discover",
+        cta: "Review APIs",
+      });
+    }
+
     if (
       stableItems.length > 0 &&
       (!store.report || reportStale)
@@ -1786,6 +1974,7 @@ export default function ConnectWorkspace() {
     hasSystems,
     missingDomains,
     stableItems.length,
+    apiCounts.pending,
     store.report,
     reportStale,
   ]);
@@ -2184,275 +2373,436 @@ export default function ConnectWorkspace() {
     </>
   );
 
-  const renderDiscover = () => (
-    <section
-      className="connect-card"
-      aria-labelledby="disc-title"
-    >
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          gap: 12,
-          marginBottom: 12,
-        }}
+  const renderDiscover = () => {
+    const canDecide = workspace?.institution.role === "owner";
+
+    const visibleEndpoints = discovery
+      ? discovery.endpoints.filter(
+          (endpoint) =>
+            endpointFilter === "all" ||
+            endpoint.approval_status === endpointFilter
+        )
+      : [];
+
+    return (
+      <section
+        className="connect-card"
+        aria-labelledby="disc-title"
       >
-        <div>
-          <div className="connect-eyebrow">
-            SYSTEM INTEGRATION
-          </div>
-
-          <h2
-            className="connect-section-title"
-            id="disc-title"
-            style={{ marginTop: 6, marginBottom: 0 }}
-          >
-            Discover Banking APIs
-          </h2>
-        </div>
-
-        <span className="connect-status">API discovery</span>
-      </div>
-
-      <p
-        className="connect-muted"
-        style={{ lineHeight: 1.6 }}
-      >
-        Enter an institution's banking portal, API gateway, or
-        a direct OpenAPI/Swagger specification URL. Rebel will
-        inspect accessible API documentation and identify
-        potential read-only data endpoints. No public URL?
-        Upload a specification on the{" "}
-        <button
-          type="button"
-          className="connect-button link"
+        <div
           style={{
-            color: "var(--c-accent)",
-            padding: 0,
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            gap: 12,
+            marginBottom: 12,
           }}
-          onClick={() => setTab("evidence")}
         >
-          Evidence tab
-        </button>.
-      </p>
+          <div>
+            <div className="connect-eyebrow">
+              SYSTEM INTEGRATION
+            </div>
 
-      <form onSubmit={discoverAPIs}>
-        <label
-          className="connect-label"
-          htmlFor="bank-source-url"
+            <h2
+              className="connect-section-title"
+              id="disc-title"
+              style={{ marginTop: 6, marginBottom: 0 }}
+            >
+              Discover Banking APIs
+            </h2>
+          </div>
+
+          <span className="connect-status">API discovery</span>
+        </div>
+
+        <p
+          className="connect-muted"
+          style={{ lineHeight: 1.6 }}
         >
-          Banking portal URL or direct OpenAPI specification URL
-        </label>
-
-        <div className="connect-discovery-input">
-          <input
-            id="bank-source-url"
-            className="connect-input"
-            type="url"
-            value={sourceUrl}
-            onChange={(event) =>
-              setSourceUrl(event.target.value)
-            }
-            placeholder="https://bank.example.com/openapi.json"
-            required
-          />
-
+          Enter an institution's banking portal, API gateway, or
+          a direct OpenAPI/Swagger specification URL. Rebel reads
+          the bank's published API documentation, saves what it
+          finds against your institution and classifies each
+          operation. Every discovered endpoint starts as pending
+          approval. No public URL? Upload a specification on the{" "}
           <button
-            className="connect-button"
-            type="submit"
-            disabled={discovering}
+            type="button"
+            className="connect-button link"
+            style={{
+              color: "var(--c-accent)",
+              padding: 0,
+            }}
+            onClick={() => setTab("evidence")}
           >
-            {discovering ? "Discovering..." : "Discover APIs"}
-          </button>
-        </div>
-      </form>
+            Evidence tab
+          </button>.
+        </p>
 
-      <div
-        className="connect-info"
-        style={{ marginTop: 16 }}
-      >
-        <strong>Read-only discovery:</strong> Rebel inspects
-        accessible API documentation and permitted metadata.
-        Discovery will not initiate payments, modify accounts
-        or execute administrative operations. Results are
-        recorded as <ProvBadge p="unverified" /> until confirmed.
-      </div>
-
-      {discoveryError && (
-        <div className="connect-error" role="alert">
-          {discoveryError}
-        </div>
-      )}
-
-      {discovery && (
-        <div className="connect-discovery-result">
-          <h3 className="connect-section-title">
-            Discovery results
-          </h3>
-
-          <div className="connect-muted">
-            Target: {discovery.target_url}
-          </div>
-
-          {discovery.discovery_mode && (
-            <div
-              className="connect-muted"
-              style={{ marginTop: 6 }}
-            >
-              Discovery mode: {discovery.discovery_mode}
-            </div>
-          )}
-
-          {discovery.validated_origin && (
-            <div
-              className="connect-muted"
-              style={{ marginTop: 6 }}
-            >
-              Validated origin: {discovery.validated_origin}
-            </div>
-          )}
-
-          <div style={{ marginTop: 12 }}>
-            <span
-              className={`connect-status ${
-                discovery.reachable ? "active" : ""
-              }`}
-            >
-              {discovery.reachable
-                ? "Host reachable"
-                : "Host not reachable"}
-            </span>
-          </div>
-
-          <h3 style={{ fontSize: 14, marginTop: 20 }}>
-            API documentation
-          </h3>
-
-          {discovery.documentation_urls.length === 0 ? (
-            <p className="connect-muted">
-              No API documentation was discovered.
-            </p>
-          ) : (
-            discovery.documentation_urls.map((url) => (
-              <a
-                key={url}
-                className="connect-doc-link"
-                href={url}
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                {url}
-              </a>
-            ))
-          )}
-
-          <h3 style={{ fontSize: 14, marginTop: 20 }}>
-            Authentication methods
-          </h3>
-
-          <p className="connect-muted">
-            {discovery.authentication_methods.length
-              ? discovery.authentication_methods.join(", ")
-              : "Not determined"}
-          </p>
-
-          <h3 style={{ fontSize: 14, marginTop: 20 }}>
-            Discovered endpoints
-          </h3>
-
-          {discovery.endpoints.length === 0 ? (
-            <p className="connect-muted">
-              No endpoints have been identified yet.
-            </p>
-          ) : (
-            discovery.endpoints.map((endpoint) => {
-              const key = `${endpoint.method.toUpperCase()}:${endpoint.path}`;
-
-              return (
-                <label
-                  className="connect-endpoint"
-                  key={key}
-                >
-                  <input
-                    type="checkbox"
-                    checked={selectedEndpoints.includes(key)}
-                    disabled={!endpoint.read_only}
-                    onChange={() => toggleEndpoint(key)}
-                  />
-
-                  <span className="connect-method">
-                    {endpoint.method.toUpperCase()}
-                  </span>
-
-                  <span>
-                    <div className="connect-endpoint-path">
-                      {endpoint.path}
-                    </div>
-
-                    <div className="connect-muted">
-                      {endpoint.description ||
-                        endpoint.category ||
-                        "No description available"}
-                    </div>
-
-                    {!endpoint.read_only && (
-                      <div
-                        className="connect-muted"
-                        style={{ fontSize: 11 }}
-                      >
-                        Not eligible for read-only selection
-                      </div>
-                    )}
-                  </span>
-                </label>
-              );
-            })
-          )}
-
-          {discovery.warnings.map((warning, index) => (
-            <div className="connect-warning" key={index}>
-              {warning}
-            </div>
-          ))}
-
-          <p
-            className="connect-muted"
-            style={{ marginTop: 15 }}
+        <form onSubmit={discoverAPIs}>
+          <label
+            className="connect-label"
+            htmlFor="bank-source-url"
           >
-            Selected read-only endpoints:{" "}
-            {selectedEndpoints.length}
-          </p>
+            Banking portal URL or direct OpenAPI specification URL
+          </label>
 
-          <div className="connect-info">
-            Endpoint selection is currently a discovery preview.
-            Connection approval, authentication configuration
-            and evidence collection will be implemented as the
-            next integration stage. Selections are saved in this
-            browser for this institution.
-          </div>
+          <div className="connect-discovery-input">
+            <input
+              id="bank-source-url"
+              className="connect-input"
+              type="url"
+              value={sourceUrl}
+              onChange={(event) =>
+                setSourceUrl(event.target.value)
+              }
+              placeholder="https://bank.example.com/openapi.json"
+              required
+            />
 
-          <div className="connect-actions-row">
             <button
-              type="button"
               className="connect-button"
-              onClick={() => setTab("report")}
+              type="submit"
+              disabled={discovering || !canDecide}
+              title={
+                canDecide
+                  ? undefined
+                  : "Only the institution owner can run discovery"
+              }
             >
-              Continue to report
-            </button>
-
-            <button
-              type="button"
-              className="connect-button secondary"
-              onClick={() => setTab("evidence")}
-            >
-              Add more evidence
+              {discovering ? "Discovering..." : "Discover APIs"}
             </button>
           </div>
+        </form>
+
+        <div
+          className="connect-info"
+          style={{ marginTop: 16 }}
+        >
+          <strong>Read-only discovery:</strong> Rebel inspects
+          accessible API documentation and permitted metadata.
+          Discovery will not initiate payments, modify accounts
+          or execute administrative operations. Results are
+          recorded as <ProvBadge p="unverified" /> until confirmed.
         </div>
-      )}
-    </section>
-  );
+
+        {discoveryError && (
+          <div className="connect-error" role="alert">
+            {discoveryError}
+          </div>
+        )}
+
+        {scanNote && (
+          <div className="connect-warning" role="status">
+            {scanNote}
+          </div>
+        )}
+
+        {discovery && (
+          <div className="connect-discovery-result">
+            <h3 className="connect-section-title">
+              Saved API inventory
+            </h3>
+
+            <div className="connect-muted">
+              Target: {discovery.target_url}
+            </div>
+
+            {discovery.discovery_mode && (
+              <div
+                className="connect-muted"
+                style={{ marginTop: 6 }}
+              >
+                Discovery mode: {discovery.discovery_mode}
+              </div>
+            )}
+
+            {discovery.validated_origin && (
+              <div
+                className="connect-muted"
+                style={{ marginTop: 6 }}
+              >
+                Validated origin: {discovery.validated_origin}
+              </div>
+            )}
+
+            <div
+              className="connect-muted"
+              style={{ marginTop: 6 }}
+            >
+              Discovered: {formatDate(discovery.created_at)}
+            </div>
+
+            <div style={{ marginTop: 12 }}>
+              <span
+                className={`connect-status ${
+                  discovery.reachable ? "active" : ""
+                }`}
+              >
+                {discovery.reachable
+                  ? "Host reachable"
+                  : "Host not reachable"}
+              </span>
+            </div>
+
+            <h3 style={{ fontSize: 14, marginTop: 20 }}>
+              API documentation
+            </h3>
+
+            {discovery.documentation_urls.length === 0 ? (
+              <p className="connect-muted">
+                No API documentation was discovered.
+              </p>
+            ) : (
+              discovery.documentation_urls.map((url) => (
+                <a
+                  key={url}
+                  className="connect-doc-link"
+                  href={url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  {url}
+                </a>
+              ))
+            )}
+
+            <h3 style={{ fontSize: 14, marginTop: 20 }}>
+              Authentication methods
+            </h3>
+
+            <p className="connect-muted">
+              {discovery.authentication_methods.length
+                ? discovery.authentication_methods.join(", ")
+                : "Not determined"}
+            </p>
+
+            <h3 style={{ fontSize: 14, marginTop: 20 }}>
+              Discovered endpoints
+            </h3>
+
+            {discovery.endpoints.length === 0 ? (
+              <p className="connect-muted">
+                No endpoints have been identified yet.
+              </p>
+            ) : (
+              <>
+                <div
+                  className="connect-chips"
+                  role="group"
+                  aria-label="Filter endpoints by approval status"
+                >
+                  <button
+                    type="button"
+                    className="connect-chip"
+                    aria-pressed={endpointFilter === "all"}
+                    onClick={() => setEndpointFilter("all")}
+                  >
+                    All ({apiCounts.total})
+                  </button>
+
+                  {(
+                    ["pending", "approved", "rejected"] as const
+                  ).map((status) => (
+                    <button
+                      type="button"
+                      key={status}
+                      className="connect-chip"
+                      aria-pressed={endpointFilter === status}
+                      onClick={() => setEndpointFilter(status)}
+                    >
+                      {APPROVAL_LABEL[status]} ({apiCounts[status]})
+                    </button>
+                  ))}
+                </div>
+
+                {!canDecide && (
+                  <div className="connect-warning">
+                    Only the institution owner can approve or
+                    reject endpoints.
+                  </div>
+                )}
+
+                {decisionError && (
+                  <div className="connect-error" role="alert">
+                    {decisionError}
+                  </div>
+                )}
+
+                {visibleEndpoints.length === 0 && (
+                  <p className="connect-muted">
+                    No endpoints match this filter.
+                  </p>
+                )}
+
+                {visibleEndpoints.map((endpoint) => {
+                  const busy = decidingId === endpoint.endpoint_id;
+
+                  return (
+                    <div
+                      className="connect-endpoint"
+                      key={endpoint.endpoint_id}
+                      style={{
+                        display: "flex",
+                        gap: 12,
+                        alignItems: "flex-start",
+                        flexWrap: "wrap",
+                      }}
+                    >
+                      <span className="connect-method">
+                        {endpoint.method.toUpperCase()}
+                      </span>
+
+                      <span style={{ flex: "1 1 260px", minWidth: 0 }}>
+                        <div className="connect-endpoint-path">
+                          {endpoint.path}
+                        </div>
+
+                        <div className="connect-muted">
+                          {endpoint.description ||
+                            endpoint.category ||
+                            "No description available"}
+                        </div>
+
+                        <div
+                          className="connect-muted"
+                          style={{ fontSize: 11 }}
+                        >
+                          {endpoint.read_only
+                            ? "Read-only"
+                            : "Write or state-changing"}
+                          {" · "}
+                          {endpoint.classification_source ===
+                          "declared"
+                            ? "declared in the bank's specification"
+                            : "inferred from the HTTP method"}
+                        </div>
+
+                        {!endpoint.approvable &&
+                          endpoint.approval_blocker && (
+                            <div
+                              className="connect-muted"
+                              style={{ fontSize: 11 }}
+                            >
+                              Cannot be approved:{" "}
+                              {endpoint.approval_blocker}
+                            </div>
+                          )}
+
+                        {endpoint.decided_at && (
+                          <div
+                            className="connect-muted"
+                            style={{ fontSize: 11 }}
+                          >
+                            Decided {formatDate(endpoint.decided_at)}
+                          </div>
+                        )}
+                      </span>
+
+                      <span
+                        style={{
+                          display: "flex",
+                          gap: 8,
+                          alignItems: "center",
+                          flexWrap: "wrap",
+                        }}
+                      >
+                        <span
+                          className={`connect-status ${
+                            APPROVAL_CLASS[endpoint.approval_status]
+                          }`}
+                        >
+                          {APPROVAL_LABEL[endpoint.approval_status]}
+                        </span>
+
+                        <button
+                          type="button"
+                          className="connect-button small"
+                          disabled={
+                            !canDecide ||
+                            busy ||
+                            !endpoint.approvable ||
+                            endpoint.approval_status === "approved"
+                          }
+                          title={
+                            endpoint.approval_blocker ?? undefined
+                          }
+                          onClick={() =>
+                            void decideEndpoint(endpoint, "approved")
+                          }
+                        >
+                          Approve
+                        </button>
+
+                        <button
+                          type="button"
+                          className="connect-button secondary small"
+                          disabled={
+                            !canDecide ||
+                            busy ||
+                            endpoint.approval_status === "rejected"
+                          }
+                          onClick={() =>
+                            void decideEndpoint(endpoint, "rejected")
+                          }
+                        >
+                          Reject
+                        </button>
+                      </span>
+                    </div>
+                  );
+                })}
+              </>
+            )}
+
+            {discovery.warnings.map((warning, index) => (
+              <div className="connect-warning" key={index}>
+                {warning}
+              </div>
+            ))}
+
+            <p
+              className="connect-muted"
+              style={{ marginTop: 15 }}
+            >
+              {apiCounts.approved} approved ·{" "}
+              {apiCounts.pending} pending ·{" "}
+              {apiCounts.rejected} rejected
+            </p>
+
+            <div className="connect-info">
+              <strong>Approval is a decision, not access.</strong>{" "}
+              Approving an endpoint records that the institution
+              permits Rebel to use it for read-only collection.
+              Only read-only operations can be approved; the server
+              refuses anything else. Bank authentication, encrypted
+              credentials and data collection are the next stage,
+              so approved APIs stay unverified until data is
+              actually collected. Every decision is recorded in an
+              audit trail.
+            </div>
+
+            <div className="connect-actions-row">
+              <button
+                type="button"
+                className="connect-button"
+                onClick={() => setTab("report")}
+              >
+                Continue to report
+              </button>
+
+              <button
+                type="button"
+                className="connect-button secondary"
+                onClick={() => setTab("evidence")}
+              >
+                Add more evidence
+              </button>
+            </div>
+          </div>
+        )}
+      </section>
+    );
+  };
 
   const renderEvidence = () => (
     <>
@@ -3156,7 +3506,10 @@ export default function ConnectWorkspace() {
         <button
           className="connect-button"
           style={{ marginTop: 18 }}
-          onClick={() => void loadWorkspace()}
+          onClick={() => {
+            void loadWorkspace();
+            void loadInventory();
+          }}
         >
           Refresh workspace
         </button>

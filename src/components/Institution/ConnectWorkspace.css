@@ -1,34 +1,34 @@
-/* Rebel Institution Connect — standalone stylesheet
+/* Rebel Institution Connect — standalone stylesheet (light theme)
    Import from ConnectWorkspace.tsx with: import "./ConnectWorkspace.css";
 */
 
 .connect-page {
-  --c-bg: #07111f;
-  --c-bg-soft: #0b1929;
-  --c-card: #102237;
-  --c-card-raised: #142b42;
-  --c-line: #213b52;
-  --c-line-strong: #34516a;
-  --c-text: #e8f1f7;
-  --c-muted: #9bb0c2;
-  --c-accent: #27d3bd;
-  --c-accent-strong: #13b9a6;
-  --c-accent-soft: #103b40;
-  --c-verified: #4adea5;
-  --c-verified-bg: #123b36;
-  --c-document: #7db8ff;
-  --c-document-bg: #183b60;
-  --c-declared: #f5c66b;
-  --c-declared-bg: #49391e;
-  --c-unverified: #b4c2d0;
-  --c-unverified-bg: #26384a;
-  --c-danger: #ff8585;
-  --c-danger-bg: #48252d;
+  --c-bg: #f3f6f9;
+  --c-bg-soft: #eaf0f5;
+  --c-card: #ffffff;
+  --c-card-raised: #f8fafc;
+  --c-line: #dde5ec;
+  --c-line-strong: #c3cfda;
+  --c-text: #14222e;
+  --c-muted: #5b6b7a;
+  --c-accent: #0b7f73;
+  --c-accent-strong: #086b61;
+  --c-accent-soft: #dcf3ef;
+  --c-verified: #0f7a52;
+  --c-verified-bg: #dff5ea;
+  --c-document: #1f5fae;
+  --c-document-bg: #e1edfb;
+  --c-declared: #8a5a00;
+  --c-declared-bg: #fdf0d2;
+  --c-unverified: #4b5a69;
+  --c-unverified-bg: #e9eef3;
+  --c-danger: #b42323;
+  --c-danger-bg: #fde8e8;
   min-height: 100vh;
   padding: 76px 30px 56px;
   background:
-    radial-gradient(ellipse at 78% 0%, rgba(39, 211, 189, .09), transparent 32%),
-    linear-gradient(180deg, #07111f 0%, #091625 100%);
+    radial-gradient(ellipse at 78% 0%, rgba(11, 127, 115, .07), transparent 34%),
+    linear-gradient(180deg, #f3f6f9 0%, #edf2f7 100%);
   color: var(--c-text);
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   box-sizing: border-box;
@@ -53,7 +53,7 @@
 }
 
 .connect-title {
-  color: #f4f8fb;
+  color: #0d1a24;
   font-size: clamp(30px, 4vw, 42px);
   line-height: 1.12;
   letter-spacing: -.035em;
@@ -73,11 +73,11 @@
 
 .connect-card {
   min-width: 0;
-  background: linear-gradient(145deg, rgba(20, 43, 66, .98), rgba(13, 32, 51, .98));
+  background: var(--c-card);
   border: 1px solid var(--c-line);
   border-radius: 15px;
   padding: 22px;
-  box-shadow: 0 12px 32px rgba(0, 0, 0, .14);
+  box-shadow: 0 1px 2px rgba(20, 34, 46, .04), 0 8px 24px rgba(20, 34, 46, .06);
 }
 
 .connect-card + .connect-card { margin-top: 16px; }
@@ -91,7 +91,7 @@
 }
 
 .connect-metric {
-  color: #f4fbff;
+  color: #0d1a24;
   font-size: 32px;
   font-weight: 780;
   letter-spacing: -.04em;
@@ -99,7 +99,7 @@
 }
 
 .connect-section-title {
-  color: #f1f7fb;
+  color: #0d1a24;
   font-size: 17px;
   font-weight: 720;
   letter-spacing: -.015em;
@@ -126,7 +126,7 @@
 .connect-table-wrap {
   width: 100%;
   overflow-x: auto;
-  border: 1px solid rgba(52, 81, 106, .55);
+  border: 1px solid var(--c-line);
   border-radius: 10px;
 }
 
@@ -140,8 +140,8 @@
 .connect-table th {
   text-align: left;
   padding: 12px 11px;
-  color: #a9bfd0;
-  background: #0b1b2c;
+  color: #4a5c6c;
+  background: #f1f5f9;
   border-bottom: 1px solid var(--c-line);
   font-size: 10px;
   font-weight: 750;
@@ -151,9 +151,9 @@
 }
 
 .connect-table td {
-  color: #dce8f0;
+  color: #1d2f3d;
   padding: 13px 11px;
-  border-bottom: 1px solid rgba(33, 59, 82, .72);
+  border-bottom: 1px solid var(--c-line);
   vertical-align: top;
 }
 
@@ -162,7 +162,7 @@
 }
 
 .connect-table tbody tr:hover {
-  background: rgba(39, 211, 189, .045);
+  background: rgba(11, 127, 115, .045);
 }
 
 .connect-table tbody tr:last-child td { border-bottom: 0; }
@@ -172,10 +172,10 @@
   align-items: center;
   gap: 6px;
   padding: 5px 9px;
-  border: 1px solid rgba(180, 194, 208, .12);
+  border: 1px solid var(--c-line-strong);
   border-radius: 999px;
-  background: #26384a;
-  color: #c4d1dc;
+  background: #eef2f6;
+  color: #4b5a69;
   font-size: 11px;
   font-weight: 650;
   white-space: nowrap;
@@ -184,19 +184,19 @@
 .connect-status.active,
 .connect-status.complete {
   background: var(--c-verified-bg);
-  border-color: rgba(74, 222, 165, .2);
+  border-color: rgba(15, 122, 82, .25);
   color: var(--c-verified);
 }
 
 .connect-status.in_progress {
   background: var(--c-document-bg);
-  border-color: rgba(125, 184, 255, .2);
+  border-color: rgba(31, 95, 174, .25);
   color: var(--c-document);
 }
 
 .connect-status.optional {
-  background: #1b2b3c;
-  color: #9aabba;
+  background: #f3f6f9;
+  color: #6b7b8a;
   border: 1px dashed var(--c-line-strong);
 }
 
@@ -205,8 +205,8 @@
   border-radius: 8px;
   padding: 11px 16px;
   background: var(--c-accent);
-  color: #06211f;
-  font-weight: 800;
+  color: #ffffff;
+  font-weight: 700;
   font-size: 13px;
   cursor: pointer;
   white-space: nowrap;
@@ -214,29 +214,30 @@
 }
 
 .connect-button:hover:not(:disabled) {
-  filter: brightness(1.07);
+  filter: brightness(1.08);
   transform: translateY(-1px);
-  box-shadow: 0 7px 20px rgba(39, 211, 189, .13);
+  box-shadow: 0 6px 16px rgba(11, 127, 115, .2);
 }
 
 .connect-button:active:not(:disabled) { transform: translateY(0); }
 
 .connect-button:disabled {
-  opacity: .48;
+  opacity: .45;
   cursor: not-allowed;
   box-shadow: none;
   transform: none;
 }
 
 .connect-button.secondary {
-  background: #142b42;
-  color: #dce8f0;
-  border-color: #3a5871;
+  background: #ffffff;
+  color: #1d2f3d;
+  border-color: var(--c-line-strong);
 }
 
 .connect-button.secondary:hover:not(:disabled) {
-  background: #1a3852;
-  border-color: #5a7890;
+  background: #f1f5f9;
+  border-color: #9fb0bf;
+  box-shadow: none;
 }
 
 .connect-button.small {
@@ -255,9 +256,11 @@
 }
 
 .connect-button.link:hover:not(:disabled) {
-  color: #ffaaaa;
+  color: #8f1818;
   text-decoration: underline;
   transform: none;
+  filter: none;
+  box-shadow: none;
 }
 
 .connect-input,
@@ -271,16 +274,16 @@
   margin: 7px 0 15px;
   font: inherit;
   font-size: 14px;
-  background: #091a2a;
+  background: #ffffff;
   color: var(--c-text);
   transition: border-color .15s ease, box-shadow .15s ease;
 }
 
 .connect-input::placeholder,
-.connect-textarea::placeholder { color: #71889b; }
+.connect-textarea::placeholder { color: #8a9aa8; }
 
 .connect-select option {
-  background: #102237;
+  background: #ffffff;
   color: var(--c-text);
 }
 
@@ -295,7 +298,7 @@
 .connect-textarea:focus {
   outline: none;
   border-color: var(--c-accent);
-  box-shadow: 0 0 0 3px rgba(39, 211, 189, .12);
+  box-shadow: 0 0 0 3px rgba(11, 127, 115, .15);
 }
 
 .connect-button:focus-visible,
@@ -306,9 +309,9 @@
 }
 
 .connect-error {
-  color: #ffc1c1;
+  color: #8f1818;
   background: var(--c-danger-bg);
-  border: 1px solid rgba(255, 133, 133, .28);
+  border: 1px solid rgba(180, 35, 35, .28);
   padding: 13px 15px;
   border-radius: 9px;
   margin: 14px 0;
@@ -316,9 +319,9 @@
 }
 
 .connect-info {
-  color: #b9e8e3;
-  background: rgba(16, 59, 64, .68);
-  border: 1px solid rgba(39, 211, 189, .25);
+  color: #0a5d55;
+  background: #e4f5f2;
+  border: 1px solid rgba(11, 127, 115, .25);
   padding: 14px 15px;
   border-radius: 9px;
   line-height: 1.6;
@@ -326,9 +329,9 @@
 }
 
 .connect-warning {
-  color: #f5d99e;
-  background: rgba(73, 57, 30, .62);
-  border: 1px solid rgba(245, 198, 107, .25);
+  color: #7a4f00;
+  background: #fff6dd;
+  border: 1px solid rgba(138, 90, 0, .25);
   padding: 12px 14px;
   border-radius: 8px;
   margin-top: 10px;
@@ -338,7 +341,7 @@
 
 .connect-hash {
   font: 11px ui-monospace, SFMono-Regular, Menlo, monospace;
-  color: #9db4c5;
+  color: #52667a;
   word-break: break-all;
 }
 
@@ -361,12 +364,11 @@
   gap: 12px;
   padding: 14px 8px;
   border-bottom: 1px solid var(--c-line);
-  cursor: pointer;
   border-radius: 7px;
   transition: background .15s ease;
 }
 
-.connect-endpoint:hover { background: rgba(39, 211, 189, .045); }
+.connect-endpoint:hover { background: rgba(11, 127, 115, .04); }
 .connect-endpoint input { margin-top: 5px; accent-color: var(--c-accent); }
 
 .connect-method {
@@ -381,7 +383,7 @@
 }
 
 .connect-endpoint-path {
-  color: #e3edf4;
+  color: #14222e;
   font: 12px ui-monospace, SFMono-Regular, Menlo, monospace;
   overflow-wrap: anywhere;
 }
@@ -389,12 +391,12 @@
 .connect-doc-link {
   display: block;
   margin-top: 8px;
-  color: #70c8ff;
+  color: #1666b0;
   font-size: 13px;
   overflow-wrap: anywhere;
 }
 
-.connect-doc-link:hover { color: #a5ddff; }
+.connect-doc-link:hover { color: #0d4d8c; }
 
 .connect-discovery-result {
   margin-top: 22px;
@@ -410,7 +412,7 @@
   overflow-x: auto;
   border-bottom: 1px solid var(--c-line-strong);
   scrollbar-width: thin;
-  scrollbar-color: #34516a transparent;
+  scrollbar-color: #c3cfda transparent;
 }
 
 .connect-tab {
@@ -430,8 +432,8 @@
 }
 
 .connect-tab:hover {
-  color: #e8f1f7;
-  background: rgba(39, 211, 189, .045);
+  color: #14222e;
+  background: rgba(11, 127, 115, .05);
 }
 
 .connect-tab[aria-selected="true"] {
@@ -448,8 +450,8 @@
   height: 19px;
   padding: 1px 6px;
   border-radius: 10px;
-  background: #203d51;
-  color: #b8d0df;
+  background: #e3eaf0;
+  color: #3d5164;
   font-size: 10px;
   text-align: center;
 }
@@ -467,26 +469,26 @@
   width: 116px;
   height: 116px;
   border-radius: 50%;
-  background: conic-gradient(var(--c-accent) calc(var(--p) * 1%), #263d50 0);
+  background: conic-gradient(var(--c-accent) calc(var(--p) * 1%), #dde5ec 0);
   display: grid;
   place-items: center;
   flex-shrink: 0;
-  box-shadow: 0 0 28px rgba(39, 211, 189, .08);
+  box-shadow: 0 0 24px rgba(11, 127, 115, .08);
 }
 
 .connect-ring-inner {
   width: 88px;
   height: 88px;
   border-radius: 50%;
-  background: #102237;
-  border: 1px solid rgba(255, 255, 255, .04);
+  background: #ffffff;
+  border: 1px solid var(--c-line);
   display: grid;
   place-items: center;
   text-align: center;
 }
 
 .connect-ring-value {
-  color: #f3fbff;
+  color: #0d1a24;
   font-size: 26px;
   font-weight: 800;
   line-height: 1;
@@ -503,7 +505,7 @@
 
 .connect-bar {
   height: 7px;
-  background: #263d50;
+  background: #e1e8ee;
   border-radius: 5px;
   overflow: hidden;
 }
@@ -511,12 +513,12 @@
 .connect-bar > span {
   display: block;
   height: 100%;
-  background: linear-gradient(90deg, #12b8a5, #54e0c9);
+  background: linear-gradient(90deg, #0b7f73, #20b3a2);
   border-radius: 5px;
   transition: width .3s ease;
 }
 
-.connect-bar.done > span { background: #39ce91; }
+.connect-bar.done > span { background: #1f9d6b; }
 .connect-bar.stack { display: flex; height: 9px; }
 .connect-bar.stack > span { border-radius: 0; }
 
@@ -540,13 +542,13 @@
   place-items: center;
   font-weight: 800;
   font-size: 12px;
-  background: #263d50;
-  color: #b8c9d6;
+  background: #e3eaf0;
+  color: #4a5c6c;
 }
 
-.connect-stage-num.complete { background: #1b765b; color: #e0fff2; }
-.connect-stage-num.in_progress { background: #126c70; color: #cffff8; }
-.connect-stage-title { color: #eaf3f8; font-weight: 750; font-size: 14px; }
+.connect-stage-num.complete { background: #1f9d6b; color: #ffffff; }
+.connect-stage-num.in_progress { background: var(--c-accent); color: #ffffff; }
+.connect-stage-title { color: #0d1a24; font-weight: 750; font-size: 14px; }
 .connect-stage-body { min-width: 0; }
 .connect-stage-body .connect-bar { margin-top: 11px; max-width: 440px; }
 .connect-stage-side {
@@ -556,7 +558,7 @@
   gap: 8px;
   align-items: flex-end;
 }
-.connect-pct { color: #e7f5f7; font-weight: 800; font-size: 18px; }
+.connect-pct { color: #0d1a24; font-weight: 800; font-size: 18px; }
 
 /* Action and issue lists */
 .connect-list { list-style: none; margin: 0; padding: 0; }
@@ -569,7 +571,7 @@
   align-items: flex-start;
 }
 .connect-list li:last-child { border-bottom: 0; }
-.connect-list-title { color: #e8f1f7; font-weight: 700; font-size: 13px; line-height: 1.45; }
+.connect-list-title { color: #14222e; font-weight: 700; font-size: 13px; line-height: 1.45; }
 
 .connect-issue-tag {
   flex-shrink: 0;
@@ -614,10 +616,10 @@
   border: 1px dashed var(--c-line-strong);
 }
 
-.connect-seg.verified { background: #39ce91; }
-.connect-seg.document { background: #62aaff; }
-.connect-seg.declared { background: #eebc59; }
-.connect-seg.unverified { background: #8195a8; }
+.connect-seg.verified { background: #1f9d6b; }
+.connect-seg.document { background: #3b82d6; }
+.connect-seg.declared { background: #e0a21e; }
+.connect-seg.unverified { background: #8fa1b2; }
 
 .connect-legend {
   display: grid;
@@ -644,47 +646,47 @@
 
 .connect-chip {
   border: 1px solid var(--c-line-strong);
-  background: #0d2032;
+  background: #ffffff;
   border-radius: 999px;
   padding: 6px 12px;
   font: inherit;
   font-size: 11px;
   font-weight: 650;
   cursor: pointer;
-  color: #bdcbd6;
+  color: #3d5164;
   transition: border-color .15s ease, background .15s ease, color .15s ease;
 }
 
 .connect-chip:hover {
   border-color: var(--c-accent);
-  color: #eafffb;
+  color: var(--c-accent-strong);
 }
 
 .connect-chip[aria-pressed="true"] {
-  background: #124b4b;
-  color: #aafff1;
-  border-color: #1a958a;
+  background: var(--c-accent-soft);
+  color: var(--c-accent-strong);
+  border-color: var(--c-accent);
 }
 
 /* File dropzone */
 .connect-dropzone {
-  border: 2px dashed #3b5c73;
+  border: 2px dashed #b3c2cf;
   border-radius: 11px;
   padding: 28px 16px;
   text-align: center;
-  background: rgba(7, 24, 39, .68);
+  background: #f8fafc;
   cursor: pointer;
   transition: background .16s ease, border-color .16s ease, transform .16s ease;
 }
 
 .connect-dropzone.over,
 .connect-dropzone:hover {
-  background: rgba(16, 59, 64, .55);
+  background: #e9f6f4;
   border-color: var(--c-accent);
 }
 
 .connect-dropzone.over { transform: scale(1.005); }
-.connect-dropzone strong { display: block; color: #eaf7f8; font-size: 14px; margin-bottom: 6px; }
+.connect-dropzone strong { display: block; color: #14222e; font-size: 14px; margin-bottom: 6px; }
 
 .connect-file-types {
   display: flex;
@@ -698,13 +700,13 @@
   font: 700 10px ui-monospace, SFMono-Regular, Menlo, monospace;
   padding: 4px 8px;
   border-radius: 5px;
-  background: #20394e;
-  color: #b8cbd9;
+  background: #e6edf3;
+  color: #44586a;
 }
 
 .connect-label {
   display: block;
-  color: #dce8f0;
+  color: #1d2f3d;
   font-size: 12px;
   font-weight: 700;
 }
@@ -740,17 +742,17 @@
 }
 
 .connect-planned {
-  border: 1px dashed #45647b;
+  border: 1px dashed #aebfcd;
   border-radius: 10px;
   padding: 17px;
-  background: rgba(7, 24, 39, .55);
+  background: #f8fafc;
 }
 
 /* Initial workspace registration */
 .connect-page form { min-width: 0; }
 
 .connect-page h2,
-.connect-page h3 { color: #edf5fa; }
+.connect-page h3 { color: #0d1a24; }
 
 .connect-page a { text-decoration: none; }
 .connect-page a:hover { text-decoration: underline; }
