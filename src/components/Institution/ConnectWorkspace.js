@@ -21,6 +21,40 @@ async function readResponse(response) {
     }
     return data;
 }
+const CONNECTORS = [
+    {
+        id: "direct_api",
+        title: "Direct API",
+        receives: "Access to approved API endpoints",
+        use: "Account, transaction and control data",
+        next: "Rebel reads the bank's published OpenAPI documentation. You approve which read-only endpoints Rebel may use.",
+        available: true,
+    },
+    {
+        id: "open_banking",
+        title: "Open Banking / OAuth",
+        receives: "Institution-approved, scoped access",
+        use: "Consent-based financial data sharing",
+        next: "The institution grants scoped OAuth access to specific data.",
+        available: false,
+    },
+    {
+        id: "sftp",
+        title: "Secure file exchange (SFTP)",
+        receives: "Scheduled CSV, XML or other data files",
+        use: "Statements, transaction exports and audit records",
+        next: "The institution delivers files on a schedule to a Rebel-controlled drop.",
+        available: false,
+    },
+    {
+        id: "private_network",
+        title: "Private enterprise connection",
+        receives: "Access through VPN or private network",
+        use: "Large-bank and enterprise integrations",
+        next: "A private network link is arranged with Rebel onboarding.",
+        available: false,
+    },
+];
 const DOMAINS = [
     {
         id: "governance",
@@ -91,8 +125,6 @@ const PROVENANCE_ORDER = [
     "unverified",
 ];
 const EMPTY_STORE = {
-    discovery: null,
-    selected: [],
     files: [],
     declarations: [],
     report: null,
@@ -126,6 +158,21 @@ function formatDate(value) {
         return "—";
     const d = new Date(value);
     return Number.isNaN(d.getTime()) ? "—" : d.toLocaleString();
+}
+function countApis(d) {
+    const counts = { pending: 0, approved: 0, rejected: 0, total: 0 };
+    if (!d)
+        return counts;
+    for (const endpoint of d.endpoints) {
+        counts.total += 1;
+        if (endpoint.approval_status === "approved")
+            counts.approved += 1;
+        else if (endpoint.approval_status === "rejected")
+            counts.rejected += 1;
+        else
+            counts.pending += 1;
+    }
+    return counts;
 }
 function shortHash(h) {
     return h.length > 20 ? `${h.slice(0, 10)}…${h.slice(-8)}` : h;
@@ -539,6 +586,17 @@ const STATUS_LABEL = {
     not_started: "Not started",
     optional: "Optional · later",
 };
+const APPROVAL_LABEL = {
+    pending: "Pending approval",
+    approved: "Approved",
+    rejected: "Rejected",
+};
+// Reuses the existing connect-status colour variants.
+const APPROVAL_CLASS = {
+    pending: "in_progress",
+    approved: "complete",
+    rejected: "not_started",
+};
 /* ------------------------------------------------------------------ */
 /* Small presentational components                                     */
 /* ------------------------------------------------------------------ */
@@ -574,7 +632,8 @@ export default function ConnectWorkspace() {
     const [discovering, setDiscovering] = useState(false);
     const [discoveryError, setDiscoveryError] = useState("");
     const [tab, setTab] = useState("overview");
-    // This data remains browser-local until server persistence endpoints exist.
+    // Documents and declarations remain browser-local. API discovery and
+    // endpoint approvals are persisted by the server.
     const [store, setStore] = useState(EMPTY_STORE);
     const [hydratedInstitutionId, setHydratedInstitutionId] = useState(null);
     const institutionId = workspace?.institution.institution_id ?? null;
@@ -588,8 +647,14 @@ export default function ConnectWorkspace() {
     const [declBy, setDeclBy] = useState("");
     const [filter, setFilter] = useState("all");
     const fileInput = useRef(null);
-    const discovery = store.discovery;
-    const selectedEndpoints = store.selected;
+    const [discovery, setDiscovery] = useState(null);
+    const [decidingId, setDecidingId] = useState(null);
+    const [decisionError, setDecisionError] = useState("");
+    const [scanNote, setScanNote] = useState("");
+    const [endpointFilter, setEndpointFilter] = useState("all");
+    const [connectors, setConnectors] = useState([]);
+    const [connectorBusy, setConnectorBusy] = useState(null);
+    const [connectorError, setConnectorError] = useState("");
     /* ---------------- persistence ---------------- */
     useEffect(() => {
         if (!institutionId) {
@@ -603,14 +668,15 @@ export default function ConnectWorkspace() {
             const saved = raw
                 ? JSON.parse(raw)
                 : {};
+            // Discovery results and selections from earlier versions were kept
+            // in this browser. They are intentionally not carried over: the
+            // server is now the only source of truth for the API inventory.
             setStore({
-                ...EMPTY_STORE,
-                ...saved,
-                selected: Array.isArray(saved.selected) ? saved.selected : [],
                 files: Array.isArray(saved.files) ? saved.files : [],
                 declarations: Array.isArray(saved.declarations)
                     ? saved.declarations
                     : [],
+                report: saved.report ?? null,
             });
         }
         catch {
@@ -637,8 +703,9 @@ export default function ConnectWorkspace() {
         }));
     }, []);
     /* ---------------- server calls ---------------- */
-    const loadWorkspace = useCallback(async () => {
-        setLoading(true);
+    const loadWorkspace = useCallback(async (silent = false) => {
+        if (!silent)
+            setLoading(true);
         setError("");
         try {
             const response = await connectRequest("/connect/workspace");
@@ -661,6 +728,44 @@ export default function ConnectWorkspace() {
     useEffect(() => {
         void loadWorkspace();
     }, [loadWorkspace]);
+    const loadInventory = useCallback(async () => {
+        try {
+            const response = await connectRequest("/connect/discovery/latest");
+            const data = await readResponse(response);
+            setDiscovery(data.discovery);
+        }
+        catch (err) {
+            setDiscoveryError(err instanceof Error
+                ? err.message
+                : "Could not load the saved API inventory.");
+        }
+    }, []);
+    useEffect(() => {
+        if (!institutionId) {
+            setDiscovery(null);
+            return;
+        }
+        void loadInventory();
+    }, [institutionId, loadInventory]);
+    const loadConnectors = useCallback(async () => {
+        try {
+            const response = await connectRequest("/connect/connectors");
+            const data = await readResponse(response);
+            setConnectors(data.connectors);
+        }
+        catch (err) {
+            setConnectorError(err instanceof Error
+                ? err.message
+                : "Could not load connection methods.");
+        }
+    }, []);
+    useEffect(() => {
+        if (!institutionId) {
+            setConnectors([]);
+            return;
+        }
+        void loadConnectors();
+    }, [institutionId, loadConnectors]);
     const createWorkspace = async (event) => {
         event.preventDefault();
         setCreating(true);
@@ -692,7 +797,8 @@ export default function ConnectWorkspace() {
         event.preventDefault();
         setDiscovering(true);
         setDiscoveryError("");
-        patchStore({ discovery: null, selected: [] });
+        setDecisionError("");
+        setScanNote("");
         try {
             const submittedUrl = sourceUrl.trim();
             const parsed = new URL(submittedUrl);
@@ -704,6 +810,11 @@ export default function ConnectWorkspace() {
             }
             if (parsed.search || parsed.hash) {
                 throw new Error("Remove URL query parameters and fragments before discovery.");
+            }
+            const approvedBefore = countApis(discovery).approved;
+            if (approvedBefore > 0 &&
+                !window.confirm(`A new scan replaces the current inventory. Your ${approvedBefore} approved API${approvedBefore === 1 ? "" : "s"} will not carry over and every newly discovered endpoint starts as pending. Continue?`)) {
+                return;
             }
             const response = await connectRequest("/connect/discovery/scan", {
                 method: "POST",
@@ -717,12 +828,15 @@ export default function ConnectWorkspace() {
                 }),
             });
             const result = await readResponse(response);
-            patchStore({
-                discovery: result,
-                selected: result.endpoints
-                    .filter((endpoint) => endpoint.read_only)
-                    .map((endpoint) => `${endpoint.method.toUpperCase()}:${endpoint.path}`),
-            });
+            if (result.endpoints.length > 0 || !discovery) {
+                setDiscovery(result);
+                setEndpointFilter("all");
+            }
+            else {
+                // An empty scan must not hide an inventory already under review.
+                setScanNote(`The latest scan found no endpoints, so your existing inventory was kept. ${result.warnings[0] ?? ""}`.trim());
+            }
+            void loadWorkspace(true);
         }
         catch (err) {
             setDiscoveryError(err instanceof Error
@@ -733,13 +847,60 @@ export default function ConnectWorkspace() {
             setDiscovering(false);
         }
     };
-    const toggleEndpoint = (key) => {
-        setStore((current) => ({
-            ...current,
-            selected: current.selected.includes(key)
-                ? current.selected.filter((item) => item !== key)
-                : [...current.selected, key],
-        }));
+    const setConnector = async (type, select) => {
+        setConnectorBusy(type);
+        setConnectorError("");
+        try {
+            const response = await connectRequest(`/connect/connectors/${type}`, select
+                ? {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({}),
+                }
+                : { method: "DELETE" });
+            await readResponse(response);
+            await loadConnectors();
+            return true;
+        }
+        catch (err) {
+            setConnectorError(err instanceof Error
+                ? err.message
+                : "Could not save the connection method.");
+            return false;
+        }
+        finally {
+            setConnectorBusy(null);
+        }
+    };
+    const decideEndpoint = async (endpoint, decision) => {
+        setDecidingId(endpoint.endpoint_id);
+        setDecisionError("");
+        try {
+            const response = await connectRequest(`/connect/discovery/endpoints/${encodeURIComponent(endpoint.endpoint_id)}/decision`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ decision }),
+            });
+            // The server's record replaces the local one.
+            const updated = await readResponse(response);
+            setDiscovery((current) => current
+                ? {
+                    ...current,
+                    endpoints: current.endpoints.map((item) => item.endpoint_id === updated.endpoint_id
+                        ? updated
+                        : item),
+                }
+                : current);
+            void loadWorkspace(true);
+        }
+        catch (err) {
+            setDecisionError(err instanceof Error
+                ? err.message
+                : "Could not record the decision.");
+        }
+        finally {
+            setDecidingId(null);
+        }
     };
     /* ---------------- evidence intake ---------------- */
     const handleFiles = async (list) => {
@@ -880,40 +1041,52 @@ export default function ConnectWorkspace() {
                 removeId: declaration.id,
             });
         });
-        if (store.discovery) {
+        if (discovery) {
             const host = (() => {
                 try {
-                    return new URL(store.discovery.target_url).host;
+                    return new URL(discovery.target_url).host;
                 }
                 catch {
-                    return store.discovery.target_url;
+                    return discovery.target_url;
                 }
             })();
-            if (store.discovery.endpoints.length > 0) {
+            const counts = countApis(discovery);
+            if (counts.total > 0) {
                 output.push({
-                    id: "u-discovery-inventory",
+                    id: `u-discovery-inventory-${discovery.discovery_id}-${counts.approved}-${counts.pending}-${counts.rejected}`,
                     domain: "api_inventory",
                     provenance: "unverified",
-                    title: `${store.discovery.endpoints.length} endpoints discovered`,
+                    title: `${counts.total} endpoints discovered`,
                     source: host,
-                    at: new Date().toISOString(),
-                    detail: "From API discovery. Not yet confirmed by the institution.",
+                    at: discovery.created_at ?? "",
+                    detail: `${counts.approved} approved · ${counts.pending} pending · ${counts.rejected} rejected. From API discovery; not yet confirmed by the institution.`,
                 });
             }
-            if (store.discovery.authentication_methods.length > 0) {
+            if (counts.approved > 0) {
+                output.push({
+                    id: `u-discovery-approved-${discovery.discovery_id}-${counts.approved}`,
+                    domain: "api_inventory",
+                    provenance: "unverified",
+                    title: `${counts.approved} read-only API${counts.approved === 1 ? "" : "s"} approved, awaiting collection`,
+                    source: host,
+                    at: discovery.created_at ?? "",
+                    detail: "Approved by the institution owner. No data has been collected, so nothing here is verified.",
+                });
+            }
+            if (discovery.authentication_methods.length > 0) {
                 output.push({
                     id: "u-discovery-auth",
                     domain: "authentication",
                     provenance: "unverified",
                     title: "Authentication methods discovered",
                     source: host,
-                    at: new Date().toISOString(),
-                    detail: store.discovery.authentication_methods.join(", "),
+                    at: discovery.created_at ?? "",
+                    detail: discovery.authentication_methods.join(", "),
                 });
             }
         }
         return output;
-    }, [workspace, store]);
+    }, [workspace, store, discovery]);
     const stableItems = useMemo(() => items, [items]);
     const domainStats = useMemo(() => {
         return DOMAINS.map((domain) => {
@@ -940,6 +1113,7 @@ export default function ConnectWorkspace() {
     /* ---------------- stages, issues and actions ---------------- */
     const hasSystems = Boolean(discovery && discovery.endpoints.length > 0) ||
         store.files.some((file) => file.kind === "spec");
+    const apiCounts = useMemo(() => countApis(discovery), [discovery]);
     const stages = useMemo(() => {
         if (!workspace)
             return [];
@@ -1044,6 +1218,24 @@ export default function ConnectWorkspace() {
                 tab: "discover",
             });
         }
+        if (apiCounts.pending > 0) {
+            list.push({
+                id: "apis-pending",
+                severity: "blocker",
+                title: `${apiCounts.pending} discovered API${apiCounts.pending === 1 ? "" : "s"} awaiting approval`,
+                detail: "Approve or reject each endpoint. Nothing is accessed or collected from a pending API.",
+                tab: "discover",
+            });
+        }
+        if (apiCounts.approved > 0) {
+            list.push({
+                id: "apis-approved-uncollected",
+                severity: "warning",
+                title: `${apiCounts.approved} approved API${apiCounts.approved === 1 ? "" : "s"} not yet collected`,
+                detail: "Bank authentication and collection are not configured, so approved APIs remain unverified.",
+                tab: "discover",
+            });
+        }
         if (metrics.agents_total === 0) {
             list.push({
                 id: "no-agent",
@@ -1076,6 +1268,7 @@ export default function ConnectWorkspace() {
         workspace,
         stableItems.length,
         discovery,
+        apiCounts,
         reportStale,
     ]);
     const missingDomains = domainStats
@@ -1087,6 +1280,15 @@ export default function ConnectWorkspace() {
             return [];
         const metrics = workspace.metrics;
         const list = [];
+        if (connectors.length === 0) {
+            list.push({
+                id: "choose-connection",
+                title: "Choose how your institution connects",
+                detail: "Direct API, Open Banking / OAuth, secure file exchange (SFTP) or a private enterprise connection.",
+                tab: "connect",
+                cta: "Choose method",
+            });
+        }
         if (!hasSystems) {
             list.push({
                 id: "systems",
@@ -1108,6 +1310,15 @@ export default function ConnectWorkspace() {
                 detail: "A short declaration is enough to start. Back it with a document later.",
                 tab: "evidence",
                 cta: "Add evidence",
+            });
+        }
+        if (apiCounts.pending > 0) {
+            list.push({
+                id: "review-apis",
+                title: `Review ${apiCounts.pending} discovered API${apiCounts.pending === 1 ? "" : "s"}`,
+                detail: "Approve the read-only endpoints Rebel may use and reject the rest.",
+                tab: "discover",
+                cta: "Review APIs",
             });
         }
         if (stableItems.length > 0 &&
@@ -1146,6 +1357,8 @@ export default function ConnectWorkspace() {
         hasSystems,
         missingDomains,
         stableItems.length,
+        apiCounts.pending,
+        connectors.length,
         store.report,
         reportStale,
     ]);
@@ -1181,6 +1394,11 @@ export default function ConnectWorkspace() {
         "Unclassified";
     const tabs = [
         { id: "overview", label: "Overview" },
+        {
+            id: "connect",
+            label: "Connect",
+            count: connectors.length,
+        },
         { id: "discover", label: "Discover APIs" },
         {
             id: "evidence",
@@ -1193,7 +1411,7 @@ export default function ConnectWorkspace() {
     const renderStages = () => (_jsxs("section", { className: "connect-card", "aria-labelledby": "stages-title", children: [_jsx("h2", { className: "connect-section-title", id: "stages-title", children: "Onboarding stages" }), stages.map((stage, index) => (_jsxs("div", { className: "connect-stage", children: [_jsx("div", { className: `connect-stage-num ${stage.status}`, "aria-hidden": "true", children: stage.status === "complete" ? "✓" : index + 1 }), _jsxs("div", { className: "connect-stage-body", children: [_jsx("div", { className: "connect-stage-title", children: stage.title }), _jsx("div", { className: "connect-muted connect-small", style: { marginTop: 3, lineHeight: 1.5 }, children: stage.description }), _jsx("div", { className: "connect-small", style: { marginTop: 6 }, children: stage.detail }), stage.status !== "optional" && (_jsx(ProgressBar, { value: stage.progress }))] }), _jsxs("div", { className: "connect-stage-side", children: [stage.status !== "optional" && (_jsxs("span", { className: "connect-pct", children: [stage.progress, "%"] })), _jsx("span", { className: `connect-status ${stage.status}`, children: STATUS_LABEL[stage.status] }), stage.id !== "institution" && (_jsx("button", { type: "button", className: "connect-button secondary small", onClick: () => setTab(stage.tab), children: stage.status === "optional"
                                     ? "Learn more"
                                     : "Open" }))] })] }, stage.id)))] }));
-    const renderOverview = () => (_jsxs(_Fragment, { children: [_jsxs("section", { className: "connect-card connect-hero", children: [_jsx("div", { className: "connect-ring", style: { ["--p"]: overall }, role: "img", "aria-label": `Overall onboarding ${overall} percent complete`, children: _jsx("div", { className: "connect-ring-inner", children: _jsxs("div", { children: [_jsxs("div", { className: "connect-ring-value", children: [overall, "%"] }), _jsx("div", { className: "connect-ring-label", children: "onboarded" })] }) }) }), _jsxs("div", { children: [_jsx("div", { className: "connect-eyebrow", children: "ACTIVE INSTITUTION" }), _jsx("h2", { style: { fontSize: 23, margin: "9px 0" }, children: workspace?.institution.name }), _jsxs("div", { className: "connect-muted", children: [workspace?.institution.jurisdiction, " · ", workspace?.institution.role] }), _jsxs("div", { className: "connect-muted", style: { fontSize: 11, marginTop: 8 }, children: ["Institution ID:", " ", workspace?.institution.institution_id] }), _jsx("p", { className: "connect-muted connect-small", style: {
+    const renderOverview = () => (_jsxs(_Fragment, { children: [connectors.length === 0 && (_jsxs("section", { className: "connect-card", style: { marginBottom: 16 }, "aria-labelledby": "choose-title", children: [_jsx("div", { className: "connect-eyebrow", children: "START HERE" }), _jsx("h2", { className: "connect-section-title", id: "choose-title", style: { marginTop: 6 }, children: "How will your institution connect to Rebel?" }), _jsx("p", { className: "connect-muted", style: { lineHeight: 1.6, marginTop: 0 }, children: "Pick the connection method that fits your institution: a direct API, Open Banking / OAuth, secure file exchange (SFTP) or a private enterprise connection." }), _jsx("button", { type: "button", className: "connect-button", onClick: () => setTab("connect"), children: "Choose a connection method" })] })), _jsxs("section", { className: "connect-card connect-hero", children: [_jsx("div", { className: "connect-ring", style: { ["--p"]: overall }, role: "img", "aria-label": `Overall onboarding ${overall} percent complete`, children: _jsx("div", { className: "connect-ring-inner", children: _jsxs("div", { children: [_jsxs("div", { className: "connect-ring-value", children: [overall, "%"] }), _jsx("div", { className: "connect-ring-label", children: "onboarded" })] }) }) }), _jsxs("div", { children: [_jsx("div", { className: "connect-eyebrow", children: "ACTIVE INSTITUTION" }), _jsx("h2", { style: { fontSize: 23, margin: "9px 0" }, children: workspace?.institution.name }), _jsxs("div", { className: "connect-muted", children: [workspace?.institution.jurisdiction, " · ", workspace?.institution.role] }), _jsxs("div", { className: "connect-muted", style: { fontSize: 11, marginTop: 8 }, children: ["Institution ID:", " ", workspace?.institution.institution_id] }), _jsx("p", { className: "connect-muted connect-small", style: {
                                     marginTop: 12,
                                     lineHeight: 1.55,
                                     maxWidth: 560,
@@ -1202,25 +1420,80 @@ export default function ConnectWorkspace() {
                                                     : `${total} item${total === 1 ? "" : "s"}` })] }), _jsx(ProvenanceStack, { counts: counts }), total === 0 && (_jsx("div", { className: "connect-muted connect-small", style: { marginTop: 6 }, children: domain.hint }))] }, domain.id))), _jsx("div", { className: "connect-muted connect-small", style: { marginTop: 10 }, children: unverifiedDomains > 0
                                     ? `${unverifiedDomains} covered area${unverifiedDomains === 1 ? " has" : "s have"} no verified evidence yet.`
                                     : "All covered areas include verified evidence." })] }), _jsxs("section", { className: "connect-card", "aria-labelledby": "prov-title", children: [_jsx("h2", { className: "connect-section-title", id: "prov-title", children: "Evidence quality" }), _jsx(ProvenanceStack, { counts: totals }), _jsx("div", { className: "connect-legend", children: PROVENANCE_ORDER.map((p) => (_jsxs("div", { className: "connect-legend-item", children: [_jsx(ProvBadge, { p: p }), " ", _jsx("strong", { style: { color: "var(--c-text)" }, children: totals[p] }), _jsx("div", { children: PROVENANCE[p].help })] }, p))) })] })] }), renderStages()] }));
-    const renderDiscover = () => (_jsxs("section", { className: "connect-card", "aria-labelledby": "disc-title", children: [_jsxs("div", { style: {
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                    gap: 12,
-                    marginBottom: 12,
-                }, children: [_jsxs("div", { children: [_jsx("div", { className: "connect-eyebrow", children: "SYSTEM INTEGRATION" }), _jsx("h2", { className: "connect-section-title", id: "disc-title", style: { marginTop: 6, marginBottom: 0 }, children: "Discover Banking APIs" })] }), _jsx("span", { className: "connect-status", children: "API discovery" })] }), _jsxs("p", { className: "connect-muted", style: { lineHeight: 1.6 }, children: ["Enter an institution's banking portal, API gateway, or a direct OpenAPI/Swagger specification URL. Rebel will inspect accessible API documentation and identify potential read-only data endpoints. No public URL? Upload a specification on the", " ", _jsx("button", { type: "button", className: "connect-button link", style: {
-                            color: "var(--c-accent)",
-                            padding: 0,
-                        }, onClick: () => setTab("evidence"), children: "Evidence tab" }), "."] }), _jsxs("form", { onSubmit: discoverAPIs, children: [_jsx("label", { className: "connect-label", htmlFor: "bank-source-url", children: "Banking portal URL or direct OpenAPI specification URL" }), _jsxs("div", { className: "connect-discovery-input", children: [_jsx("input", { id: "bank-source-url", className: "connect-input", type: "url", value: sourceUrl, onChange: (event) => setSourceUrl(event.target.value), placeholder: "https://bank.example.com/openapi.json", required: true }), _jsx("button", { className: "connect-button", type: "submit", disabled: discovering, children: discovering ? "Discovering..." : "Discover APIs" })] })] }), _jsxs("div", { className: "connect-info", style: { marginTop: 16 }, children: [_jsx("strong", { children: "Read-only discovery:" }), " Rebel inspects accessible API documentation and permitted metadata. Discovery will not initiate payments, modify accounts or execute administrative operations. Results are recorded as ", _jsx(ProvBadge, { p: "unverified" }), " until confirmed."] }), discoveryError && (_jsx("div", { className: "connect-error", role: "alert", children: discoveryError })), discovery && (_jsxs("div", { className: "connect-discovery-result", children: [_jsx("h3", { className: "connect-section-title", children: "Discovery results" }), _jsxs("div", { className: "connect-muted", children: ["Target: ", discovery.target_url] }), discovery.discovery_mode && (_jsxs("div", { className: "connect-muted", style: { marginTop: 6 }, children: ["Discovery mode: ", discovery.discovery_mode] })), discovery.validated_origin && (_jsxs("div", { className: "connect-muted", style: { marginTop: 6 }, children: ["Validated origin: ", discovery.validated_origin] })), _jsx("div", { style: { marginTop: 12 }, children: _jsx("span", { className: `connect-status ${discovery.reachable ? "active" : ""}`, children: discovery.reachable
-                                ? "Host reachable"
-                                : "Host not reachable" }) }), _jsx("h3", { style: { fontSize: 14, marginTop: 20 }, children: "API documentation" }), discovery.documentation_urls.length === 0 ? (_jsx("p", { className: "connect-muted", children: "No API documentation was discovered." })) : (discovery.documentation_urls.map((url) => (_jsx("a", { className: "connect-doc-link", href: url, target: "_blank", rel: "noopener noreferrer", children: url }, url)))), _jsx("h3", { style: { fontSize: 14, marginTop: 20 }, children: "Authentication methods" }), _jsx("p", { className: "connect-muted", children: discovery.authentication_methods.length
-                            ? discovery.authentication_methods.join(", ")
-                            : "Not determined" }), _jsx("h3", { style: { fontSize: 14, marginTop: 20 }, children: "Discovered endpoints" }), discovery.endpoints.length === 0 ? (_jsx("p", { className: "connect-muted", children: "No endpoints have been identified yet." })) : (discovery.endpoints.map((endpoint) => {
-                        const key = `${endpoint.method.toUpperCase()}:${endpoint.path}`;
-                        return (_jsxs("label", { className: "connect-endpoint", children: [_jsx("input", { type: "checkbox", checked: selectedEndpoints.includes(key), disabled: !endpoint.read_only, onChange: () => toggleEndpoint(key) }), _jsx("span", { className: "connect-method", children: endpoint.method.toUpperCase() }), _jsxs("span", { children: [_jsx("div", { className: "connect-endpoint-path", children: endpoint.path }), _jsx("div", { className: "connect-muted", children: endpoint.description ||
-                                                endpoint.category ||
-                                                "No description available" }), !endpoint.read_only && (_jsx("div", { className: "connect-muted", style: { fontSize: 11 }, children: "Not eligible for read-only selection" }))] })] }, key));
-                    })), discovery.warnings.map((warning, index) => (_jsx("div", { className: "connect-warning", children: warning }, index))), _jsxs("p", { className: "connect-muted", style: { marginTop: 15 }, children: ["Selected read-only endpoints:", " ", selectedEndpoints.length] }), _jsx("div", { className: "connect-info", children: "Endpoint selection is currently a discovery preview. Connection approval, authentication configuration and evidence collection will be implemented as the next integration stage. Selections are saved in this browser for this institution." }), _jsxs("div", { className: "connect-actions-row", children: [_jsx("button", { type: "button", className: "connect-button", onClick: () => setTab("report"), children: "Continue to report" }), _jsx("button", { type: "button", className: "connect-button secondary", onClick: () => setTab("evidence"), children: "Add more evidence" })] })] }))] }));
+    const renderConnect = () => {
+        const isOwner = workspace?.institution.role === "owner";
+        return (_jsxs("section", { className: "connect-card", "aria-labelledby": "connect-title", children: [_jsx("div", { className: "connect-eyebrow", children: "CONNECTION METHOD" }), _jsx("h2", { className: "connect-section-title", id: "connect-title", style: { marginTop: 6 }, children: "How will your institution connect?" }), _jsx("p", { className: "connect-muted", style: { lineHeight: 1.6, marginTop: 0 }, children: "Choose one or more ways for your bank or institution to connect to Rebel. Rebel never needs access to your internal source code. Nothing is accessed until you approve it." }), !isOwner && (_jsx("div", { className: "connect-warning", children: "Only the institution owner can choose connection methods." })), connectorError && (_jsx("div", { className: "connect-error", role: "alert", children: connectorError })), _jsx("div", { className: "connect-grid-2", children: CONNECTORS.map((option, index) => {
+                        const selected = connectors.some((item) => item.connector_type === option.id);
+                        const busy = connectorBusy === option.id;
+                        return (_jsxs("div", { className: "connect-card", style: {
+                                background: "var(--c-card-raised)",
+                                boxShadow: "none",
+                                borderColor: selected
+                                    ? "var(--c-accent)"
+                                    : undefined,
+                            }, children: [_jsxs("div", { style: {
+                                        display: "flex",
+                                        gap: 12,
+                                        alignItems: "center",
+                                    }, children: [_jsx("div", { className: `connect-stage-num ${selected ? "complete" : ""}`, "aria-hidden": "true", children: index + 1 }), _jsx("strong", { style: { fontSize: 15 }, children: option.title }), _jsx("span", { className: `connect-status ${option.available ? "active" : "optional"}`, style: { marginLeft: "auto" }, children: option.available ? "Available" : "Planned" })] }), _jsxs("div", { style: { marginTop: 14 }, children: [_jsx("div", { className: "connect-card-label", children: "What Rebel receives" }), _jsx("div", { style: { marginTop: 4, fontSize: 13 }, children: option.receives })] }), _jsxs("div", { style: { marginTop: 12 }, children: [_jsx("div", { className: "connect-card-label", children: "Typical use" }), _jsx("div", { style: { marginTop: 4, fontSize: 13 }, children: option.use })] }), _jsx("p", { className: "connect-muted connect-small", style: { lineHeight: 1.55 }, children: option.next }), !option.available && (_jsx("div", { className: "connect-warning", children: "Rebel cannot receive data this way yet. Choosing it records your preference so onboarding can follow up. Nothing is connected." })), _jsxs("div", { className: "connect-actions-row", children: [option.available ? (_jsx("button", { type: "button", className: "connect-button", disabled: busy || !isOwner, onClick: async () => {
+                                                if (selected ||
+                                                    (await setConnector(option.id, true))) {
+                                                    setTab("discover");
+                                                }
+                                            }, children: selected
+                                                ? "Continue to API discovery"
+                                                : "Set up Direct API" })) : (_jsx("button", { type: "button", className: "connect-button", disabled: busy || !isOwner || selected, onClick: () => void setConnector(option.id, true), children: selected ? "Interest recorded" : "Register interest" })), selected && (_jsx("button", { type: "button", className: "connect-button secondary", disabled: busy || !isOwner, onClick: () => void setConnector(option.id, false), children: "Remove" }))] })] }, option.id));
+                    }) })] }));
+    };
+    const renderDiscover = () => {
+        const canDecide = workspace?.institution.role === "owner";
+        const visibleEndpoints = discovery
+            ? discovery.endpoints.filter((endpoint) => endpointFilter === "all" ||
+                endpoint.approval_status === endpointFilter)
+            : [];
+        return (_jsxs("section", { className: "connect-card", "aria-labelledby": "disc-title", children: [_jsxs("div", { style: {
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        gap: 12,
+                        marginBottom: 12,
+                    }, children: [_jsxs("div", { children: [_jsx("div", { className: "connect-eyebrow", children: "SYSTEM INTEGRATION" }), _jsx("h2", { className: "connect-section-title", id: "disc-title", style: { marginTop: 6, marginBottom: 0 }, children: "Discover Banking APIs" })] }), _jsx("span", { className: "connect-status", children: "API discovery" })] }), _jsxs("p", { className: "connect-muted", style: { lineHeight: 1.6 }, children: ["Enter an institution's banking portal, API gateway, or a direct OpenAPI/Swagger specification URL. Rebel reads the bank's published API documentation, saves what it finds against your institution and classifies each operation. Every discovered endpoint starts as pending approval. No public URL? Upload a specification on the", " ", _jsx("button", { type: "button", className: "connect-button link", style: {
+                                color: "var(--c-accent)",
+                                padding: 0,
+                            }, onClick: () => setTab("evidence"), children: "Evidence tab" }), "."] }), _jsxs("form", { onSubmit: discoverAPIs, children: [_jsx("label", { className: "connect-label", htmlFor: "bank-source-url", children: "Banking portal URL or direct OpenAPI specification URL" }), _jsxs("div", { className: "connect-discovery-input", children: [_jsx("input", { id: "bank-source-url", className: "connect-input", type: "url", value: sourceUrl, onChange: (event) => setSourceUrl(event.target.value), placeholder: "https://bank.example.com/openapi.json", required: true }), _jsx("button", { className: "connect-button", type: "submit", disabled: discovering || !canDecide, title: canDecide
+                                        ? undefined
+                                        : "Only the institution owner can run discovery", children: discovering ? "Discovering..." : "Discover APIs" })] })] }), _jsxs("div", { className: "connect-info", style: { marginTop: 16 }, children: [_jsx("strong", { children: "Read-only discovery:" }), " Rebel inspects accessible API documentation and permitted metadata. Discovery will not initiate payments, modify accounts or execute administrative operations. Results are recorded as ", _jsx(ProvBadge, { p: "unverified" }), " until confirmed."] }), discoveryError && (_jsx("div", { className: "connect-error", role: "alert", children: discoveryError })), scanNote && (_jsx("div", { className: "connect-warning", role: "status", children: scanNote })), discovery && (_jsxs("div", { className: "connect-discovery-result", children: [_jsx("h3", { className: "connect-section-title", children: "Saved API inventory" }), _jsxs("div", { className: "connect-muted", children: ["Target: ", discovery.target_url] }), discovery.discovery_mode && (_jsxs("div", { className: "connect-muted", style: { marginTop: 6 }, children: ["Discovery mode: ", discovery.discovery_mode] })), discovery.validated_origin && (_jsxs("div", { className: "connect-muted", style: { marginTop: 6 }, children: ["Validated origin: ", discovery.validated_origin] })), _jsxs("div", { className: "connect-muted", style: { marginTop: 6 }, children: ["Discovered: ", formatDate(discovery.created_at)] }), _jsx("div", { style: { marginTop: 12 }, children: _jsx("span", { className: `connect-status ${discovery.reachable ? "active" : ""}`, children: discovery.reachable
+                                    ? "Host reachable"
+                                    : "Host not reachable" }) }), _jsx("h3", { style: { fontSize: 14, marginTop: 20 }, children: "API documentation" }), discovery.documentation_urls.length === 0 ? (_jsx("p", { className: "connect-muted", children: "No API documentation was discovered." })) : (discovery.documentation_urls.map((url) => (_jsx("a", { className: "connect-doc-link", href: url, target: "_blank", rel: "noopener noreferrer", children: url }, url)))), _jsx("h3", { style: { fontSize: 14, marginTop: 20 }, children: "Authentication methods" }), _jsx("p", { className: "connect-muted", children: discovery.authentication_methods.length
+                                ? discovery.authentication_methods.join(", ")
+                                : "Not determined" }), _jsx("h3", { style: { fontSize: 14, marginTop: 20 }, children: "Discovered endpoints" }), discovery.endpoints.length === 0 ? (_jsx("p", { className: "connect-muted", children: "No endpoints have been identified yet." })) : (_jsxs(_Fragment, { children: [_jsxs("div", { className: "connect-chips", role: "group", "aria-label": "Filter endpoints by approval status", children: [_jsxs("button", { type: "button", className: "connect-chip", "aria-pressed": endpointFilter === "all", onClick: () => setEndpointFilter("all"), children: ["All (", apiCounts.total, ")"] }), ["pending", "approved", "rejected"].map((status) => (_jsxs("button", { type: "button", className: "connect-chip", "aria-pressed": endpointFilter === status, onClick: () => setEndpointFilter(status), children: [APPROVAL_LABEL[status], " (", apiCounts[status], ")"] }, status)))] }), !canDecide && (_jsx("div", { className: "connect-warning", children: "Only the institution owner can approve or reject endpoints." })), decisionError && (_jsx("div", { className: "connect-error", role: "alert", children: decisionError })), visibleEndpoints.length === 0 && (_jsx("p", { className: "connect-muted", children: "No endpoints match this filter." })), visibleEndpoints.map((endpoint) => {
+                                    const busy = decidingId === endpoint.endpoint_id;
+                                    return (_jsxs("div", { className: "connect-endpoint", style: {
+                                            display: "flex",
+                                            gap: 12,
+                                            alignItems: "flex-start",
+                                            flexWrap: "wrap",
+                                        }, children: [_jsx("span", { className: "connect-method", children: endpoint.method.toUpperCase() }), _jsxs("span", { style: { flex: "1 1 260px", minWidth: 0 }, children: [_jsx("div", { className: "connect-endpoint-path", children: endpoint.path }), _jsx("div", { className: "connect-muted", children: endpoint.description ||
+                                                            endpoint.category ||
+                                                            "No description available" }), _jsxs("div", { className: "connect-muted", style: { fontSize: 11 }, children: [endpoint.read_only
+                                                                ? "Read-only"
+                                                                : "Write or state-changing", " · ", endpoint.classification_source ===
+                                                                "declared"
+                                                                ? "declared in the bank's specification"
+                                                                : "inferred from the HTTP method"] }), !endpoint.approvable &&
+                                                        endpoint.approval_blocker && (_jsxs("div", { className: "connect-muted", style: { fontSize: 11 }, children: ["Cannot be approved:", " ", endpoint.approval_blocker] })), endpoint.decided_at && (_jsxs("div", { className: "connect-muted", style: { fontSize: 11 }, children: ["Decided ", formatDate(endpoint.decided_at)] }))] }), _jsxs("span", { style: {
+                                                    display: "flex",
+                                                    gap: 8,
+                                                    alignItems: "center",
+                                                    flexWrap: "wrap",
+                                                }, children: [_jsx("span", { className: `connect-status ${APPROVAL_CLASS[endpoint.approval_status]}`, children: APPROVAL_LABEL[endpoint.approval_status] }), _jsx("button", { type: "button", className: "connect-button small", disabled: !canDecide ||
+                                                            busy ||
+                                                            !endpoint.approvable ||
+                                                            endpoint.approval_status === "approved", title: endpoint.approval_blocker ?? undefined, onClick: () => void decideEndpoint(endpoint, "approved"), children: "Approve" }), _jsx("button", { type: "button", className: "connect-button secondary small", disabled: !canDecide ||
+                                                            busy ||
+                                                            endpoint.approval_status === "rejected", onClick: () => void decideEndpoint(endpoint, "rejected"), children: "Reject" })] })] }, endpoint.endpoint_id));
+                                })] })), discovery.warnings.map((warning, index) => (_jsx("div", { className: "connect-warning", children: warning }, index))), _jsxs("p", { className: "connect-muted", style: { marginTop: 15 }, children: [apiCounts.approved, " approved \u00B7", " ", apiCounts.pending, " pending \u00B7", " ", apiCounts.rejected, " rejected"] }), _jsxs("div", { className: "connect-info", children: [_jsx("strong", { children: "Approval is a decision, not access." }), " ", "Approving an endpoint records that the institution permits Rebel to use it for read-only collection. Only read-only operations can be approved; the server refuses anything else. Bank authentication, encrypted credentials and data collection are the next stage, so approved APIs stay unverified until data is actually collected. Every decision is recorded in an audit trail."] }), _jsxs("div", { className: "connect-actions-row", children: [_jsx("button", { type: "button", className: "connect-button", onClick: () => setTab("report"), children: "Continue to report" }), _jsx("button", { type: "button", className: "connect-button secondary", onClick: () => setTab("evidence"), children: "Add more evidence" })] })] }))] }));
+    };
     const renderEvidence = () => (_jsxs(_Fragment, { children: [_jsxs("div", { className: "connect-grid-2", children: [_jsxs("section", { className: "connect-card", "aria-labelledby": "upload-title", children: [_jsx("h2", { className: "connect-section-title", id: "upload-title", children: "Upload documents or data" }), _jsx("label", { className: "connect-label", htmlFor: "intake-domain", children: "Applies to" }), _jsx(DomainSelect, { id: "intake-domain", value: intakeDomain, onChange: setIntakeDomain }), _jsxs("div", { className: `connect-dropzone ${dragOver ? "over" : ""}`, role: "button", tabIndex: 0, "aria-label": "Upload files", onClick: () => fileInput.current?.click(), onKeyDown: (event) => {
                                     if (event.key === "Enter" ||
                                         event.key === " ") {
@@ -1278,11 +1551,14 @@ export default function ConnectWorkspace() {
                                         lineHeight: 1.6,
                                         margin: "10px 0 0",
                                         fontSize: 13,
-                                    }, children: ["When Vestro sandbox credentials are available, approved read-only endpoints from discovery become scheduled collectors. Their submissions arrive as", " ", _jsx(ProvBadge, { p: "verified" }), " evidence and the preliminary report refreshes automatically as new data lands. Nothing on this page needs to change to adopt it: existing declarations and documents stay in place and are progressively superseded by verified data."] })] })] }), _jsxs("div", { className: "connect-info", style: { marginTop: 16 }, children: [_jsx("strong", { children: "Integration workflow:" }), " Discover the institution's existing APIs, approve the required read-only resources, configure authentication and then provision an institution-specific data collector."] }), _jsx("button", { className: "connect-button", style: { marginTop: 18 }, onClick: () => void loadWorkspace(), children: "Refresh workspace" })] }));
+                                    }, children: ["When Vestro sandbox credentials are available, approved read-only endpoints from discovery become scheduled collectors. Their submissions arrive as", " ", _jsx(ProvBadge, { p: "verified" }), " evidence and the preliminary report refreshes automatically as new data lands. Nothing on this page needs to change to adopt it: existing declarations and documents stay in place and are progressively superseded by verified data."] })] })] }), _jsxs("div", { className: "connect-info", style: { marginTop: 16 }, children: [_jsx("strong", { children: "Integration workflow:" }), " Discover the institution's existing APIs, approve the required read-only resources, configure authentication and then provision an institution-specific data collector."] }), _jsx("button", { className: "connect-button", style: { marginTop: 18 }, onClick: () => {
+                        void loadWorkspace();
+                        void loadInventory();
+                    }, children: "Refresh workspace" })] }));
     };
     /* ---------------- page ---------------- */
     return (_jsx("main", { className: "connect-page", children: _jsxs("div", { className: "connect-wrap", children: [_jsx("div", { className: "connect-eyebrow", children: "REBEL // INSTITUTIONAL CONNECT" }), _jsx("h1", { className: "connect-title", children: "Institution Connect" }), _jsx("p", { className: "connect-subtitle", children: "Connect your institution's existing systems to Rebel. Start with whatever you have: an API URL, a spec, a PDF, a spreadsheet or a simple statement. Build toward verified evidence and compliance assessments at your own pace." }), error && (_jsx("div", { className: "connect-error", role: "alert", children: error })), loading ? (_jsx("div", { className: "connect-card", style: { marginTop: 25 }, children: "Loading institution workspace\u2026" })) : workspace ? (_jsxs(_Fragment, { children: [_jsx("div", { className: "connect-tabs", role: "tablist", "aria-label": "Workspace sections", children: tabs.map((item) => (_jsxs("button", { type: "button", role: "tab", id: `tab-${item.id}`, "aria-selected": tab === item.id, "aria-controls": `panel-${item.id}`, className: "connect-tab", onClick: () => setTab(item.id), children: [item.label, typeof item.count === "number" &&
-                                        item.count > 0 && (_jsx("span", { className: "connect-tab-count", children: item.count }))] }, item.id))) }), _jsxs("div", { role: "tabpanel", id: `panel-${tab}`, "aria-labelledby": `tab-${tab}`, children: [tab === "overview" && renderOverview(), tab === "discover" && renderDiscover(), tab === "evidence" && renderEvidence(), tab === "report" && renderReport(), tab === "agents" && renderAgents()] })] })) : (_jsxs("section", { className: "connect-card", style: {
+                                        item.count > 0 && (_jsx("span", { className: "connect-tab-count", children: item.count }))] }, item.id))) }), _jsxs("div", { role: "tabpanel", id: `panel-${tab}`, "aria-labelledby": `tab-${tab}`, children: [tab === "overview" && renderOverview(), tab === "connect" && renderConnect(), tab === "discover" && renderDiscover(), tab === "evidence" && renderEvidence(), tab === "report" && renderReport(), tab === "agents" && renderAgents()] })] })) : (_jsxs("section", { className: "connect-card", style: {
                         maxWidth: 650,
                         marginTop: 25,
                     }, children: [_jsx("div", { className: "connect-eyebrow", children: "INITIALIZE WORKSPACE" }), _jsx("h2", { style: {

@@ -112,8 +112,71 @@ async function readResponse<T>(response: Response): Promise<T> {
 /* ------------------------------------------------------------------ */
 
 type Provenance = "verified" | "document" | "declared" | "unverified";
-type TabId = "overview" | "discover" | "evidence" | "report" | "agents";
+type TabId =
+  | "overview"
+  | "connect"
+  | "discover"
+  | "evidence"
+  | "report"
+  | "agents";
 type FileKind = "spec" | "document" | "import";
+
+type ConnectorType =
+  | "direct_api"
+  | "open_banking"
+  | "sftp"
+  | "private_network";
+
+interface SavedConnector {
+  connector_type: ConnectorType;
+  status: string;
+  note?: string | null;
+  created_at: string;
+}
+
+interface ConnectorOption {
+  id: ConnectorType;
+  title: string;
+  receives: string;
+  use: string;
+  next: string;
+  available: boolean;
+}
+
+const CONNECTORS: ConnectorOption[] = [
+  {
+    id: "direct_api",
+    title: "Direct API",
+    receives: "Access to approved API endpoints",
+    use: "Account, transaction and control data",
+    next: "Rebel reads the bank's published OpenAPI documentation. You approve which read-only endpoints Rebel may use.",
+    available: true,
+  },
+  {
+    id: "open_banking",
+    title: "Open Banking / OAuth",
+    receives: "Institution-approved, scoped access",
+    use: "Consent-based financial data sharing",
+    next: "The institution grants scoped OAuth access to specific data.",
+    available: false,
+  },
+  {
+    id: "sftp",
+    title: "Secure file exchange (SFTP)",
+    receives: "Scheduled CSV, XML or other data files",
+    use: "Statements, transaction exports and audit records",
+    next: "The institution delivers files on a schedule to a Rebel-controlled drop.",
+    available: false,
+  },
+  {
+    id: "private_network",
+    title: "Private enterprise connection",
+    receives: "Access through VPN or private network",
+    use: "Large-bank and enterprise integrations",
+    next: "A private network link is arranged with Rebel onboarding.",
+    available: false,
+  },
+];
 
 interface Domain {
   id: string;
@@ -1063,6 +1126,9 @@ export default function ConnectWorkspace() {
   const [endpointFilter, setEndpointFilter] = useState<
     ApprovalStatus | "all"
   >("all");
+  const [connectors, setConnectors] = useState<SavedConnector[]>([]);
+  const [connectorBusy, setConnectorBusy] = useState<string | null>(null);
+  const [connectorError, setConnectorError] = useState("");
 
   /* ---------------- persistence ---------------- */
 
@@ -1181,6 +1247,32 @@ export default function ConnectWorkspace() {
     void loadInventory();
   }, [institutionId, loadInventory]);
 
+  const loadConnectors = useCallback(async () => {
+    try {
+      const response = await connectRequest("/connect/connectors");
+      const data = await readResponse<{ connectors: SavedConnector[] }>(
+        response
+      );
+
+      setConnectors(data.connectors);
+    } catch (err) {
+      setConnectorError(
+        err instanceof Error
+          ? err.message
+          : "Could not load connection methods."
+      );
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!institutionId) {
+      setConnectors([]);
+      return;
+    }
+
+    void loadConnectors();
+  }, [institutionId, loadConnectors]);
+
   const createWorkspace = async (
     event: FormEvent<HTMLFormElement>
   ) => {
@@ -1296,6 +1388,40 @@ export default function ConnectWorkspace() {
       );
     } finally {
       setDiscovering(false);
+    }
+  };
+
+  const setConnector = async (
+    type: ConnectorType,
+    select: boolean
+  ): Promise<boolean> => {
+    setConnectorBusy(type);
+    setConnectorError("");
+
+    try {
+      const response = await connectRequest(
+        `/connect/connectors/${type}`,
+        select
+          ? {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({}),
+            }
+          : { method: "DELETE" }
+      );
+
+      await readResponse<unknown>(response);
+      await loadConnectors();
+      return true;
+    } catch (err) {
+      setConnectorError(
+        err instanceof Error
+          ? err.message
+          : "Could not save the connection method."
+      );
+      return false;
+    } finally {
+      setConnectorBusy(null);
     }
   };
 
@@ -1891,6 +2017,17 @@ export default function ConnectWorkspace() {
     const metrics = workspace.metrics;
     const list: Action[] = [];
 
+    if (connectors.length === 0) {
+      list.push({
+        id: "choose-connection",
+        title: "Choose how your institution connects",
+        detail:
+          "Direct API, Open Banking / OAuth, secure file exchange (SFTP) or a private enterprise connection.",
+        tab: "connect",
+        cta: "Choose method",
+      });
+    }
+
     if (!hasSystems) {
       list.push({
         id: "systems",
@@ -1975,6 +2112,7 @@ export default function ConnectWorkspace() {
     missingDomains,
     stableItems.length,
     apiCounts.pending,
+    connectors.length,
     store.report,
     reportStale,
   ]);
@@ -2046,6 +2184,11 @@ export default function ConnectWorkspace() {
     count?: number;
   }[] = [
     { id: "overview", label: "Overview" },
+    {
+      id: "connect",
+      label: "Connect",
+      count: connectors.length,
+    },
     { id: "discover", label: "Discover APIs" },
     {
       id: "evidence",
@@ -2130,6 +2273,41 @@ export default function ConnectWorkspace() {
 
   const renderOverview = () => (
     <>
+      {connectors.length === 0 && (
+        <section
+          className="connect-card"
+          style={{ marginBottom: 16 }}
+          aria-labelledby="choose-title"
+        >
+          <div className="connect-eyebrow">START HERE</div>
+
+          <h2
+            className="connect-section-title"
+            id="choose-title"
+            style={{ marginTop: 6 }}
+          >
+            How will your institution connect to Rebel?
+          </h2>
+
+          <p
+            className="connect-muted"
+            style={{ lineHeight: 1.6, marginTop: 0 }}
+          >
+            Pick the connection method that fits your institution:
+            a direct API, Open Banking / OAuth, secure file
+            exchange (SFTP) or a private enterprise connection.
+          </p>
+
+          <button
+            type="button"
+            className="connect-button"
+            onClick={() => setTab("connect")}
+          >
+            Choose a connection method
+          </button>
+        </section>
+      )}
+
       <section className="connect-card connect-hero">
         <div
           className="connect-ring"
@@ -2372,6 +2550,183 @@ export default function ConnectWorkspace() {
       {renderStages()}
     </>
   );
+
+  const renderConnect = () => {
+    const isOwner = workspace?.institution.role === "owner";
+
+    return (
+      <section
+        className="connect-card"
+        aria-labelledby="connect-title"
+      >
+        <div className="connect-eyebrow">CONNECTION METHOD</div>
+
+        <h2
+          className="connect-section-title"
+          id="connect-title"
+          style={{ marginTop: 6 }}
+        >
+          How will your institution connect?
+        </h2>
+
+        <p
+          className="connect-muted"
+          style={{ lineHeight: 1.6, marginTop: 0 }}
+        >
+          Choose one or more ways for your bank or institution to
+          connect to Rebel. Rebel never needs access to your
+          internal source code. Nothing is accessed until you
+          approve it.
+        </p>
+
+        {!isOwner && (
+          <div className="connect-warning">
+            Only the institution owner can choose connection
+            methods.
+          </div>
+        )}
+
+        {connectorError && (
+          <div className="connect-error" role="alert">
+            {connectorError}
+          </div>
+        )}
+
+        <div className="connect-grid-2">
+          {CONNECTORS.map((option, index) => {
+            const selected = connectors.some(
+              (item) => item.connector_type === option.id
+            );
+            const busy = connectorBusy === option.id;
+
+            return (
+              <div
+                className="connect-card"
+                key={option.id}
+                style={{
+                  background: "var(--c-card-raised)",
+                  boxShadow: "none",
+                  borderColor: selected
+                    ? "var(--c-accent)"
+                    : undefined,
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    gap: 12,
+                    alignItems: "center",
+                  }}
+                >
+                  <div
+                    className={`connect-stage-num ${
+                      selected ? "complete" : ""
+                    }`}
+                    aria-hidden="true"
+                  >
+                    {index + 1}
+                  </div>
+
+                  <strong style={{ fontSize: 15 }}>
+                    {option.title}
+                  </strong>
+
+                  <span
+                    className={`connect-status ${
+                      option.available ? "active" : "optional"
+                    }`}
+                    style={{ marginLeft: "auto" }}
+                  >
+                    {option.available ? "Available" : "Planned"}
+                  </span>
+                </div>
+
+                <div style={{ marginTop: 14 }}>
+                  <div className="connect-card-label">
+                    What Rebel receives
+                  </div>
+                  <div style={{ marginTop: 4, fontSize: 13 }}>
+                    {option.receives}
+                  </div>
+                </div>
+
+                <div style={{ marginTop: 12 }}>
+                  <div className="connect-card-label">
+                    Typical use
+                  </div>
+                  <div style={{ marginTop: 4, fontSize: 13 }}>
+                    {option.use}
+                  </div>
+                </div>
+
+                <p
+                  className="connect-muted connect-small"
+                  style={{ lineHeight: 1.55 }}
+                >
+                  {option.next}
+                </p>
+
+                {!option.available && (
+                  <div className="connect-warning">
+                    Rebel cannot receive data this way yet.
+                    Choosing it records your preference so
+                    onboarding can follow up. Nothing is
+                    connected.
+                  </div>
+                )}
+
+                <div className="connect-actions-row">
+                  {option.available ? (
+                    <button
+                      type="button"
+                      className="connect-button"
+                      disabled={busy || !isOwner}
+                      onClick={async () => {
+                        if (
+                          selected ||
+                          (await setConnector(option.id, true))
+                        ) {
+                          setTab("discover");
+                        }
+                      }}
+                    >
+                      {selected
+                        ? "Continue to API discovery"
+                        : "Set up Direct API"}
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      className="connect-button"
+                      disabled={busy || !isOwner || selected}
+                      onClick={() =>
+                        void setConnector(option.id, true)
+                      }
+                    >
+                      {selected ? "Interest recorded" : "Register interest"}
+                    </button>
+                  )}
+
+                  {selected && (
+                    <button
+                      type="button"
+                      className="connect-button secondary"
+                      disabled={busy || !isOwner}
+                      onClick={() =>
+                        void setConnector(option.id, false)
+                      }
+                    >
+                      Remove
+                    </button>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </section>
+    );
+  };
 
   const renderDiscover = () => {
     const canDecide = workspace?.institution.role === "owner";
@@ -3587,6 +3942,7 @@ export default function ConnectWorkspace() {
               aria-labelledby={`tab-${tab}`}
             >
               {tab === "overview" && renderOverview()}
+              {tab === "connect" && renderConnect()}
               {tab === "discover" && renderDiscover()}
               {tab === "evidence" && renderEvidence()}
               {tab === "report" && renderReport()}
