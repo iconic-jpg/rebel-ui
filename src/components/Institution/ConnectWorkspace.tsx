@@ -121,62 +121,406 @@ type TabId =
   | "agents";
 type FileKind = "spec" | "document" | "import";
 
-type ConnectorType =
-  | "direct_api"
-  | "open_banking"
-  | "sftp"
-  | "private_network";
+type GatewayMethod =
+  | "rest_api"
+  | "outbound_agent"
+  | "file_import"
+  | "vestro_sandbox";
 
-interface SavedConnector {
-  connector_type: ConnectorType;
+interface GatewayCheck {
+  name: string;
+  ok: boolean;
+  detail: string;
+}
+
+interface GatewayJob {
+  job_id: string;
   status: string;
-  note?: string | null;
+  trigger: string;
+  started_at?: string | null;
+  finished_at?: string | null;
+  items_collected: number;
+  items_failed: number;
+  error?: string | null;
+  created_at: string;
+  detail?: { target: string; status: string; error?: string }[];
+}
+
+interface GatewayIntegration {
+  integration_id: string;
+  method: GatewayMethod;
+  name: string;
+  status: "pending_approval" | "approved" | "suspended" | "revoked";
+  config: Record<string, unknown>;
+  has_credentials: boolean;
+  needs_credentials: boolean;
+  approved_at?: string | null;
+  last_test: {
+    status: string | null;
+    at: string | null;
+    detail: GatewayCheck[] | null;
+    current: boolean;
+  };
+  last_collected_at?: string | null;
+  evidence_count: number;
+  latest_evidence_at?: string | null;
+  freshness: { status: string; age_hours: number | null };
+  last_job?: GatewayJob | null;
+  jobs?: GatewayJob[];
+}
+
+interface GatewayEvidence {
+  submission_id: string;
+  integration_name?: string | null;
+  source_system: string;
+  evidence_type: string;
+  source_uri: string;
+  collected_at: string;
+  payload_sha256: string;
+  freshness: { status: string; age_hours: number | null };
+  provenance: Record<string, unknown>;
+}
+
+interface GatewayAudit {
+  audit_id: string;
+  actor: string;
+  action: string;
+  detail: Record<string, unknown>;
   created_at: string;
 }
 
-interface ConnectorOption {
-  id: ConnectorType;
-  title: string;
-  receives: string;
-  use: string;
-  next: string;
-  available: boolean;
+interface FieldDef {
+  key: string;
+  label: string;
+  type?: "text" | "number" | "select" | "checkbox" | "textarea" | "secret";
+  placeholder?: string;
+  options?: { value: string; label: string }[];
 }
 
-const CONNECTORS: ConnectorOption[] = [
+async function gatewayRequest<T>(
+  path: string,
+  method: string,
+  body?: unknown
+): Promise<T> {
+  const response = await connectRequest(`/connect/gateway${path}`, {
+    method,
+    headers:
+      body !== undefined ? { "Content-Type": "application/json" } : undefined,
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
+
+  return readResponse<T>(response);
+}
+
+const GATEWAY_METHODS: {
+  id: GatewayMethod;
+  title: string;
+  summary: string;
+  receives: string;
+  use: string;
+}[] = [
   {
-    id: "direct_api",
-    title: "Direct API",
-    receives: "Access to approved API endpoints",
+    id: "rest_api",
+    title: "Bank-approved REST API",
+    summary:
+      "Rebel calls the bank's own API using OAuth2, an API key, a bearer token or basic auth, optionally with mutual TLS.",
+    receives: "Only the read-only endpoints you approve",
     use: "Account, transaction and control data",
-    next: "Rebel reads the bank's published OpenAPI documentation. You approve which read-only endpoints Rebel may use.",
-    available: true,
   },
   {
-    id: "open_banking",
-    title: "Open Banking / OAuth",
-    receives: "Institution-approved, scoped access",
-    use: "Consent-based financial data sharing",
-    next: "The institution grants scoped OAuth access to specific data.",
-    available: false,
+    id: "outbound_agent",
+    title: "Bank-controlled outbound agent",
+    summary:
+      "A connector the bank runs pushes evidence to Rebel with its own agent credential. Rebel never reaches into the bank.",
+    receives: "Evidence the bank's connector chooses to send",
+    use: "Banks that cannot expose inbound access",
   },
   {
-    id: "sftp",
-    title: "Secure file exchange (SFTP)",
-    receives: "Scheduled CSV, XML or other data files",
+    id: "file_import",
+    title: "Secure file import",
+    summary:
+      "Rebel pulls files over SFTP with a pinned host key, or you upload a bank export.",
+    receives: "CSV, JSON, JSONL, XML or text files up to 1 MB",
     use: "Statements, transaction exports and audit records",
-    next: "The institution delivers files on a schedule to a Rebel-controlled drop.",
-    available: false,
   },
   {
-    id: "private_network",
-    title: "Private enterprise connection",
-    receives: "Access through VPN or private network",
-    use: "Large-bank and enterprise integrations",
-    next: "A private network link is arranged with Rebel onboarding.",
-    available: false,
+    id: "vestro_sandbox",
+    title: "Vestro sandbox adapter",
+    summary:
+      "A REST adapter preset for the Vestro sandbox. Everything it collects is labelled synthetic sandbox data.",
+    receives: "Approved read-only sandbox endpoints",
+    use: "Demonstrations and integration testing",
   },
 ];
+
+const AUTH_OPTIONS = [
+  { value: "oauth2_client_credentials", label: "OAuth 2.0 client credentials" },
+  { value: "api_key", label: "API key header" },
+  { value: "bearer", label: "Bearer token" },
+  { value: "basic", label: "Basic (username and password)" },
+];
+
+const NUMERIC_CONFIG_KEYS = new Set([
+  "freshness_hours",
+  "schedule_minutes",
+  "port",
+  "heartbeat_max_age_minutes",
+]);
+
+function configFields(
+  method: GatewayMethod,
+  form: Record<string, string>
+): FieldDef[] {
+  const freshness: FieldDef = {
+    key: "freshness_hours",
+    label: "Evidence freshness window (hours)",
+    type: "number",
+    placeholder: "24",
+  };
+
+  const complianceFields: FieldDef[] = [
+    {
+      key: "compliance_role",
+      label: "Use this data as compliance evidence",
+      type: "select",
+      options: [
+        { value: "", label: "No, collect only" },
+        { value: "asset_inventory", label: "Yes, it is the institution's asset inventory" },
+      ],
+    },
+    {
+      key: "scope_statement",
+      label: "Scope statement (needed for scope controls)",
+      placeholder: "e.g. All production systems in scope for RBI assessment",
+    },
+  ];
+
+  const schedule: FieldDef = {
+    key: "schedule_minutes",
+    label: "Scheduled collection every N minutes (optional)",
+    type: "number",
+    placeholder: "e.g. 1440",
+  };
+
+  if (method === "rest_api" || method === "vestro_sandbox") {
+    const authType = form.auth_type || "oauth2_client_credentials";
+
+    const fields: FieldDef[] = [
+      {
+        key: "base_url",
+        label:
+          method === "vestro_sandbox"
+            ? "Vestro sandbox base URL (blank uses the server default)"
+            : "Bank API base URL",
+        placeholder: "https://api.bank.example",
+      },
+      {
+        key: "auth_type",
+        label: "Authentication",
+        type: "select",
+        options: AUTH_OPTIONS,
+      },
+    ];
+
+    if (authType === "oauth2_client_credentials") {
+      fields.push(
+        {
+          key: "token_url",
+          label: "OAuth token URL",
+          placeholder: "https://auth.bank.example/oauth/token",
+        },
+        { key: "scope", label: "Scope (optional)" },
+        {
+          key: "token_auth_style",
+          label: "Send client credentials",
+          type: "select",
+          options: [
+            { value: "basic", label: "In an HTTP Basic header" },
+            { value: "body", label: "In the request body" },
+          ],
+        }
+      );
+    }
+
+    if (authType === "api_key") {
+      fields.push({
+        key: "api_key_header",
+        label: "API key header name",
+        placeholder: "X-API-Key",
+      });
+    }
+
+    fields.push(
+      {
+        key: "test_path",
+        label: "Connection test path (GET)",
+        placeholder: "/health",
+      },
+      {
+        key: "mtls",
+        label: "Require mutual TLS (client certificate)",
+        type: "checkbox",
+      }
+    );
+
+    if (method === "rest_api") {
+      fields.push({
+        key: "environment",
+        label: "Environment",
+        type: "select",
+        options: [
+          { value: "production", label: "Production" },
+          { value: "sandbox", label: "Sandbox" },
+        ],
+      });
+    }
+
+    fields.push(schedule, freshness, ...complianceFields);
+    return fields;
+  }
+
+  if (method === "outbound_agent") {
+    return [
+      {
+        key: "agent_id",
+        label: "Rebel agent ID the bank's connector uses",
+        placeholder: "agent_…",
+      },
+      {
+        key: "heartbeat_max_age_minutes",
+        label: "Maximum heartbeat age (minutes)",
+        type: "number",
+        placeholder: "60",
+      },
+      freshness,
+    ];
+  }
+
+  const fields: FieldDef[] = [
+    {
+      key: "transport",
+      label: "Transport",
+      type: "select",
+      options: [
+        { value: "sftp", label: "SFTP pull (pinned host key)" },
+        { value: "upload", label: "Manual upload of bank exports" },
+      ],
+    },
+  ];
+
+  if ((form.transport || "sftp") === "sftp") {
+    fields.push(
+      { key: "host", label: "SFTP host", placeholder: "sftp.bank.example" },
+      { key: "port", label: "Port", type: "number", placeholder: "22" },
+      { key: "username", label: "SFTP username" },
+      {
+        key: "host_key_sha256",
+        label: "Pinned host key fingerprint",
+        placeholder: "SHA256:…",
+      },
+      { key: "remote_dir", label: "Remote directory", placeholder: "/exports" },
+      { key: "file_pattern", label: "File pattern", placeholder: "*.csv" },
+      schedule
+    );
+  }
+
+  fields.push(freshness, ...complianceFields);
+  return fields;
+}
+
+function buildConfig(
+  method: GatewayMethod,
+  form: Record<string, string>
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+
+  for (const def of configFields(method, form)) {
+    if (def.type === "checkbox") {
+      if (form[def.key] === "true") out[def.key] = true;
+      continue;
+    }
+
+    const value =
+      def.type === "select"
+        ? form[def.key] || def.options?.[0]?.value || ""
+        : (form[def.key] ?? "").trim();
+
+    if (!value) continue;
+
+    out[def.key] = NUMERIC_CONFIG_KEYS.has(def.key) ? Number(value) : value;
+  }
+
+  return out;
+}
+
+function credentialFields(integration: GatewayIntegration): FieldDef[] {
+  const config = integration.config;
+
+  if (integration.method === "file_import") {
+    return [
+      { key: "password", label: "SFTP password", type: "secret" },
+      {
+        key: "sftp_private_key_pem",
+        label: "SFTP private key (PEM, alternative to a password)",
+        type: "textarea",
+      },
+      { key: "sftp_passphrase", label: "Key passphrase", type: "secret" },
+    ];
+  }
+
+  const fields: FieldDef[] = [];
+
+  switch (config.auth_type) {
+    case "oauth2_client_credentials":
+      fields.push(
+        { key: "client_id", label: "Client ID", type: "text" },
+        { key: "client_secret", label: "Client secret", type: "secret" }
+      );
+      break;
+    case "api_key":
+      fields.push({ key: "api_key", label: "API key", type: "secret" });
+      break;
+    case "bearer":
+      fields.push({ key: "token", label: "Bearer token", type: "secret" });
+      break;
+    case "basic":
+      fields.push(
+        { key: "username", label: "Username", type: "text" },
+        { key: "password", label: "Password", type: "secret" }
+      );
+      break;
+  }
+
+  if (config.mtls) {
+    fields.push(
+      {
+        key: "client_cert_pem",
+        label: "Client certificate (PEM)",
+        type: "textarea",
+      },
+      {
+        key: "client_key_pem",
+        label: "Client private key (PEM)",
+        type: "textarea",
+      }
+    );
+  }
+
+  return fields;
+}
+
+const GATEWAY_STATUS_CLASS: Record<string, string> = {
+  pending_approval: "in_progress",
+  approved: "complete",
+  suspended: "optional",
+  revoked: "not_started",
+};
+
+const FRESHNESS_CLASS: Record<string, string> = {
+  fresh: "complete",
+  stale: "in_progress",
+  expired: "not_started",
+};
 
 interface Domain {
   id: string;
@@ -230,7 +574,7 @@ const PROVENANCE: Record<
     label: "Verified evidence",
     short: "Verified",
     weight: 1,
-    help: "Submitted by an institution agent with an integrity hash recorded by Rebel.",
+    help: "Submitted by an institution agent, or collected by Rebel from an approved bank connection, with an integrity hash recorded by Rebel.",
   },
   document: {
     label: "Uploaded document",
@@ -407,6 +751,9 @@ function djb2(input: string): string {
 }
 
 function classifyVerified(item: Evidence): string | null {
+  // Gateway-collected bank data has no compliance-area mapping yet.
+  if (/^bank_(api_response|data_file)$/.test(item.evidence_type)) return null;
+
   const t = `${item.evidence_type} ${item.source_system}`.toLowerCase();
 
   if (/auth|iam|identity|access|oauth/.test(t)) return "authentication";
@@ -1126,9 +1473,22 @@ export default function ConnectWorkspace() {
   const [endpointFilter, setEndpointFilter] = useState<
     ApprovalStatus | "all"
   >("all");
-  const [connectors, setConnectors] = useState<SavedConnector[]>([]);
-  const [connectorBusy, setConnectorBusy] = useState<string | null>(null);
-  const [connectorError, setConnectorError] = useState("");
+  const [integrations, setIntegrations] = useState<GatewayIntegration[]>([]);
+  const [gwCanManage, setGwCanManage] = useState(false);
+  const [gwEncryption, setGwEncryption] = useState(true);
+  const [gwError, setGwError] = useState("");
+  const [gwNotice, setGwNotice] = useState("");
+  const [gwBusy, setGwBusy] = useState<string | null>(null);
+  const [createMethod, setCreateMethod] = useState<GatewayMethod | null>(null);
+  const [createName, setCreateName] = useState("");
+  const [createForm, setCreateForm] = useState<Record<string, string>>({});
+  const [openId, setOpenId] = useState<string | null>(null);
+  const [detail, setDetail] = useState<GatewayIntegration | null>(null);
+  const [gwEvidence, setGwEvidence] = useState<GatewayEvidence[]>([]);
+  const [gwAudit, setGwAudit] = useState<GatewayAudit[]>([]);
+  const [credForm, setCredForm] = useState<Record<string, string>>({});
+  const [testChecks, setTestChecks] = useState<GatewayCheck[] | null>(null);
+  const [verified, setVerified] = useState<Record<string, boolean>>({});
 
   /* ---------------- persistence ---------------- */
 
@@ -1247,31 +1607,62 @@ export default function ConnectWorkspace() {
     void loadInventory();
   }, [institutionId, loadInventory]);
 
-  const loadConnectors = useCallback(async () => {
+  const loadIntegrations = useCallback(async () => {
     try {
-      const response = await connectRequest("/connect/connectors");
-      const data = await readResponse<{ connectors: SavedConnector[] }>(
-        response
-      );
+      const data = await gatewayRequest<{
+        can_manage: boolean;
+        encryption_configured: boolean;
+        integrations: GatewayIntegration[];
+      }>("/integrations", "GET");
 
-      setConnectors(data.connectors);
+      setIntegrations(data.integrations);
+      setGwCanManage(data.can_manage);
+      setGwEncryption(data.encryption_configured);
     } catch (err) {
-      setConnectorError(
+      setGwError(
         err instanceof Error
           ? err.message
-          : "Could not load connection methods."
+          : "Could not load bank integrations."
+      );
+    }
+  }, []);
+
+  const loadDetail = useCallback(async (id: string) => {
+    try {
+      const [integration, evidence, audit] = await Promise.all([
+        gatewayRequest<GatewayIntegration>(`/integrations/${id}`, "GET"),
+        gatewayRequest<{ evidence: GatewayEvidence[] }>(
+          `/evidence?integration_id=${encodeURIComponent(id)}&limit=25`,
+          "GET"
+        ),
+        gatewayRequest<{ audit: GatewayAudit[] }>(
+          `/audit?integration_id=${encodeURIComponent(id)}&limit=50`,
+          "GET"
+        ),
+      ]);
+
+      setDetail(integration);
+      setGwEvidence(evidence.evidence);
+      setGwAudit(audit.audit);
+    } catch (err) {
+      setGwError(
+        err instanceof Error
+          ? err.message
+          : "Could not load the integration."
       );
     }
   }, []);
 
   useEffect(() => {
     if (!institutionId) {
-      setConnectors([]);
+      setIntegrations([]);
+      setOpenId(null);
+      setDetail(null);
       return;
     }
 
-    void loadConnectors();
-  }, [institutionId, loadConnectors]);
+    void loadIntegrations();
+  }, [institutionId, loadIntegrations]);
 
   const createWorkspace = async (
     event: FormEvent<HTMLFormElement>
@@ -1391,39 +1782,200 @@ export default function ConnectWorkspace() {
     }
   };
 
-  const setConnector = async (
-    type: ConnectorType,
-    select: boolean
-  ): Promise<boolean> => {
-    setConnectorBusy(type);
-    setConnectorError("");
+  const runGateway = async (key: string, task: () => Promise<void>) => {
+    setGwBusy(key);
+    setGwError("");
+    setGwNotice("");
 
     try {
-      const response = await connectRequest(
-        `/connect/connectors/${type}`,
-        select
-          ? {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({}),
-            }
-          : { method: "DELETE" }
-      );
-
-      await readResponse<unknown>(response);
-      await loadConnectors();
-      return true;
+      await task();
     } catch (err) {
-      setConnectorError(
-        err instanceof Error
-          ? err.message
-          : "Could not save the connection method."
+      setGwError(
+        err instanceof Error ? err.message : "The request failed."
       );
-      return false;
     } finally {
-      setConnectorBusy(null);
+      setGwBusy(null);
     }
   };
+
+  const refreshGateway = async (id: string | null) => {
+    await loadIntegrations();
+    if (id) await loadDetail(id);
+    void loadWorkspace(true);
+  };
+
+  const openIntegration = (id: string) => {
+    setOpenId(id);
+    setDetail(null);
+    setGwEvidence([]);
+    setGwAudit([]);
+    setCredForm({});
+    setTestChecks(null);
+    setVerified({});
+    void loadDetail(id);
+  };
+
+  const startCreate = (method: GatewayMethod) => {
+    setCreateMethod(method);
+    setCreateName("");
+    setCreateForm({
+      auth_type: "oauth2_client_credentials",
+      transport: "sftp",
+      environment: "production",
+    });
+  };
+
+  const createIntegration = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    if (!createMethod) return;
+
+    void runGateway("create", async () => {
+      const created = await gatewayRequest<GatewayIntegration>(
+        "/integrations",
+        "POST",
+        {
+          method: createMethod,
+          name: createName.trim(),
+          config: buildConfig(createMethod, createForm),
+        }
+      );
+
+      setCreateMethod(null);
+      await loadIntegrations();
+      openIntegration(created.integration_id);
+      setGwNotice(
+        "Integration created and pending approval. Add credentials, test the connection, then approve it."
+      );
+    });
+  };
+
+  const saveCredentials = (id: string) => {
+    const credentials: Record<string, string> = {};
+
+    for (const [key, value] of Object.entries(credForm)) {
+      if (value.trim()) credentials[key] = value;
+    }
+
+    void runGateway("credentials", async () => {
+      await gatewayRequest(`/integrations/${id}/credentials`, "PUT", {
+        credentials,
+      });
+
+      // The browser never keeps secrets after they are sent.
+      setCredForm({});
+      setTestChecks(null);
+      await refreshGateway(id);
+      setGwNotice(
+        "Credentials encrypted and stored. They cannot be viewed again. Approval was withdrawn: run a connection test."
+      );
+    });
+  };
+
+  const testConnection = (id: string) =>
+    void runGateway("test", async () => {
+      const result = await gatewayRequest<{
+        status: string;
+        checks: GatewayCheck[];
+      }>(`/integrations/${id}/test`, "POST");
+
+      setTestChecks(result.checks);
+      await refreshGateway(id);
+      setGwNotice(
+        result.status === "success"
+          ? "Connection test passed."
+          : "Connection test failed. See the checks below."
+      );
+    });
+
+  const transitionIntegration = (
+    id: string,
+    action: "approve" | "suspend" | "resume" | "revoke"
+  ) => {
+    if (
+      action === "revoke" &&
+      !window.confirm(
+        "Revoking is permanent and deletes the stored credentials. Continue?"
+      )
+    ) {
+      return;
+    }
+
+    void runGateway(action, async () => {
+      await gatewayRequest(`/integrations/${id}/${action}`, "POST");
+      await refreshGateway(id);
+    });
+  };
+
+  const collectNow = (id: string) =>
+    void runGateway("collect", async () => {
+      const started = await gatewayRequest<{ job_id: string }>(
+        `/integrations/${id}/collect`,
+        "POST"
+      );
+
+      let job: GatewayJob | null = null;
+
+      for (let attempt = 0; attempt < 120; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+
+        job = await gatewayRequest<GatewayJob>(
+          `/integrations/${id}/jobs/${started.job_id}`,
+          "GET"
+        );
+
+        if (job.status !== "pending" && job.status !== "running") break;
+      }
+
+      await refreshGateway(id);
+
+      setGwNotice(
+        job && job.status !== "pending" && job.status !== "running"
+          ? `Collection ${job.status}: ${job.items_collected} collected, ${job.items_failed} failed.${
+              job.error ? ` ${job.error}` : ""
+            }`
+          : "Collection is still running. Refresh to see the result."
+      );
+    });
+
+  const uploadExport = (id: string, file: File) => {
+    void runGateway("upload", async () => {
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      let binary = "";
+
+      bytes.forEach((byte) => {
+        binary += String.fromCharCode(byte);
+      });
+
+      const result = await gatewayRequest<{ file_sha256: string }>(
+        `/integrations/${id}/files`,
+        "POST",
+        { file_name: file.name, content_base64: btoa(binary) }
+      );
+
+      await refreshGateway(id);
+      setGwNotice(
+        `Imported ${file.name}. SHA-256 ${shortHash(result.file_sha256)}.`
+      );
+    });
+  };
+
+  const verifyEvidence = (submissionId: string) =>
+    void runGateway("verify", async () => {
+      const result = await gatewayRequest<{
+        integrity: {
+          payload_hash_matches: boolean;
+          data_hash_matches: boolean | null;
+        };
+      }>(`/evidence/${encodeURIComponent(submissionId)}`, "GET");
+
+      setVerified((current) => ({
+        ...current,
+        [submissionId]:
+          result.integrity.payload_hash_matches &&
+          result.integrity.data_hash_matches !== false,
+      }));
+    });
 
   const decideEndpoint = async (
     endpoint: DiscoveredEndpoint,
@@ -2017,12 +2569,12 @@ export default function ConnectWorkspace() {
     const metrics = workspace.metrics;
     const list: Action[] = [];
 
-    if (connectors.length === 0) {
+    if (integrations.length === 0) {
       list.push({
         id: "choose-connection",
         title: "Choose how your institution connects",
         detail:
-          "Direct API, Open Banking / OAuth, secure file exchange (SFTP) or a private enterprise connection.",
+          "Bank-approved REST API, outbound agent, secure file import or the Vestro sandbox adapter.",
         tab: "connect",
         cta: "Choose method",
       });
@@ -2112,7 +2664,7 @@ export default function ConnectWorkspace() {
     missingDomains,
     stableItems.length,
     apiCounts.pending,
-    connectors.length,
+    integrations.length,
     store.report,
     reportStale,
   ]);
@@ -2187,7 +2739,7 @@ export default function ConnectWorkspace() {
     {
       id: "connect",
       label: "Connect",
-      count: connectors.length,
+      count: integrations.length,
     },
     { id: "discover", label: "Discover APIs" },
     {
@@ -2273,7 +2825,7 @@ export default function ConnectWorkspace() {
 
   const renderOverview = () => (
     <>
-      {connectors.length === 0 && (
+      {integrations.length === 0 && (
         <section
           className="connect-card"
           style={{ marginBottom: 16 }}
@@ -2293,9 +2845,10 @@ export default function ConnectWorkspace() {
             className="connect-muted"
             style={{ lineHeight: 1.6, marginTop: 0 }}
           >
-            Pick the connection method that fits your institution:
-            a direct API, Open Banking / OAuth, secure file
-            exchange (SFTP) or a private enterprise connection.
+            Choose a bank-approved REST API, a bank-controlled
+            outbound agent, a secure file import or the Vestro
+            sandbox adapter. Nothing is collected until the
+            institution owner approves it.
           </p>
 
           <button
@@ -2551,182 +3104,552 @@ export default function ConnectWorkspace() {
     </>
   );
 
-  const renderConnect = () => {
-    const isOwner = workspace?.institution.role === "owner";
+  const renderFieldInput = (
+    def: FieldDef,
+    values: Record<string, string>,
+    setValues: (next: Record<string, string>) => void,
+    prefix: string
+  ) => {
+    const id = `${prefix}-${def.key}`;
+    const set = (value: string) => setValues({ ...values, [def.key]: value });
+
+    if (def.type === "checkbox") {
+      return (
+        <label
+          key={def.key}
+          htmlFor={id}
+          className="connect-label"
+          style={{ display: "flex", gap: 8, alignItems: "center", margin: "6px 0 14px" }}
+        >
+          <input
+            id={id}
+            type="checkbox"
+            checked={values[def.key] === "true"}
+            onChange={(event) => set(event.target.checked ? "true" : "")}
+          />
+          {def.label}
+        </label>
+      );
+    }
+
+    return (
+      <div key={def.key}>
+        <label className="connect-label" htmlFor={id}>
+          {def.label}
+        </label>
+
+        {def.type === "select" ? (
+          <select
+            id={id}
+            className="connect-select"
+            value={values[def.key] ?? def.options?.[0]?.value ?? ""}
+            onChange={(event) => set(event.target.value)}
+          >
+            {def.options?.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        ) : def.type === "textarea" ? (
+          <textarea
+            id={id}
+            className="connect-textarea"
+            value={values[def.key] ?? ""}
+            onChange={(event) => set(event.target.value)}
+            autoComplete="off"
+            spellCheck={false}
+          />
+        ) : (
+          <input
+            id={id}
+            className="connect-input"
+            type={
+              def.type === "secret"
+                ? "password"
+                : def.type === "number"
+                  ? "number"
+                  : "text"
+            }
+            value={values[def.key] ?? ""}
+            placeholder={def.placeholder}
+            onChange={(event) => set(event.target.value)}
+            autoComplete="off"
+          />
+        )}
+      </div>
+    );
+  };
+
+  const renderIntegrationDetail = (integration: GatewayIntegration) => {
+    const canCollect =
+      integration.status === "approved" &&
+      (integration.method === "rest_api" ||
+        integration.method === "vestro_sandbox" ||
+        (integration.method === "file_import" &&
+          integration.config.transport === "sftp"));
+
+    const isUpload =
+      integration.method === "file_import" &&
+      integration.config.transport === "upload";
+
+    const credFields = credentialFields(integration);
+    const checks = testChecks ?? integration.last_test.detail ?? [];
+    const busy = gwBusy !== null;
 
     return (
       <section
         className="connect-card"
-        aria-labelledby="connect-title"
+        style={{ marginTop: 16 }}
+        aria-label={`${integration.name} details`}
       >
-        <div className="connect-eyebrow">CONNECTION METHOD</div>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+          <div>
+            <div className="connect-eyebrow">INTEGRATION</div>
+            <h2 className="connect-section-title" style={{ marginTop: 6 }}>
+              {integration.name}
+            </h2>
+          </div>
 
-        <h2
-          className="connect-section-title"
-          id="connect-title"
-          style={{ marginTop: 6 }}
-        >
-          How will your institution connect?
-        </h2>
+          <span className={`connect-status ${GATEWAY_STATUS_CLASS[integration.status] ?? ""}`}>
+            {integration.status.replace("_", " ")}
+          </span>
+        </div>
 
-        <p
-          className="connect-muted"
-          style={{ lineHeight: 1.6, marginTop: 0 }}
-        >
-          Choose one or more ways for your bank or institution to
-          connect to Rebel. Rebel never needs access to your
-          internal source code. Nothing is accessed until you
-          approve it.
-        </p>
+        <div className="connect-small connect-muted" style={{ lineHeight: 1.7 }}>
+          {Object.entries(integration.config)
+            .filter(([, value]) => value !== null && value !== undefined && value !== "")
+            .map(([key, value]) => (
+              <div key={key}>
+                <strong>{key}</strong>: {String(value)}
+              </div>
+            ))}
+        </div>
 
-        {!isOwner && (
-          <div className="connect-warning">
-            Only the institution owner can choose connection
-            methods.
+        <div className="connect-info" style={{ marginTop: 14 }}>
+          Approval needs a passing connection test made after the latest
+          change. Changing the configuration or credentials withdraws
+          approval. Nothing is collected until the institution owner approves.
+        </div>
+
+        {gwCanManage && integration.status !== "revoked" && (
+          <div className="connect-actions-row">
+            <button type="button" className="connect-button secondary" disabled={busy} onClick={() => testConnection(integration.integration_id)}>
+              {gwBusy === "test" ? "Testing…" : "Test connection"}
+            </button>
+
+            {integration.status === "pending_approval" && (
+              <button
+                type="button"
+                className="connect-button"
+                disabled={busy || !integration.last_test.current}
+                title={integration.last_test.current ? undefined : "Run a passing connection test first"}
+                onClick={() => transitionIntegration(integration.integration_id, "approve")}
+              >
+                Approve integration
+              </button>
+            )}
+
+            {integration.status === "approved" && (
+              <button type="button" className="connect-button secondary" disabled={busy} onClick={() => transitionIntegration(integration.integration_id, "suspend")}>
+                Suspend
+              </button>
+            )}
+
+            {integration.status === "suspended" && (
+              <button type="button" className="connect-button" disabled={busy} onClick={() => transitionIntegration(integration.integration_id, "resume")}>
+                Resume
+              </button>
+            )}
+
+            {canCollect && (
+              <button type="button" className="connect-button" disabled={busy} onClick={() => collectNow(integration.integration_id)}>
+                {gwBusy === "collect" ? "Collecting…" : "Collect now"}
+              </button>
+            )}
+
+            <button type="button" className="connect-button link" disabled={busy} onClick={() => transitionIntegration(integration.integration_id, "revoke")}>
+              Revoke
+            </button>
           </div>
         )}
 
-        {connectorError && (
+        {checks.length > 0 && (
+          <>
+            <h3 style={{ fontSize: 14, marginTop: 20 }}>
+              Connection test {integration.last_test.at ? `· ${formatDate(integration.last_test.at)}` : ""}
+            </h3>
+
+            <ul className="connect-list">
+              {checks.map((check) => (
+                <li key={check.name}>
+                  <div>
+                    <span className={`connect-status ${check.ok ? "complete" : "not_started"}`}>
+                      {check.ok ? "Passed" : "Failed"}
+                    </span>{" "}
+                    <strong style={{ fontSize: 13 }}>{check.name.replace("_", " ")}</strong>
+                    <div className="connect-muted connect-small" style={{ marginTop: 4 }}>
+                      {check.detail}
+                    </div>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+
+        {integration.method === "outbound_agent" && (
+          <div className="connect-info" style={{ marginTop: 14 }}>
+            The bank's connector pushes evidence using agent{" "}
+            <strong>{String(integration.config.agent_id)}</strong>. There is
+            nothing for Rebel to collect. Evidence it sends appears below.
+          </div>
+        )}
+
+        {gwCanManage && integration.needs_credentials && integration.status !== "revoked" && (
+          <>
+            <h3 style={{ fontSize: 14, marginTop: 22 }}>
+              {integration.has_credentials ? "Rotate credentials" : "Add credentials"}
+            </h3>
+
+            <p className="connect-muted connect-small" style={{ lineHeight: 1.6 }}>
+              Credentials are encrypted on the server, never shown again and
+              never kept in this browser.
+              {!gwEncryption && " Encryption is not configured on the server, so saving will fail."}
+            </p>
+
+            {credFields.map((def) =>
+              renderFieldInput(def, credForm, setCredForm, "cred")
+            )}
+
+            <button
+              type="button"
+              className="connect-button"
+              disabled={busy || Object.values(credForm).every((value) => !value.trim())}
+              onClick={() => saveCredentials(integration.integration_id)}
+            >
+              {gwBusy === "credentials" ? "Saving…" : "Save credentials"}
+            </button>
+          </>
+        )}
+
+        {isUpload && integration.status === "approved" && gwCanManage && (
+          <>
+            <h3 style={{ fontSize: 14, marginTop: 22 }}>Import a bank export</h3>
+            <p className="connect-muted connect-small">
+              CSV, JSON, JSONL, XML or text, up to 1 MB, decrypted. Larger
+              exports should use the dataset pipeline.
+            </p>
+            <input
+              type="file"
+              accept=".csv,.json,.jsonl,.ndjson,.xml,.txt"
+              disabled={busy}
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                if (file) uploadExport(integration.integration_id, file);
+                event.target.value = "";
+              }}
+            />
+          </>
+        )}
+
+        <h3 style={{ fontSize: 14, marginTop: 24 }}>Collection jobs</h3>
+
+        {!integration.jobs || integration.jobs.length === 0 ? (
+          <p className="connect-muted connect-small">No collection jobs yet.</p>
+        ) : (
+          <div className="connect-table-wrap">
+            <table className="connect-table">
+              <thead>
+                <tr>
+                  <th>Started</th>
+                  <th>Trigger</th>
+                  <th>Status</th>
+                  <th>Collected</th>
+                  <th>Failed</th>
+                  <th>Notes</th>
+                </tr>
+              </thead>
+              <tbody>
+                {integration.jobs.map((job) => (
+                  <tr key={job.job_id}>
+                    <td>{formatDate(job.started_at ?? job.created_at)}</td>
+                    <td>{job.trigger}</td>
+                    <td>{job.status}</td>
+                    <td>{job.items_collected}</td>
+                    <td>{job.items_failed}</td>
+                    <td className="connect-muted connect-small">
+                      {job.error ??
+                        (job.detail ?? [])
+                          .filter((item) => item.error)
+                          .map((item) => `${item.target}: ${item.error}`)
+                          .join("; ")}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        <h3 style={{ fontSize: 14, marginTop: 24 }}>Collected evidence</h3>
+
+        {gwEvidence.length === 0 ? (
+          <p className="connect-muted connect-small">Nothing collected yet.</p>
+        ) : (
+          <div className="connect-table-wrap">
+            <table className="connect-table">
+              <thead>
+                <tr>
+                  <th>Collected</th>
+                  <th>Freshness</th>
+                  <th>Source</th>
+                  <th>Integrity hash</th>
+                  <th />
+                </tr>
+              </thead>
+              <tbody>
+                {gwEvidence.map((item) => (
+                  <tr key={item.submission_id}>
+                    <td>{formatDate(item.collected_at)}</td>
+                    <td>
+                      <span className={`connect-status ${FRESHNESS_CLASS[item.freshness.status] ?? "optional"}`}>
+                        {item.freshness.status}
+                      </span>
+                    </td>
+                    <td style={{ overflowWrap: "anywhere" }}>
+                      {item.source_uri || item.source_system}
+                      {item.provenance.synthetic === true && (
+                        <div className="connect-muted connect-small">Synthetic sandbox data</div>
+                      )}
+                    </td>
+                    <td className="connect-hash">{shortHash(item.payload_sha256)}</td>
+                    <td>
+                      {item.submission_id in verified ? (
+                        <span className={`connect-status ${verified[item.submission_id] ? "complete" : "not_started"}`}>
+                          {verified[item.submission_id] ? "Integrity verified" : "Hash mismatch"}
+                        </span>
+                      ) : (
+                        <button type="button" className="connect-button secondary small" disabled={busy} onClick={() => verifyEvidence(item.submission_id)}>
+                          Verify
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        <h3 style={{ fontSize: 14, marginTop: 24 }}>Audit trail</h3>
+
+        {gwAudit.length === 0 ? (
+          <p className="connect-muted connect-small">No audit entries.</p>
+        ) : (
+          <div className="connect-table-wrap">
+            <table className="connect-table">
+              <thead>
+                <tr>
+                  <th>When</th>
+                  <th>Action</th>
+                  <th>By</th>
+                </tr>
+              </thead>
+              <tbody>
+                {gwAudit.map((entry) => (
+                  <tr key={entry.audit_id}>
+                    <td>{formatDate(entry.created_at)}</td>
+                    <td>{entry.action}</td>
+                    <td className="connect-muted">{entry.actor.startsWith("user:") ? "Institution user" : entry.actor}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+    );
+  };
+
+  const renderConnect = () => (
+    <>
+      <section className="connect-card" aria-labelledby="connect-title">
+        <div className="connect-eyebrow">BANK INTEGRATION GATEWAY</div>
+
+        <h2 className="connect-section-title" id="connect-title" style={{ marginTop: 6 }}>
+          How will your institution connect?
+        </h2>
+
+        <p className="connect-muted" style={{ lineHeight: 1.6, marginTop: 0 }}>
+          Rebel connects through interfaces the bank controls. It never needs
+          the bank's source code or internal databases. Every integration
+          starts pending, needs a passing connection test, and collects
+          nothing until the institution owner approves it.
+        </p>
+
+        {!gwCanManage && (
+          <div className="connect-warning">
+            Only the institution owner can add, approve or run integrations.
+          </div>
+        )}
+
+        {!gwEncryption && (
           <div className="connect-error" role="alert">
-            {connectorError}
+            Credential encryption is not configured on the server. Credentials
+            cannot be saved until REBEL_GATEWAY_ENCRYPTION_KEYS is set.
+          </div>
+        )}
+
+        {gwError && (
+          <div className="connect-error" role="alert">
+            {gwError}
+          </div>
+        )}
+
+        {gwNotice && (
+          <div className="connect-info" role="status" style={{ marginTop: 12 }}>
+            {gwNotice}
           </div>
         )}
 
         <div className="connect-grid-2">
-          {CONNECTORS.map((option, index) => {
-            const selected = connectors.some(
-              (item) => item.connector_type === option.id
-            );
-            const busy = connectorBusy === option.id;
-
-            return (
-              <div
-                className="connect-card"
-                key={option.id}
-                style={{
-                  background: "var(--c-card-raised)",
-                  boxShadow: "none",
-                  borderColor: selected
-                    ? "var(--c-accent)"
-                    : undefined,
-                }}
-              >
-                <div
-                  style={{
-                    display: "flex",
-                    gap: 12,
-                    alignItems: "center",
-                  }}
-                >
-                  <div
-                    className={`connect-stage-num ${
-                      selected ? "complete" : ""
-                    }`}
-                    aria-hidden="true"
-                  >
-                    {index + 1}
-                  </div>
-
-                  <strong style={{ fontSize: 15 }}>
-                    {option.title}
-                  </strong>
-
-                  <span
-                    className={`connect-status ${
-                      option.available ? "active" : "optional"
-                    }`}
-                    style={{ marginLeft: "auto" }}
-                  >
-                    {option.available ? "Available" : "Planned"}
-                  </span>
+          {GATEWAY_METHODS.map((option, index) => (
+            <div
+              className="connect-card"
+              key={option.id}
+              style={{ background: "var(--c-card-raised)", boxShadow: "none" }}
+            >
+              <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+                <div className="connect-stage-num" aria-hidden="true">
+                  {index + 1}
                 </div>
-
-                <div style={{ marginTop: 14 }}>
-                  <div className="connect-card-label">
-                    What Rebel receives
-                  </div>
-                  <div style={{ marginTop: 4, fontSize: 13 }}>
-                    {option.receives}
-                  </div>
-                </div>
-
-                <div style={{ marginTop: 12 }}>
-                  <div className="connect-card-label">
-                    Typical use
-                  </div>
-                  <div style={{ marginTop: 4, fontSize: 13 }}>
-                    {option.use}
-                  </div>
-                </div>
-
-                <p
-                  className="connect-muted connect-small"
-                  style={{ lineHeight: 1.55 }}
-                >
-                  {option.next}
-                </p>
-
-                {!option.available && (
-                  <div className="connect-warning">
-                    Rebel cannot receive data this way yet.
-                    Choosing it records your preference so
-                    onboarding can follow up. Nothing is
-                    connected.
-                  </div>
-                )}
-
-                <div className="connect-actions-row">
-                  {option.available ? (
-                    <button
-                      type="button"
-                      className="connect-button"
-                      disabled={busy || !isOwner}
-                      onClick={async () => {
-                        if (
-                          selected ||
-                          (await setConnector(option.id, true))
-                        ) {
-                          setTab("discover");
-                        }
-                      }}
-                    >
-                      {selected
-                        ? "Continue to API discovery"
-                        : "Set up Direct API"}
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      className="connect-button"
-                      disabled={busy || !isOwner || selected}
-                      onClick={() =>
-                        void setConnector(option.id, true)
-                      }
-                    >
-                      {selected ? "Interest recorded" : "Register interest"}
-                    </button>
-                  )}
-
-                  {selected && (
-                    <button
-                      type="button"
-                      className="connect-button secondary"
-                      disabled={busy || !isOwner}
-                      onClick={() =>
-                        void setConnector(option.id, false)
-                      }
-                    >
-                      Remove
-                    </button>
-                  )}
-                </div>
+                <strong style={{ fontSize: 15 }}>{option.title}</strong>
               </div>
-            );
-          })}
+
+              <p className="connect-muted connect-small" style={{ lineHeight: 1.55 }}>
+                {option.summary}
+              </p>
+
+              <div className="connect-card-label">What Rebel receives</div>
+              <div style={{ margin: "4px 0 12px", fontSize: 13 }}>{option.receives}</div>
+
+              <div className="connect-card-label">Typical use</div>
+              <div style={{ margin: "4px 0 12px", fontSize: 13 }}>{option.use}</div>
+
+              <button
+                type="button"
+                className="connect-button"
+                disabled={!gwCanManage}
+                onClick={() => startCreate(option.id)}
+              >
+                Add integration
+              </button>
+            </div>
+          ))}
         </div>
       </section>
-    );
-  };
+
+      {createMethod && (
+        <section className="connect-card" style={{ marginTop: 16 }} aria-labelledby="create-title">
+          <h2 className="connect-section-title" id="create-title">
+            New {GATEWAY_METHODS.find((m) => m.id === createMethod)?.title}
+          </h2>
+
+          <form onSubmit={createIntegration}>
+            <label className="connect-label" htmlFor="gw-name">Integration name</label>
+            <input
+              id="gw-name"
+              className="connect-input"
+              value={createName}
+              onChange={(event) => setCreateName(event.target.value)}
+              minLength={2}
+              maxLength={120}
+              required
+              placeholder="e.g. Vestro production API"
+            />
+
+            {configFields(createMethod, createForm).map((def) =>
+              renderFieldInput(def, createForm, setCreateForm, "gw")
+            )}
+
+            <p className="connect-muted connect-small">
+              Credentials are added in the next step and are never part of this form.
+            </p>
+
+            <div className="connect-actions-row">
+              <button className="connect-button" type="submit" disabled={gwBusy === "create"}>
+                {gwBusy === "create" ? "Creating…" : "Create integration"}
+              </button>
+
+              <button type="button" className="connect-button secondary" onClick={() => setCreateMethod(null)}>
+                Cancel
+              </button>
+            </div>
+          </form>
+        </section>
+      )}
+
+      <section className="connect-card" style={{ marginTop: 16 }} aria-labelledby="integrations-title">
+        <h2 className="connect-section-title" id="integrations-title">
+          Your integrations
+        </h2>
+
+        {integrations.length === 0 ? (
+          <div className="connect-empty">
+            None yet. Add one above to start collecting evidence.
+          </div>
+        ) : (
+          <ul className="connect-list">
+            {integrations.map((integration) => (
+              <li key={integration.integration_id}>
+                <div>
+                  <div className="connect-list-title">{integration.name}</div>
+
+                  <div className="connect-muted connect-small" style={{ marginTop: 4 }}>
+                    {GATEWAY_METHODS.find((m) => m.id === integration.method)?.title} ·{" "}
+                    {integration.evidence_count} evidence item
+                    {integration.evidence_count === 1 ? "" : "s"}
+                    {integration.latest_evidence_at && ` · latest ${formatDate(integration.latest_evidence_at)}`}
+                  </div>
+
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 8 }}>
+                    <span className={`connect-status ${GATEWAY_STATUS_CLASS[integration.status] ?? ""}`}>
+                      {integration.status.replace("_", " ")}
+                    </span>
+
+                    {integration.freshness.status !== "none" && (
+                      <span className={`connect-status ${FRESHNESS_CLASS[integration.freshness.status] ?? "optional"}`}>
+                        evidence {integration.freshness.status}
+                      </span>
+                    )}
+
+                    <span className={`connect-status ${integration.last_test.current ? "complete" : "optional"}`}>
+                      {integration.last_test.current
+                        ? "test passed"
+                        : integration.last_test.status === "failed"
+                          ? "test failed"
+                          : "not tested"}
+                    </span>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  className="connect-button secondary small"
+                  onClick={() => openIntegration(integration.integration_id)}
+                >
+                  {openId === integration.integration_id ? "Refresh" : "Manage"}
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      {openId && detail && detail.integration_id === openId && renderIntegrationDetail(detail)}
+    </>
+  );
 
   const renderDiscover = () => {
     const canDecide = workspace?.institution.role === "owner";
@@ -3864,6 +4787,7 @@ export default function ConnectWorkspace() {
           onClick={() => {
             void loadWorkspace();
             void loadInventory();
+            void loadIntegrations();
           }}
         >
           Refresh workspace

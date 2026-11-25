@@ -118,6 +118,17 @@ interface EvidenceItem {
     uri?: string;
     version?: string;
   } | null;
+  confidence_note?: string;
+  // Present when the evidence was collected by the Bank Integration Gateway.
+  gateway?: {
+    integration_name?: string;
+    integration_method?: string;
+    environment?: string;
+    synthetic?: boolean;
+    retrieval?: string;
+    freshness?: { status: string; age_hours: number | null; window_hours: number };
+    source_authenticity_verified?: boolean;
+  } | null;
 }
 interface AffectedAsset {
   status: string; reason: string; last_checked: string;
@@ -131,6 +142,20 @@ interface ControlDetail {
   // audit-engine extras (optional so older backends still work)
   finding_id?: string; status?: string; approval_state?: string; approvals?: Record<string, string>;
   explanation?: string; evidence?: EvidenceItem[]; source_url?: string; source_verification?: string;
+}
+interface GatewayControl {
+  id: number; control_id: string; control_ref: string; title: string; framework_code: string;
+  status: string; severity: string; explanation: string;
+  evidence: {
+    evidence_id: string; request_id: string; result: string; confidence?: number;
+    scoring_eligible: boolean; rationale: string; confidence_note: string;
+    collected_at?: string; source_uri?: string | null; sha256?: string;
+    gateway: NonNullable<EvidenceItem["gateway"]>;
+  }[];
+}
+interface GatewaySummary {
+  rows_loaded?: number; accepted?: number; scoring_eligible?: number; rejected?: number;
+  excluded?: number; superseded?: number; error?: string | null;
 }
 interface TrendPoint { snapshot_date: string; score: number; pass_rate: number; failed_controls: number; critical_violations: number; }
 
@@ -190,6 +215,8 @@ export default function ComplianceDashboard() {
   const [trailStatus, setTrailStatus] = useState<{ ok: boolean; detail: string } | null>(null);
   const [comment, setComment] = useState("");
   const [tick, setTick] = useState(0); // bumps after an assessment so the trend chart refetches
+  const [gwControls, setGwControls] = useState<GatewayControl[]>([]);
+  const [gwSummary, setGwSummary] = useState<GatewaySummary | null>(null);
 
 
   const saveIdentity = (a: string, t: string) => {
@@ -300,6 +327,20 @@ export default function ComplianceDashboard() {
       .then(d => { if (d) setTrend(d.points ?? []); })
       .catch(() => {});
   }, [selectedFramework, trendDays, tick]);
+
+  // ── Load bank-gateway evidence for the latest assessment ─────────────────
+  useEffect(() => {
+    const params = new URLSearchParams();
+    if (selectedFramework) params.set("framework", selectedFramework);
+    af(`/compliance/gateway-evidence?${params.toString()}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(d => {
+        if (!d) { setGwControls([]); setGwSummary(null); return; }
+        setGwControls(d.controls ?? []);
+        setGwSummary(d.gateway_summary ?? null);
+      })
+      .catch(() => { setGwControls([]); setGwSummary(null); });
+  }, [selectedFramework, tick]);
 
   // ── Draw trend chart ──────────────────────────────────────────────────────
   useEffect(() => { drawTrend(); }, [trend, mobile]);
@@ -587,6 +628,60 @@ export default function ComplianceDashboard() {
         </div>
       </LPanel>
 
+      {/* ── BANK GATEWAY EVIDENCE ── */}
+      <LPanel>
+        <LPanelHeader
+          left="BANK GATEWAY EVIDENCE"
+          right={gwSummary ? (
+            <span style={{ fontSize: 9, color: L.text3 }}>
+              {gwSummary.rows_loaded ?? 0} collected · {gwSummary.scoring_eligible ?? 0} scoring-eligible · {gwSummary.rejected ?? 0} rejected · {gwSummary.excluded ?? 0} excluded · {gwSummary.superseded ?? 0} superseded
+            </span>
+          ) : undefined}
+        />
+        {gwSummary?.error && <div style={{ padding: "8px 14px", fontSize: 10, color: L.red }}>⚠ {gwSummary.error}</div>}
+        {gwControls.length === 0 ? (
+          <div style={{ padding: 20, fontSize: 11, color: L.text3, textAlign: "center" }}>
+            No bank-collected evidence in the latest assessment. In Connect, mark an approved integration as the asset inventory, collect, then run an assessment.
+          </div>
+        ) : (
+          <div>
+            {gwControls.map(c => (
+              <div key={c.control_id} style={{ padding: "10px 14px", borderBottom: `1px solid ${L.borderLight}` }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                  <span style={{ fontSize: 8, fontWeight: 700, color: resultColor(c.status === "insufficient_evidence" || c.status === "not_assessed" ? "inconclusive" : c.status), textTransform: "uppercase" as const }}>{c.status.replace(/_/g, " ")}</span>
+                  <span style={{ fontSize: 9, color: L.text4, fontFamily: "'DM Mono',monospace" }}>{c.control_ref}</span>
+                  <span style={{ fontSize: 11, color: L.text1, fontWeight: 500 }}>{c.title}</span>
+                  <Badge v="gray">{c.framework_code.replace(/_/g, " ")}</Badge>
+                </div>
+                <div style={{ fontSize: 9, color: L.text3, margin: "3px 0 6px" }}>{c.explanation}</div>
+                {c.evidence.map(e => (
+                  <div key={e.evidence_id} style={{ background: L.insetBg, border: `1px solid ${L.panelBorder}`, borderRadius: 5, padding: "6px 10px", marginBottom: 4 }}>
+                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+                      <span style={{ fontSize: 8, fontWeight: 700, color: resultColor(e.result), textTransform: "uppercase" as const }}>{e.result}</span>
+                      <span style={{ fontSize: 8, fontWeight: 700, color: e.scoring_eligible ? L.green : L.yellow, border: "1px solid currentColor", borderRadius: 3, padding: "2px 6px" }}>
+                        {e.scoring_eligible ? "ELIGIBLE FOR SCORING" : "NOT ELIGIBLE FOR SCORING"}
+                      </span>
+                      <span style={{ fontSize: 8, fontWeight: 700, color: L.cyan, border: `1px solid ${L.cyan}44`, borderRadius: 3, padding: "2px 6px" }}>{e.gateway.integration_name || e.gateway.integration_method}</span>
+                      {e.gateway.freshness && (
+                        <span style={{ fontSize: 8, fontWeight: 700, color: e.gateway.freshness.status === "fresh" ? L.green : e.gateway.freshness.status === "stale" ? L.yellow : L.red, textTransform: "uppercase" as const }}>
+                          {e.gateway.freshness.status}{e.gateway.freshness.age_hours !== null ? ` · ${e.gateway.freshness.age_hours}h old` : ""}
+                        </span>
+                      )}
+                      {e.gateway.synthetic && <span style={{ fontSize: 8, fontWeight: 700, color: L.purple }}>SYNTHETIC SANDBOX DATA</span>}
+                    </div>
+                    <div style={{ fontSize: 9, color: L.text3, marginTop: 3 }}>{e.request_id} · confidence {typeof e.confidence === "number" ? e.confidence.toFixed(2) : "n/a"} — {e.rationale}</div>
+                    {!e.scoring_eligible && e.confidence_note && <div style={{ fontSize: 8, color: L.yellow, marginTop: 3 }}>{e.confidence_note}</div>}
+                    <div style={{ fontSize: 8, color: L.text4, fontFamily: "'DM Mono',monospace", marginTop: 3, overflowWrap: "anywhere" }}>
+                      {e.source_uri || "source URI unavailable"} · {e.collected_at || "collection time unavailable"} · sha256 {e.sha256 ? `${e.sha256.slice(0, 16)}…` : "unavailable"} · source system not independently verified
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
+        )}
+      </LPanel>
+
       {/* ── FAILED CONTROLS DRILL-DOWN ── */}
       <LPanel>
         <LPanelHeader
@@ -703,9 +798,26 @@ export default function ComplianceDashboard() {
                                       {e.request_id} · confidence {typeof e.confidence === "number" ? e.confidence.toFixed(2) : "n/a"}
                                       {e.rationale ? ` — ${e.rationale}` : ""}
                                     </div>
+                                    {e.gateway && (
+                                      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", marginTop: 4 }}>
+                                        <span style={{ fontSize: 8, fontWeight: 700, color: L.cyan, border: `1px solid ${L.cyan}44`, borderRadius: 3, padding: "2px 6px" }}>
+                                          BANK GATEWAY · {e.gateway.integration_name || e.gateway.integration_method}
+                                        </span>
+                                        {e.gateway.freshness && (
+                                          <span style={{ fontSize: 8, fontWeight: 700, color: e.gateway.freshness.status === "fresh" ? L.green : e.gateway.freshness.status === "stale" ? L.yellow : L.red, border: "1px solid currentColor", borderRadius: 3, padding: "2px 6px", textTransform: "uppercase" as const }}>
+                                            {e.gateway.freshness.status}
+                                            {e.gateway.freshness.age_hours !== null ? ` · ${e.gateway.freshness.age_hours}h old` : ""}
+                                          </span>
+                                        )}
+                                        {e.gateway.synthetic && (
+                                          <span style={{ fontSize: 8, fontWeight: 700, color: L.purple, border: `1px solid ${L.purple}44`, borderRadius: 3, padding: "2px 6px" }}>SYNTHETIC SANDBOX DATA</span>
+                                        )}
+                                        <span style={{ fontSize: 8, color: L.text3 }}>{(e.gateway.retrieval || "").replace(/_/g, " ")} · source system not independently verified</span>
+                                      </div>
+                                    )}
                                     {!eligible && (
                                       <div style={{ fontSize: 8, color: L.yellow, marginTop: 3 }}>
-                                        Scoring exclusion: {eligibilityReason || "eligibility requirements not met"}
+                                        Scoring exclusion: {eligibilityReason || e.confidence_note || "eligibility requirements not met"}
                                       </div>
                                     )}
                                     <div style={{ fontSize: 8, color: L.text4, fontFamily: "'DM Mono',monospace", marginTop: 3, overflowWrap: "anywhere" }}>
