@@ -93,12 +93,116 @@ async function connectRequest(
   });
 }
 
+interface ValidationIssue {
+  row: number | null;
+  field: string | null;
+  code: string;
+  message: string;
+}
+
+interface ValidationReport {
+  profile: string;
+  valid: boolean;
+  record_count: number;
+  error_count: number;
+  errors: ValidationIssue[];
+  errors_truncated: boolean;
+  warning_count: number;
+  warnings: { code: string; message: string; rows?: number[]; row_count?: number }[];
+}
+
+interface MappingRow {
+  control_id: string;
+  control_ref: string | null;
+  framework: string | null;
+  title: string | null;
+  request_id: string;
+  handled: boolean;
+  would_map: boolean;
+  result: string | null;
+  rationale: string;
+  scoring_eligible: boolean;
+  scoring_note: string;
+}
+
+interface MappingPreview {
+  profile: string | null;
+  consumers: string[];
+  note?: string;
+  error?: string;
+  role_declared?: boolean;
+  controls: MappingRow[];
+}
+
+interface MapTarget {
+  control_id: string;
+  control_ref: string | null;
+  framework: string | null;
+  title: string | null;
+  request_id: string;
+  description: string | null;
+  required: boolean;
+  kind: "asset_inventory" | "document";
+  supported: boolean;
+  unsupported_reason: string | null;
+  needs_scope_statement: boolean;
+}
+
+interface MapsTo {
+  control_id: string;
+  request_id: string;
+  scope_statement?: string;
+}
+
+interface FileAnalysis {
+  maps_to?: { control_id: string; request_id: string; kind: string } | null;
+  profile: string | null;
+  profile_source?: string | null;
+  enforced: boolean;
+  validation: ValidationReport | null;
+  mapping: MappingPreview | null;
+}
+
+class GatewayValidationError extends Error {
+  analysis: FileAnalysis;
+
+  constructor(message: string, analysis: FileAnalysis) {
+    super(message);
+    this.analysis = analysis;
+  }
+}
+
 async function readResponse<T>(response: Response): Promise<T> {
   const data = await response.json().catch(() => ({}));
 
   if (!response.ok) {
+    const detail = data.detail;
+
+    if (
+      detail &&
+      typeof detail === "object" &&
+      !Array.isArray(detail) &&
+      detail.validation
+    ) {
+      throw new GatewayValidationError(
+        String(detail.message || "The file was rejected."),
+        {
+          profile: detail.validation.profile ?? null,
+          enforced: true,
+          validation: detail.validation as ValidationReport,
+          mapping: (detail.mapping as MappingPreview | null) ?? null,
+        }
+      );
+    }
+
     throw new Error(
-      data.detail ||
+      (typeof detail === "string" && detail) ||
+        (Array.isArray(detail) &&
+          detail
+            .map((item: { msg?: string }) => item?.msg)
+            .filter(Boolean)
+            .join("; ")) ||
+        (detail && typeof detail === "object" && detail.message) ||
         data.message ||
         `Connect request failed (${response.status}).`
     );
@@ -210,6 +314,242 @@ async function gatewayRequest<T>(
   });
 
   return readResponse<T>(response);
+}
+
+function MapSelect({
+  targets,
+  value,
+  onChange,
+  scope,
+  onScope,
+  disabled,
+}: {
+  targets: MapTarget[];
+  value: string;
+  onChange: (value: string) => void;
+  scope: string;
+  onScope: (value: string) => void;
+  disabled?: boolean;
+}) {
+  const frameworks = Array.from(
+    new Set(targets.map((item) => item.framework || "Other"))
+  );
+  const chosen = targets.find(
+    (item) => `${item.control_id}|${item.request_id}` === value
+  );
+
+  return (
+    <div style={{ marginTop: 10 }}>
+      <label className="connect-label" htmlFor="map-target">
+        Attach to a specific control (optional)
+      </label>
+
+      <select
+        id="map-target"
+        className="connect-select"
+        value={value}
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.value)}
+      >
+        <option value="">No: store as a general file</option>
+        {frameworks.map((framework) => (
+          <optgroup key={framework} label={framework.replace(/_/g, " ")}>
+            {targets
+              .filter((item) => (item.framework || "Other") === framework)
+              .map((item) => (
+                <option
+                  key={`${item.control_id}|${item.request_id}`}
+                  value={`${item.control_id}|${item.request_id}`}
+                  disabled={!item.supported}
+                >
+                  {item.control_ref || item.control_id} · {item.request_id}:{" "}
+                  {item.description}
+                  {item.supported ? "" : " (no validator yet)"}
+                </option>
+              ))}
+          </optgroup>
+        ))}
+      </select>
+
+      {chosen && (
+        <p className="connect-muted connect-small" style={{ lineHeight: 1.55 }}>
+          {chosen.kind === "asset_inventory"
+            ? "The file is checked as an asset inventory and rejected if invalid. "
+            : "The document is checked for a real file type and attached to this request. "}
+          Every file you add next is attached to{" "}
+          <strong>
+            {chosen.control_ref || chosen.control_id} · {chosen.request_id}
+          </strong>
+          . Uploaded files appear on the Compliance page but cannot raise the score.
+        </p>
+      )}
+
+      {chosen?.needs_scope_statement && (
+        <>
+          <label className="connect-label" htmlFor="map-scope">
+            Scope statement for this file
+          </label>
+          <textarea
+            id="map-scope"
+            className="connect-textarea"
+            value={scope}
+            maxLength={1000}
+            disabled={disabled}
+            onChange={(event) => onScope(event.target.value)}
+            placeholder="What this inventory covers, e.g. All production systems in scope for the RBI assessment."
+          />
+        </>
+      )}
+    </div>
+  );
+}
+
+function ValidationReportView({
+  analysis,
+  stored,
+}: {
+  analysis: FileAnalysis;
+  stored: boolean | null;
+}) {
+  const report = analysis.validation;
+  const mapping = analysis.mapping;
+
+  if (!report) {
+    return (
+      <div className="connect-info" style={{ marginTop: 10 }}>
+        No data profile applies to this file, so it was checked only for
+        format. Set a data profile on the integration to enforce a schema.
+      </div>
+    );
+  }
+
+  const rejected = !report.valid && analysis.enforced;
+  const mappedTo = analysis.maps_to;
+  const label = report.valid
+    ? "VALID"
+    : analysis.enforced
+      ? "REJECTED"
+      : "INVALID · NOT ENFORCED";
+
+  return (
+    <div style={{ marginTop: 10 }} aria-live="polite">
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+        <strong
+          style={{ color: report.valid ? "#15803d" : rejected ? "#b91c1c" : "#b45309" }}
+        >
+          {label}
+        </strong>
+        <span className="connect-small connect-muted">
+          {report.profile.replace(/_/g, " ")} profile
+          {analysis.profile_source ? ` (${analysis.profile_source})` : ""} ·{" "}
+          {report.record_count} record{report.record_count === 1 ? "" : "s"} ·{" "}
+          {report.error_count} error{report.error_count === 1 ? "" : "s"} ·{" "}
+          {report.warning_count} warning{report.warning_count === 1 ? "" : "s"}
+          {stored === true && " · stored"}
+          {stored === false && " · nothing stored"}
+        </span>
+      </div>
+
+      {mappedTo && (
+        <div className="connect-small connect-muted" style={{ marginTop: 4 }}>
+          Attached to {mappedTo.control_id} · {mappedTo.request_id}
+        </div>
+      )}
+
+      {report.errors.length > 0 && (
+        <div className="connect-table-wrap" style={{ marginTop: 8 }}>
+          <table className="connect-table">
+            <thead>
+              <tr>
+                <th>Record</th>
+                <th>Field</th>
+                <th>Problem</th>
+              </tr>
+            </thead>
+            <tbody>
+              {report.errors.map((item, index) => (
+                <tr key={`${item.code}-${item.row}-${index}`}>
+                  <td>{item.row ?? "file"}</td>
+                  <td>{item.field ?? "—"}</td>
+                  <td>
+                    {item.message}{" "}
+                    <span className="connect-muted connect-small">({item.code})</span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {report.errors_truncated && (
+            <p className="connect-muted connect-small">
+              Showing the first {report.errors.length} of {report.error_count} errors.
+            </p>
+          )}
+        </div>
+      )}
+
+      {report.warnings.length > 0 && (
+        <ul style={{ margin: "8px 0 0", paddingLeft: 18 }}>
+          {report.warnings.map((item, index) => (
+            <li key={`${item.code}-${index}`} className="connect-small" style={{ color: "#b45309" }}>
+              {item.message}
+              {item.rows && item.rows.length > 0
+                ? ` (records ${item.rows.join(", ")}${
+                    (item.row_count ?? 0) > item.rows.length ? ", …" : ""
+                  })`
+                : ""}
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {mapping && (
+        <div style={{ marginTop: 12 }}>
+          <strong className="connect-small">Compliance mapping</strong>
+          {mapping.note && (
+            <p className="connect-muted connect-small" style={{ lineHeight: 1.55 }}>
+              {mapping.note}
+            </p>
+          )}
+          {mapping.error && <p className="connect-small" style={{ color: "#b45309" }}>{mapping.error}</p>}
+          {mapping.controls.length > 0 && (
+            <div className="connect-table-wrap">
+              <table className="connect-table">
+                <thead>
+                  <tr>
+                    <th>Control</th>
+                    <th>Request</th>
+                    <th>Result</th>
+                    <th>Maps</th>
+                    <th>Can score</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {mapping.controls.map((row) => (
+                    <tr key={`${row.control_id}-${row.request_id}`}>
+                      <td>
+                        {row.control_ref || row.control_id}
+                        <div className="connect-muted connect-small">{row.title}</div>
+                      </td>
+                      <td>{row.request_id}</td>
+                      <td>
+                        {row.handled ? row.result : "no validator"}
+                        <div className="connect-muted connect-small">{row.rationale}</div>
+                      </td>
+                      <td>{row.would_map ? "yes" : "no"}</td>
+                      <td>
+                        {row.scoring_eligible ? "yes" : "no"}
+                        <div className="connect-muted connect-small">{row.scoring_note}</div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
 }
 
 const GATEWAY_METHODS: {
@@ -424,7 +764,20 @@ function configFields(
     );
   }
 
-  fields.push(freshness, ...complianceFields);
+  fields.push(
+    {
+      key: "data_profile",
+      label: "Validate files against a data profile",
+      type: "select",
+      options: [
+        { value: "", label: "None (store files as received)" },
+        { value: "asset_inventory", label: "Asset inventory (rejects bad files)" },
+        { value: "transactions", label: "Transactions (rejects bad files)" },
+      ],
+    },
+    freshness,
+    ...complianceFields
+  );
   return fields;
 }
 
@@ -674,8 +1027,15 @@ const EMPTY_STORE: LocalStore = {
 
 const MAX_FILE_BYTES = 15 * 1024 * 1024;
 const MAX_PARSE_BYTES = 5 * 1024 * 1024;
+const GATEWAY_MAX_BYTES = 1_000_000;
+const GATEWAY_FILE_EXT = /\.(csv|json|jsonl|ndjson|xml|txt)$/i;
+const DOCUMENT_MAX_BYTES = 600_000;
+const DOCUMENT_EXT =
+  /\.(pdf|docx|xlsx|doc|xls|png|jpe?g|csv|json|jsonl|xml|txt|md|ya?ml)$/i;
+const DOCUMENT_ACCEPT =
+  ".pdf,.docx,.xlsx,.doc,.xls,.png,.jpg,.jpeg,.csv,.json,.jsonl,.xml,.txt,.md,.yaml,.yml";
 const ACCEPT =
-  ".json,.yaml,.yml,.pdf,.csv,.xlsx,.xls,application/json,application/pdf,text/csv";
+  ".json,.yaml,.yml,.pdf,.csv,.xlsx,.xls,.docx,.doc,.txt,.md,.png,.jpg,.jpeg,.jsonl,.xml,application/json,application/pdf,text/csv";
 
 /* ------------------------------------------------------------------ */
 /* Helpers                                                             */
@@ -752,7 +1112,7 @@ function djb2(input: string): string {
 
 function classifyVerified(item: Evidence): string | null {
   // Gateway-collected bank data has no compliance-area mapping yet.
-  if (/^bank_(api_response|data_file)$/.test(item.evidence_type)) return null;
+  if (/^bank_(api_response|data_file|document_file)$/.test(item.evidence_type)) return null;
 
   const t = `${item.evidence_type} ${item.source_system}`.toLowerCase();
 
@@ -1489,6 +1849,34 @@ export default function ConnectWorkspace() {
   const [credForm, setCredForm] = useState<Record<string, string>>({});
   const [testChecks, setTestChecks] = useState<GatewayCheck[] | null>(null);
   const [verified, setVerified] = useState<Record<string, boolean>>({});
+  const [sendTarget, setSendTarget] = useState("");
+  const [sendResults, setSendResults] = useState<
+    { name: string; ok: boolean; message: string; analysis?: FileAnalysis }[]
+  >([]);
+  const [mapTargets, setMapTargets] = useState<MapTarget[]>([]);
+  const [mapKey, setMapKey] = useState("");
+  const [mapScope, setMapScope] = useState("");
+  const [lastAnalysis, setLastAnalysis] = useState<{
+    name: string;
+    analysis: FileAnalysis;
+    stored: boolean;
+  } | null>(null);
+
+  const mapTarget =
+    mapTargets.find(
+      (item) =>
+        item.supported && `${item.control_id}|${item.request_id}` === mapKey
+    ) ?? null;
+
+  const mapsTo: MapsTo | undefined = mapTarget
+    ? {
+        control_id: mapTarget.control_id,
+        request_id: mapTarget.request_id,
+        ...(mapTarget.needs_scope_statement && mapScope.trim()
+          ? { scope_statement: mapScope.trim() }
+          : {}),
+      }
+    : undefined;
 
   /* ---------------- persistence ---------------- */
 
@@ -1662,6 +2050,10 @@ export default function ConnectWorkspace() {
     }
 
     void loadIntegrations();
+
+    void gatewayRequest<{ targets: MapTarget[] }>("/mapping-targets", "GET")
+      .then((data) => setMapTargets(data.targets))
+      .catch(() => setMapTargets([]));
   }, [institutionId, loadIntegrations]);
 
   const createWorkspace = async (
@@ -1805,6 +2197,7 @@ export default function ConnectWorkspace() {
   };
 
   const openIntegration = (id: string) => {
+    setLastAnalysis(null);
     setOpenId(id);
     setDetail(null);
     setGwEvidence([]);
@@ -1938,20 +2331,62 @@ export default function ConnectWorkspace() {
       );
     });
 
-  const uploadExport = (id: string, file: File) => {
-    void runGateway("upload", async () => {
-      const bytes = new Uint8Array(await file.arrayBuffer());
-      let binary = "";
+  const fileToBase64 = async (file: File) => {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    let binary = "";
 
-      bytes.forEach((byte) => {
-        binary += String.fromCharCode(byte);
+    for (let i = 0; i < bytes.length; i += 0x8000) {
+      binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+    }
+
+    return btoa(binary);
+  };
+
+  const postGatewayFile = async (id: string, file: File) =>
+    gatewayRequest<FileAnalysis & { file_sha256: string; submission_id: string }>(
+      `/integrations/${id}/files`,
+      "POST",
+      {
+        file_name: file.name,
+        content_base64: await fileToBase64(file),
+        ...(mapsTo ? { maps_to: mapsTo } : {}),
+      }
+    );
+
+  const validateOnly = (id: string, file: File) => {
+    void runGateway("validate", async () => {
+      const result = await gatewayRequest<
+        FileAnalysis & { accepted: boolean; stored: boolean }
+      >(`/integrations/${id}/validate`, "POST", {
+        file_name: file.name,
+        content_base64: await fileToBase64(file),
+        ...(mapsTo ? { maps_to: mapsTo } : {}),
       });
 
-      const result = await gatewayRequest<{ file_sha256: string }>(
-        `/integrations/${id}/files`,
-        "POST",
-        { file_name: file.name, content_base64: btoa(binary) }
+      setLastAnalysis({ name: file.name, analysis: result, stored: false });
+      setGwNotice(
+        result.accepted
+          ? `${file.name} passes validation. Nothing was stored.`
+          : `${file.name} would be rejected. Nothing was stored.`
       );
+    });
+  };
+
+  const uploadExport = (id: string, file: File) => {
+    void runGateway("upload", async () => {
+      let result: Awaited<ReturnType<typeof postGatewayFile>>;
+
+      try {
+        result = await postGatewayFile(id, file);
+      } catch (err) {
+        if (err instanceof GatewayValidationError) {
+          setLastAnalysis({ name: file.name, analysis: err.analysis, stored: false });
+        }
+
+        throw err;
+      }
+
+      setLastAnalysis({ name: file.name, analysis: result, stored: true });
 
       await refreshGateway(id);
       setGwNotice(
@@ -2026,6 +2461,83 @@ export default function ConnectWorkspace() {
 
   /* ---------------- evidence intake ---------------- */
 
+  const uploadTargets = integrations.filter(
+    (item) =>
+      item.method === "file_import" &&
+      item.config.transport === "upload" &&
+      item.status === "approved"
+  );
+
+  const activeTarget =
+    uploadTargets.find((item) => item.integration_id === sendTarget) ??
+    uploadTargets[0] ??
+    null;
+
+  const sendToGateway = async (files: File[], target: GatewayIntegration) => {
+    const results: {
+      name: string;
+      ok: boolean;
+      message: string;
+      analysis?: FileAnalysis;
+    }[] = [];
+
+    for (const file of files) {
+      const isDocument = mapTarget?.kind === "document";
+      const limit = isDocument ? DOCUMENT_MAX_BYTES : GATEWAY_MAX_BYTES;
+
+      if (file.size > limit) {
+        results.push({
+          name: file.name,
+          ok: false,
+          message: `Not sent: over the ${formatBytes(
+            limit
+          )} limit. Registered in this browser only.`,
+        });
+        continue;
+      }
+
+      if (!(isDocument ? DOCUMENT_EXT : GATEWAY_FILE_EXT).test(file.name)) {
+        results.push({
+          name: file.name,
+          ok: false,
+          message: isDocument
+            ? "Not sent: this file type is not accepted for documents. Registered in this browser only."
+            : "Not sent: the gateway accepts CSV, JSON, JSONL, XML and text files. Registered in this browser only.",
+        });
+        continue;
+      }
+
+      try {
+        const result = await postGatewayFile(
+          target.integration_id,
+          file
+        );
+
+        results.push({
+          name: file.name,
+          ok: true,
+          message: `Stored by Rebel. SHA-256 ${shortHash(
+            result.file_sha256
+          )}.`,
+          analysis: result,
+        });
+      } catch (err) {
+        results.push({
+          name: file.name,
+          ok: false,
+          message: `Not stored: ${
+            err instanceof Error ? err.message : "upload failed."
+          }`,
+          analysis:
+            err instanceof GatewayValidationError ? err.analysis : undefined,
+        });
+      }
+    }
+
+    setSendResults(results);
+    await refreshGateway(target.integration_id);
+  };
+
   const handleFiles = async (list: FileList | File[]) => {
     const files = Array.from(list);
 
@@ -2033,6 +2545,7 @@ export default function ConnectWorkspace() {
 
     setIngesting(true);
     setIntakeNotice("");
+    setSendResults([]);
 
     const added: FileRecord[] = [];
     const rejected: string[] = [];
@@ -2068,6 +2581,14 @@ export default function ConnectWorkspace() {
     }
 
     setIntakeNotice(messages.join(" "));
+
+    if (activeTarget && gwCanManage) {
+      await sendToGateway(
+        files.filter((file) => file.size <= MAX_FILE_BYTES),
+        activeTarget
+      );
+    }
+
     setIngesting(false);
 
     if (fileInput.current) {
@@ -3333,6 +3854,38 @@ export default function ConnectWorkspace() {
           </>
         )}
 
+        {isUpload && (
+          <>
+            <MapSelect
+              targets={mapTargets}
+              value={mapKey}
+              onChange={setMapKey}
+              scope={mapScope}
+              onScope={setMapScope}
+              disabled={busy}
+            />
+
+            <h3 style={{ fontSize: 14, marginTop: 22 }}>Check a file (nothing is stored)</h3>
+            <p className="connect-muted connect-small" style={{ lineHeight: 1.6 }}>
+              Validates a file against{" "}
+              {integration.config.data_profile
+                ? `this integration's ${String(integration.config.data_profile).replace(/_/g, " ")} profile`
+                : "a profile detected from its columns"}{" "}
+              and shows which controls it could map to, without importing it.
+            </p>
+            <input
+              type="file"
+              accept={mapTarget?.kind === "document" ? DOCUMENT_ACCEPT : ".csv,.json,.jsonl,.ndjson,.xml,.txt"}
+              disabled={busy}
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                if (file) validateOnly(integration.integration_id, file);
+                event.target.value = "";
+              }}
+            />
+          </>
+        )}
+
         {isUpload && integration.status === "approved" && gwCanManage && (
           <>
             <h3 style={{ fontSize: 14, marginTop: 22 }}>Import a bank export</h3>
@@ -3342,7 +3895,7 @@ export default function ConnectWorkspace() {
             </p>
             <input
               type="file"
-              accept=".csv,.json,.jsonl,.ndjson,.xml,.txt"
+              accept={mapTarget?.kind === "document" ? DOCUMENT_ACCEPT : ".csv,.json,.jsonl,.ndjson,.xml,.txt"}
               disabled={busy}
               onChange={(event) => {
                 const file = event.target.files?.[0];
@@ -3351,6 +3904,16 @@ export default function ConnectWorkspace() {
               }}
             />
           </>
+        )}
+
+        {isUpload && lastAnalysis && (
+          <div className="connect-card" style={{ marginTop: 16, boxShadow: "none" }}>
+            <strong>{lastAnalysis.name}</strong>
+            <ValidationReportView
+              analysis={lastAnalysis.analysis}
+              stored={lastAnalysis.stored}
+            />
+          </div>
         )}
 
         <h3 style={{ fontSize: 14, marginTop: 24 }}>Collection jobs</h3>
@@ -4098,6 +4661,62 @@ export default function ConnectWorkspace() {
 
           <label
             className="connect-label"
+            htmlFor="intake-target"
+          >
+            Send to Rebel through
+          </label>
+
+          {uploadTargets.length > 0 && gwCanManage ? (
+            <select
+              id="intake-target"
+              className="connect-select"
+              value={activeTarget?.integration_id ?? ""}
+              onChange={(event) => setSendTarget(event.target.value)}
+            >
+              {uploadTargets.map((item) => (
+                <option
+                  key={item.integration_id}
+                  value={item.integration_id}
+                >
+                  {item.name}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <div className="connect-info" id="intake-target">
+              {gwCanManage
+                ? "No approved file-import integration yet, so files stay in this browser. "
+                : "Only the institution owner can send files to Rebel. Files stay in this browser. "}
+              {gwCanManage && (
+                <>
+                  Create one in{" "}
+                  <button
+                    type="button"
+                    className="connect-link"
+                    onClick={() => setTab("connect")}
+                  >
+                    Connect
+                  </button>
+                  : choose Secure file import, test it, approve it, then
+                  come back.
+                </>
+              )}
+            </div>
+          )}
+
+          {uploadTargets.length > 0 && gwCanManage && (
+            <MapSelect
+              targets={mapTargets}
+              value={mapKey}
+              onChange={setMapKey}
+              scope={mapScope}
+              onScope={setMapScope}
+              disabled={ingesting}
+            />
+          )}
+
+          <label
+            className="connect-label"
             htmlFor="intake-domain"
           >
             Applies to
@@ -4178,12 +4797,53 @@ export default function ConnectWorkspace() {
             </div>
           )}
 
+          {sendResults.length > 0 && (
+            <ul
+              style={{ margin: "12px 0 0", paddingLeft: 18 }}
+              role="status"
+            >
+              {sendResults.map((result) => (
+                <li
+                  key={result.name}
+                  style={{
+                    color: result.ok ? "inherit" : "#b45309",
+                    fontSize: 12,
+                    lineHeight: 1.5,
+                  }}
+                >
+                  <strong>{result.name}</strong>: {result.message}
+                  {result.analysis && (
+                    <ValidationReportView
+                      analysis={result.analysis}
+                      stored={result.ok}
+                    />
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+
           <div className="connect-warning">
-            Files are hashed and summarised in your browser and
-            registered as <strong>uploaded documents</strong>.
-            Transmission to Rebel will be enabled when the
-            evidence upload API is available; nothing here
-            counts as verified.
+            {activeTarget && gwCanManage ? (
+              <>
+                Files are hashed in your browser, listed below as{" "}
+                <strong>uploaded documents</strong>, and sent to Rebel
+                through <strong>{activeTarget.name}</strong>
+                (up to {formatBytes(GATEWAY_MAX_BYTES)}; CSV, JSON,
+                JSONL, XML or text; documents up to {formatBytes(DOCUMENT_MAX_BYTES)} when attached to a control). Stored files carry a SHA-256,
+                timestamp and freshness status. A manual upload never
+                raises a compliance score on its own: only evidence
+                Rebel collects itself can score.
+              </>
+            ) : (
+              <>
+                Files are hashed and summarised in your browser and
+                registered as <strong>uploaded documents</strong>.
+                They are not sent to Rebel until a file-import
+                integration is approved; nothing here counts as
+                verified.
+              </>
+            )}
           </div>
         </section>
 

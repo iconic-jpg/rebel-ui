@@ -128,6 +128,8 @@ interface EvidenceItem {
     retrieval?: string;
     freshness?: { status: string; age_hours: number | null; window_hours: number };
     source_authenticity_verified?: boolean;
+    mapping?: { control_id: string; request_id: string; kind: string } | null;
+    document?: { name?: string; bytes?: number; sha256?: string } | null;
   } | null;
 }
 interface AffectedAsset {
@@ -668,6 +670,8 @@ export default function ComplianceDashboard() {
                         </span>
                       )}
                       {e.gateway.synthetic && <span style={{ fontSize: 8, fontWeight: 700, color: L.purple }}>SYNTHETIC SANDBOX DATA</span>}
+                      {e.gateway.mapping && <span style={{ fontSize: 8, fontWeight: 700, color: L.text2, border: `1px solid ${L.panelBorder}`, borderRadius: 3, padding: "2px 6px" }}>ATTACHED TO {e.gateway.mapping.request_id}</span>}
+                      {e.gateway.document && <span style={{ fontSize: 8, fontWeight: 700, color: L.text2 }}>DOCUMENT · {e.gateway.document.name} · needs human review</span>}
                     </div>
                     <div style={{ fontSize: 9, color: L.text3, marginTop: 3 }}>{e.request_id} · confidence {typeof e.confidence === "number" ? e.confidence.toFixed(2) : "n/a"} — {e.rationale}</div>
                     {!e.scoring_eligible && e.confidence_note && <div style={{ fontSize: 8, color: L.yellow, marginTop: 3 }}>{e.confidence_note}</div>}
